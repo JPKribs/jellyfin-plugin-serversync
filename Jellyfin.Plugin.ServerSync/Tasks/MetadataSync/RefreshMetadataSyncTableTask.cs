@@ -229,6 +229,10 @@ public class RefreshMetadataSyncTableTask
         var matchedLeavesByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
         var matchedFoldersByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
 
+        // A full scan fetches the cast only where it may have changed, since building it is most of the source's work.
+        var castSince = config.MetadataSyncPeople && !IsIncrementalRun ? LastListedSince(source) : null;
+        var savedSinceByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
+
         var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
         void ReportDiscovery(string key, long fetched, long total)
         {
@@ -262,6 +266,16 @@ public class RefreshMetadataSyncTableTask
                 {
                     await DiscoverForRunAsync(source, mapping, sourceLibraryId, folderTypes, localPaths.Folders, folderBag, mapping.SourceLibraryId + "|folders", ReportDiscovery, ct).ConfigureAwait(false);
                 }
+
+                if (castSince is not null)
+                {
+                    var savedBag = savedSinceByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new ConcurrentBag<Guid>());
+                    await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, leafTypes, localPaths.Leaves, savedBag, mapping.SourceLibraryId + "|leaves|saved", ReportDiscovery, castSince, ct).ConfigureAwait(false);
+                    if (includeFolderItems)
+                    {
+                        await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, folderTypes, localPaths.Folders, savedBag, mapping.SourceLibraryId + "|folders|saved", ReportDiscovery, castSince, ct).ConfigureAwait(false);
+                    }
+                }
             }).ConfigureAwait(false);
 
         var totalMatched = matchedLeavesByMapping.Values.Sum(b => b.Count) + matchedFoldersByMapping.Values.Sum(b => b.Count);
@@ -284,8 +298,32 @@ public class RefreshMetadataSyncTableTask
 
         // Fifty ids keep the URL under common reverse proxy header limits.
         const int heavyBatchSize = 50;
-        const int chunksPerMappingParallelism = 4;
-        async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, CancellationToken ct)
+        var chunksPerMappingParallelism = BuildRecordParallelism;
+        var fieldsWithoutCast = fields.Where(f => f != ItemFields.People).ToArray();
+        var castFetches = 0;
+
+        async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> allIds, bool isFolder, CancellationToken ct)
+        {
+            if (allIds.Count == 0) return;
+
+            savedSinceByMapping.TryGetValue(mapping.SourceLibraryId, out var savedBag);
+            var saved = savedBag is null ? null : new HashSet<Guid>(savedBag);
+            var withCast = new List<Guid>();
+            var withoutCast = new List<Guid>();
+            foreach (var id in allIds)
+            {
+                (NeedsCast(mapping, id, saved) ? withCast : withoutCast).Add(id);
+            }
+
+            Interlocked.Add(ref castFetches, withCast.Count);
+            await FetchBatchesAsync(mapping, withCast, isFolder, fields, true, ct).ConfigureAwait(false);
+            await FetchBatchesAsync(mapping, withoutCast, isFolder, fieldsWithoutCast, false, ct).ConfigureAwait(false);
+        }
+
+        bool NeedsCast(LibraryMapping mapping, Guid id, HashSet<Guid>? saved)
+            => CastNeeded(castSince is null ? null : saved, id, ExistingRows.GetValueOrDefault((mapping.SourceLibraryId, id.ToString("N", CultureInfo.InvariantCulture))));
+
+        async Task FetchBatchesAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, ItemFields[] requested, bool castFetched, CancellationToken ct)
         {
             if (ids.Count == 0) return;
 
@@ -307,10 +345,10 @@ public class RefreshMetadataSyncTableTask
                 new ParallelOptions { MaxDegreeOfParallelism = chunksPerMappingParallelism, CancellationToken = ct },
                 async (chunk, innerCt) =>
                 {
-                    var items = await client.GetItemsByIdsAsync(chunk, fields, batchSize: heavyBatchSize, cancellationToken: innerCt).ConfigureAwait(false);
+                    var items = await client.GetItemsByIdsAsync(chunk, requested, batchSize: heavyBatchSize, cancellationToken: innerCt).ConfigureAwait(false);
                     foreach (var item in items)
                     {
-                        work.Add(new MetadataWork(source, mapping, item, isFolder));
+                        work.Add(new MetadataWork(source, mapping, item, isFolder, castFetched));
                         var done = Interlocked.Increment(ref fetched);
                         progress.Report(40 + (60.0 * done / heavyDenominator));
                     }
@@ -335,11 +373,15 @@ public class RefreshMetadataSyncTableTask
                 }
             }).ConfigureAwait(false);
 
+        if (castSince is not null)
+        {
+            Logger.LogInformation("{Task}: read the cast of {Count} of {Total} items from '{Server}', since the rest are unchanged since the last scan", Name, castFetches, totalMatched, source.Name);
+        }
+
         progress.Report(100);
         return work.ToList();
     }
 
-    /// <summary>
     /// <summary>
     /// Pages the source library for item paths and adds the ids whose translated path exists in <paramref name="localPaths"/> to the shared bag.
     /// On a run that lists only what changed, it keeps the changed ids and the ids with no row yet.
@@ -529,6 +571,29 @@ public class RefreshMetadataSyncTableTask
         return fields.ToArray();
     }
 
+    /// <summary>
+    /// Says whether a scan reads an item's cast from the source. It does for a new item, one the source saved since the last scan, one whose stored cast is missing, and every item when nothing is known about what the source saved.
+    /// </summary>
+    /// <param name="savedSinceLastScan">The ids the source saved since the last clean scan, or null when that is not known.</param>
+    /// <param name="id">The source item.</param>
+    /// <param name="prior">The row the last scan stored for the item, or null.</param>
+    /// <returns><c>true</c> to read the cast.</returns>
+    public static bool CastNeeded(IReadOnlySet<Guid>? savedSinceLastScan, Guid id, MetadataSyncItem? prior)
+        => savedSinceLastScan is null || savedSinceLastScan.Contains(id) || prior?.People.Source is null;
+
+    /// <summary>Says whether the source changed anything besides the cast since the prior row was built.</summary>
+    /// <param name="fresh">The row this scan built.</param>
+    /// <param name="prior">The row the last scan stored.</param>
+    /// <returns><c>true</c> when metadata, images, or studios read differently.</returns>
+    public static bool SourceChangedBesidesCast(MetadataSyncItem fresh, MetadataSyncItem prior)
+    {
+        ArgumentNullException.ThrowIfNull(fresh);
+        ArgumentNullException.ThrowIfNull(prior);
+        return !string.Equals(fresh.Metadata.SourceHash, prior.Metadata.SourceHash, StringComparison.Ordinal)
+            || !string.Equals(fresh.Images.SourceHash, prior.Images.SourceHash, StringComparison.Ordinal)
+            || !string.Equals(fresh.Studios.SourceHash, prior.Studios.SourceHash, StringComparison.Ordinal);
+    }
+
     /// <inheritdoc />
     protected override async Task<MetadataSyncItem?> BuildRecordAsync(
         MetadataWork source,
@@ -558,11 +623,22 @@ public class RefreshMetadataSyncTableTask
             deepImageVerification: config.DeepImageVerification,
             source.Source.Client,
             cancellationToken,
-            (path, isFolder) => KnownLocalItem(source.LibraryMapping.SourceLibraryId, path, isFolder)).ConfigureAwait(false);
+            (path, isFolder) => KnownLocalItem(source.LibraryMapping.SourceLibraryId, path, isFolder),
+            source.CastFetched ? null : priorRecord?.People.Source).ConfigureAwait(false);
 
         if (fresh == null)
         {
             return null;
+        }
+
+        // Other metadata changed without a save the listing caught, so the cast may have changed with it.
+        if (!source.CastFetched && priorRecord is not null && SourceChangedBesidesCast(fresh, priorRecord))
+        {
+            var full = (await source.Source.Client.GetItemsByIdsAsync(new[] { source.SourceItem.Id!.Value }, BuildRequestedFields(config), batchSize: 1, cancellationToken: cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+            if (full is not null)
+            {
+                return await BuildRecordAsync(source with { SourceItem = full, CastFetched = true }, existing, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         fresh.ServerKey = source.Source.Key;

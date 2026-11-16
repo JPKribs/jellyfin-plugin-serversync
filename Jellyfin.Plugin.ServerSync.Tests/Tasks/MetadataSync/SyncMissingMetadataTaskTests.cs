@@ -101,6 +101,15 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
 
         public Task Verify(MetadataSyncItem record) => VerifyAfterApplyAsync(record, CancellationToken.None);
 
+        public List<IReadOnlyList<MetadataSyncItem>> Batches(IList<MetadataSyncItem> group) => SplitIntoBatches(group).ToList();
+
+        public async Task<Dictionary<MetadataSyncItem, Exception>> ApplyBatch(IReadOnlyList<MetadataSyncItem> batch)
+        {
+            var failures = new Dictionary<MetadataSyncItem, Exception>();
+            await ApplyBatchAsync(batch, failures, CancellationToken.None);
+            return failures;
+        }
+
         public void Completed(PluginConfiguration config, DateTime at) => RecordRunCompleted(config, at);
     }
 
@@ -210,6 +219,111 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
             Assert.Equal(2, Assert.Single(groups).Count);
             Assert.Equal(1, task.ParallelismOf(groups[0]));
         }
+    }
+
+    /// <summary>
+    /// Rows with no image to download are split into batches of at most fifty, a row whose item is already in the batch starts a new one, and a row with images stands alone.
+    /// True: items are saved in large batches, and each row in a batch reads back only its own values.
+    /// False: a batch would hold one item twice and the first row would read back the second row's values, or an image download would wait on a whole batch.
+    /// </summary>
+    [Fact]
+    public void SplitIntoBatches_CapsSizeAndKeepsEachItemOncePerBatch()
+    {
+        var task = NewTask();
+        var many = Enumerable.Range(0, 120).Select(i => { var r = Row(name: $"F{i}"); r.LocalItemId = Guid.NewGuid().ToString("N"); return r; }).ToList();
+        var a = Row(name: "a");
+        var b = Row(name: "b");
+        b.LocalItemId = Guid.NewGuid().ToString("N");
+        var again = Row(name: "a again");
+        var pictured = Row(name: "pictured");
+        pictured.LocalItemId = Guid.NewGuid().ToString("N");
+        pictured.Images.UpdateSource("{\"Primary\":[{\"ImageType\":\"Primary\",\"ImageIndex\":0,\"Size\":9,\"Tag\":\"t\"}]}");
+
+        var sizes = task.Batches(many).Select(x => x.Count);
+        var split = task.Batches(new List<MetadataSyncItem> { a, b, again, pictured }).Select(x => x.Select(r => r.ItemName).ToArray()).ToList();
+
+        Assert.Equal(new[] { 50, 50, 20 }, sizes);
+        Assert.Equal(new[] { new[] { "a", "b" }, new[] { "a again" }, new[] { "pictured" } }, split);
+    }
+
+    /// <summary>
+    /// A batch saves the items that share a parent in one call to the library, after writing each one's changes.
+    /// True: a batch of edits costs one library save, and every row's values land.
+    /// False: each item costs its own database transaction, or a change is lost from the save.
+    /// </summary>
+    [Fact]
+    public async Task ApplyBatchAsync_SharedParent_SavesTogetherOnce()
+    {
+        SetCategories(metadata: false, images: false, people: false, studios: true);
+        var (rows, movies) = StudioRows(3);
+        _libraryStub.Answer(nameof(ILibraryManager.GetLocalAlternateVersionIds), _ => Array.Empty<Guid>());
+        _libraryStub.Answer(nameof(ILibraryManager.UpdateItemsAsync), _ => Task.CompletedTask);
+
+        var failures = await NewTask().ApplyBatch(rows);
+
+        Assert.Empty(failures);
+        var save = Assert.Single(_libraryStub.Calls, c => c.Name == nameof(ILibraryManager.UpdateItemsAsync));
+        Assert.Equal(movies, (IReadOnlyList<BaseItem>)save.Args[0]!);
+        Assert.Equal(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, save.Args[2]);
+        Assert.All(movies, m => Assert.Equal(new[] { "Disney" }, m.Studios));
+    }
+
+    /// <summary>
+    /// A batch that cannot be saved is saved one item at a time, and each row carries its own save failure.
+    /// True: a bad item fails only its own row, as when items were saved alone.
+    /// False: one failing item would error every row in its batch, or the failure would be lost.
+    /// </summary>
+    [Fact]
+    public async Task ApplyBatchAsync_BatchSaveThrows_SavesEachAlone()
+    {
+        SetCategories(metadata: false, images: false, people: false, studios: true);
+        var (rows, _) = StudioRows(2);
+        _libraryStub.Answer(nameof(ILibraryManager.GetLocalAlternateVersionIds), _ => Array.Empty<Guid>());
+        _libraryStub.Answer(nameof(ILibraryManager.UpdateItemsAsync), _ => throw new InvalidOperationException("database is locked"));
+
+        var failures = await NewTask().ApplyBatch(rows);
+
+        Assert.Equal(2, failures.Count);
+        Assert.All(failures.Values, ex => Assert.StartsWith("Persist: UpdateToRepositoryAsync threw", ex.Message, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A video with alternate versions is saved alone, so Jellyfin still copies its details onto those versions.
+    /// True: a batch never skips the work a video's own save does.
+    /// False: an alternate version keeps the old overview and genres after a sync.
+    /// </summary>
+    [Fact]
+    public async Task ApplyBatchAsync_VideoWithAlternateVersions_IsSavedAlone()
+    {
+        SetCategories(metadata: false, images: false, people: false, studios: true);
+        var (rows, movies) = StudioRows(3);
+        _libraryStub.Answer(nameof(ILibraryManager.GetLocalAlternateVersionIds), args => ReferenceEquals(args[0], movies[0]) ? new[] { Guid.NewGuid() } : Array.Empty<Guid>());
+        _libraryStub.Answer(nameof(ILibraryManager.UpdateItemsAsync), _ => Task.CompletedTask);
+
+        var failures = await NewTask().ApplyBatch(rows);
+
+        var save = Assert.Single(_libraryStub.Calls, c => c.Name == nameof(ILibraryManager.UpdateItemsAsync));
+        Assert.Equal(movies.Skip(1), (IReadOnlyList<BaseItem>)save.Args[0]!);
+        Assert.StartsWith("Persist: UpdateToRepositoryAsync threw", Assert.Single(failures).Value.Message, StringComparison.Ordinal);
+        Assert.Same(rows[0], Assert.Single(failures).Key);
+    }
+
+    /// <summary>Builds rows that each change the studios of their own film, and the films.</summary>
+    private (List<MetadataSyncItem> Rows, List<BaseItem> Movies) StudioRows(int count)
+    {
+        var rows = new List<MetadataSyncItem>();
+        var movies = new List<BaseItem>();
+        for (var i = 0; i < count; i++)
+        {
+            var movie = new Movie { Id = Guid.NewGuid(), Name = $"Film {i}", Studios = new[] { "Pixar" } };
+            _itemsById[movie.Id] = movie;
+            var row = RowWithStudios("[\"Disney\"]");
+            row.LocalItemId = movie.Id.ToString("N");
+            rows.Add(row);
+            movies.Add(movie);
+        }
+
+        return (rows, movies);
     }
 
     /// <summary>

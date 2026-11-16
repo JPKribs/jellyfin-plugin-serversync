@@ -325,6 +325,23 @@ public sealed class MetadataSyncTableServiceTests
     }
 
     /// <summary>
+    /// A cast the last scan read is kept as the source's cast when this scan did not read it, and the local cast is still read from this server.
+    /// True: a scan that skips an unchanged cast keeps comparing it with the local cast.
+    /// False: a skipped cast reads as empty and every film's cast would be queued for removal.
+    /// </summary>
+    [Fact]
+    public async Task BuildRecordAsync_KeptSourceCast_IsUsedWhenTheCastWasNotRead()
+    {
+        const string kept = "[{\"Name\":\"Alice Smith\",\"Role\":\"Lead\",\"Type\":\"Actor\"}]";
+        _items.Answer("FindByPath", _ => LocalMovie());
+
+        var row = await _service.BuildRecordAsync(Library(), SourceItem(), false, false, false, true, false, false, false, null, null, false, null!, CancellationToken.None, keptSourcePeopleJson: kept);
+
+        Assert.Equal(kept, row!.People.Source);
+        Assert.NotNull(row.People.Local);
+    }
+
+    /// <summary>
     /// A matched item builds a row with both ids without dashes, the paths, the type, and no blob for a category that is off.
     /// True: the row says which item it is on both servers and holds only what is turned on.
     /// False: the apply step would write to the wrong item, or a category that is off would be compared.

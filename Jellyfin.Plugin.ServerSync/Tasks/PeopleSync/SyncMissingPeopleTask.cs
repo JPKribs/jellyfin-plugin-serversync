@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -32,6 +33,9 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
     private readonly AppliedVersionRecorder _applied;
+
+    /// <summary>The categories each row verified, kept until its outcome is logged.</summary>
+    private readonly ConcurrentDictionary<PeopleSyncItem, string> _verified = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SyncMissingPeopleTask"/> class.
@@ -108,7 +112,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.LogError(ex, "Metadata apply threw for {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
+                Logger.LogDebug(ex, "Metadata apply threw for {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
                 failures.Add($"Metadata: apply threw, {ex.Message}");
             }
         }
@@ -122,7 +126,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                Logger.LogError(ex, "UpdateToRepositoryAsync threw for {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
+                Logger.LogDebug(ex, "UpdateToRepositoryAsync threw for {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
                 failures.Add($"Persist: UpdateToRepositoryAsync threw, {ex.Message}");
             }
         }
@@ -145,7 +149,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
-                    Logger.LogError(ex, "Images apply threw for {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
+                    Logger.LogDebug(ex, "Images apply threw for {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
                     failures.Add($"Images: apply threw, {ex.Message}");
                 }
             }
@@ -191,12 +195,12 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             {
                 record.Metadata.MarkSynced();
                 synced.Add("Metadata");
-                Logger.LogInformation("Apply Metadata verified for person {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
+                Logger.LogDebug("Apply Metadata verified for person {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
             }
             else
             {
                 failures.Add($"Metadata: {reason}");
-                Logger.LogWarning("Apply Metadata failed verification for person {PersonName}: {Reason}", FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(reason, 300));
+                Logger.LogDebug("Apply Metadata failed verification for person {PersonName}: {Reason}", FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(reason, 300));
             }
         }
 
@@ -207,12 +211,12 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             {
                 record.Images.MarkSynced();
                 synced.Add("Images");
-                Logger.LogInformation("Apply Images verified for person {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
+                Logger.LogDebug("Apply Images verified for person {PersonName}", FormatUtilities.SanitizeForLog(record.PersonName));
             }
             else
             {
                 failures.Add($"Images: {reason}");
-                Logger.LogWarning("Apply Images failed verification for person {PersonName}: {Reason}", FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(reason, 300));
+                Logger.LogDebug("Apply Images failed verification for person {PersonName}: {Reason}", FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(reason, 300));
             }
         }
 
@@ -223,7 +227,31 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
         if (synced.Count > 0)
         {
-            Logger.LogDebug("Synced {Categories} for person {PersonName}", string.Join(", ", synced), FormatUtilities.SanitizeForLog(record.PersonName));
+            _verified[record] = string.Join(", ", synced);
+        }
+    }
+
+    /// <summary>
+    /// Writes one line for a row's outcome. A person who synced names the categories updated, one with nothing to update is skipped, and one that errored gives the reason.
+    /// </summary>
+    /// <inheritdoc />
+    protected override void LogOutcome(PeopleSyncItem record, Exception? error)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        _verified.TryRemove(record, out var categories);
+        var name = FormatUtilities.SanitizeForLog(record.PersonName);
+        if (error is not null)
+        {
+            Logger.LogError("{Task}: could not update {PersonName}. {Reason}", Name, name, FormatUtilities.SanitizeForLog(error.Message, 500));
+            Logger.LogDebug(error, "{Task}: {PersonName} errored", Name, name);
+        }
+        else if (string.IsNullOrEmpty(categories))
+        {
+            Logger.LogInformation("{Task}: skipped {PersonName}, nothing to update", Name, name);
+        }
+        else
+        {
+            Logger.LogInformation("{Task}: updated {Categories} for {PersonName}", Name, categories, name);
         }
     }
 
@@ -423,7 +451,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                     if (work.Count > 0)
                     {
                         fellBack = true;
-                        Logger.LogInformation(
+                        Logger.LogDebug(
                             "Image apply for {PersonName}: /Items/{Id}/Images returned no entries. Falling back to cached ImageTags manifest with {Count} type(s)",
                             FormatUtilities.SanitizeForLog(record.PersonName), sourcePersonId, work.Count);
                     }
@@ -431,7 +459,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
             catch (JsonException ex)
             {
-                Logger.LogWarning(ex, "Could not parse cached image manifest for {PersonName}. Falling back to no-op", FormatUtilities.SanitizeForLog(record.PersonName));
+                Logger.LogDebug(ex, "Could not parse cached image manifest for {PersonName}. Falling back to no-op", FormatUtilities.SanitizeForLog(record.PersonName));
             }
         }
 
@@ -458,7 +486,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // What did not land is left to the verify step, which fails the row when the images still differ.
         if (result.Saved == 0)
         {
-            Logger.LogWarning(
+            Logger.LogDebug(
                 "Image apply for {PersonName} produced no successful saves: {Total} attempted, {DownloadFails} download failures, {SaveFails} save failures, fellBack={FellBack}",
                 FormatUtilities.SanitizeForLog(record.PersonName), result.Attempted, result.DownloadFailures, result.SaveFailures, fellBack);
             return;
@@ -471,7 +499,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            Logger.LogWarning(ex, "Image apply for {PersonName}: UpdateToRepositoryAsync(ImageUpdate) threw after SaveImage. Image mutations may not have persisted", FormatUtilities.SanitizeForLog(record.PersonName));
+            Logger.LogDebug(ex, "Image apply for {PersonName}: UpdateToRepositoryAsync(ImageUpdate) threw after SaveImage. Image mutations may not have persisted", FormatUtilities.SanitizeForLog(record.PersonName));
         }
     }
 
@@ -501,7 +529,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         try
         {
             var primaryCount = freshPerson.GetImages(ImageType.Primary).Count();
-            Logger.LogInformation(
+            Logger.LogDebug(
                 "Verify Images for {PersonName}: freshPerson (id={Id}) reports {Count} Primary image(s)",
                 FormatUtilities.SanitizeForLog(record.PersonName), freshPerson.Id, primaryCount);
         }

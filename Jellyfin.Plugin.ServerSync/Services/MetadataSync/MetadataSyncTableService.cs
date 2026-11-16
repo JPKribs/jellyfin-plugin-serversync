@@ -181,6 +181,7 @@ public class MetadataSyncTableService
     /// <param name="client">The client for the source server, used to size its images.</param>
     /// <param name="cancellationToken">Cancels the calls that size the source images.</param>
     /// <param name="knownLocalItem">Finds a local item by path and whether it is a folder among the items the caller already holds, or null to ask the library for each.</param>
+    /// <param name="keptSourcePeopleJson">The source cast the last scan read, used when this scan did not fetch the cast, or null to read it from <paramref name="sourceItem"/>.</param>
     /// <returns>The row, or null when the item is not to be tracked.</returns>
     public async Task<MetadataSyncItem?> BuildRecordAsync(
         LibraryMapping libraryMapping,
@@ -197,7 +198,8 @@ public class MetadataSyncTableService
         bool deepImageVerification,
         SourceServerClient client,
         CancellationToken cancellationToken,
-        Func<string, bool, BaseItem?>? knownLocalItem = null)
+        Func<string, bool, BaseItem?>? knownLocalItem = null,
+        string? keptSourcePeopleJson = null)
     {
         ArgumentNullException.ThrowIfNull(libraryMapping);
         ArgumentNullException.ThrowIfNull(sourceItem);
@@ -259,6 +261,10 @@ public class MetadataSyncTableService
         if (syncPeople)
         {
             MetadataSyncMergeService.MergePeople(item, sourceItem, localItem, _libraryManager);
+            if (keptSourcePeopleJson is not null)
+            {
+                item.People.UpdateSource(keptSourcePeopleJson);
+            }
         }
 
         if (syncStudios)

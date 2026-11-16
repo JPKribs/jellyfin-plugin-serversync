@@ -276,6 +276,70 @@ public sealed class RefreshMetadataSyncTableTaskTests : IDisposable
     }
 
     /// <summary>
+    /// A scan reads an item's cast when it is new, the source saved it since the last scan, its stored cast is missing, or what the source saved is not known.
+    /// True: a full scan skips the cast only for items the source has not touched, which is most of a library.
+    /// False: every full scan rebuilds every cast on the source, or a new or edited item keeps a stale cast.
+    /// </summary>
+    [Theory]
+    [InlineData("unknown", true)]
+    [InlineData("new", true)]
+    [InlineData("saved", true)]
+    [InlineData("no cast stored", true)]
+    [InlineData("untouched", false)]
+    public void CastNeeded_ReadsOnlyWhereTheCastMayHaveChanged(string state, bool expected)
+    {
+        var id = Guid.NewGuid();
+        var prior = new MetadataSyncItem { SourceItemId = id.ToString("N") };
+        prior.People.UpdateSource("[]");
+        if (state == "no cast stored")
+        {
+            prior.People.Source = null;
+        }
+
+        var saved = state switch
+        {
+            "unknown" => null,
+            "saved" => new HashSet<Guid> { id },
+            _ => new HashSet<Guid>()
+        };
+
+        Assert.Equal(expected, RefreshMetadataSyncTableTask.CastNeeded(saved, id, state == "new" ? null : prior));
+    }
+
+    /// <summary>
+    /// A change to the metadata, images, or studios the source offers counts as a change besides the cast, and a change to the cast alone does not.
+    /// True: an item whose other details changed without a save the listing caught still has its cast read.
+    /// False: a cast that changed with other details is missed, or every item has its cast read one at a time.
+    /// </summary>
+    [Theory]
+    [InlineData("metadata", true)]
+    [InlineData("images", true)]
+    [InlineData("studios", true)]
+    [InlineData("people", false)]
+    [InlineData("none", false)]
+    public void SourceChangedBesidesCast_IgnoresTheCastOnly(string changed, bool expected)
+    {
+        static MetadataSyncItem Row(string metadata, string images, string studios, string people)
+        {
+            var row = new MetadataSyncItem();
+            row.Metadata.UpdateSource(metadata);
+            row.Images.UpdateSource(images);
+            row.Studios.UpdateSource(studios);
+            row.People.UpdateSource(people);
+            return row;
+        }
+
+        var prior = Row("{\"Overview\":\"a\"}", "{}", "[\"Pixar\"]", "[]");
+        var fresh = Row(
+            changed == "metadata" ? "{\"Overview\":\"b\"}" : "{\"Overview\":\"a\"}",
+            changed == "images" ? "{\"Primary\":[{\"ImageType\":\"Primary\",\"ImageIndex\":0,\"Size\":9,\"Tag\":\"t\"}]}" : "{}",
+            changed == "studios" ? "[\"Disney\"]" : "[\"Pixar\"]",
+            changed == "people" ? "[{\"Name\":\"Alice\"}]" : "[]");
+
+        Assert.Equal(expected, RefreshMetadataSyncTableTask.SourceChangedBesidesCast(fresh, prior));
+    }
+
+    /// <summary>
     /// Under Ranked precedence no server is asked for stamps, and no row may outrank its owner.
     /// True: Ranked follows the list order alone and costs no peer request.
     /// False: a lower ranked server overrides the owner although the administrator chose rank.

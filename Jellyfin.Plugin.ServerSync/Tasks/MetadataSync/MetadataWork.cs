@@ -11,4 +11,4 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.MetadataSync;
 /// <param name="LibraryMapping">The library mapping the item belongs to.</param>
 /// <param name="SourceItem">The item as the source reports it.</param>
 /// <param name="IsFolder">Whether the item is a container such as a series or album.</param>
-public sealed record MetadataWork(ScanSource Source, LibraryMapping LibraryMapping, BaseItemDto SourceItem, bool IsFolder);
+public sealed record MetadataWork(ScanSource Source, LibraryMapping LibraryMapping, BaseItemDto SourceItem, bool IsFolder, bool CastFetched = true);

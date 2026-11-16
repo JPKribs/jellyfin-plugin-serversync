@@ -469,8 +469,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public DateTime? LastPeopleSyncTime { get; set; }
 
     /// <summary>
-    /// Gets or sets how many items a Metadata or People scan builds at once, clamped 1 to 16.
-    /// A higher value ends a scan sooner and uses more CPU.
+    /// Gets or sets how many items a Metadata or People scan builds at once, and how many item requests a Metadata scan sends to a server at once, clamped 1 to 16.
+    /// A higher value ends a scan sooner and uses more CPU here and on the source.
     /// </summary>
     public int RefreshParallelism { get; set; } = 8;
 

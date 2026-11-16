@@ -143,6 +143,41 @@ public class SyncQueueTaskBaseTests
 
         public List<TestRecord> ApplyOrder { get; } = new();
 
+        /// <summary>Gets or sets the batch size for groups applied one row at a time, where 1 keeps the default.</summary>
+        public int BatchSize { get; set; } = 1;
+
+        /// <summary>Gets how many apply guards are open right now.</summary>
+        public int OpenGuards => _openGuards;
+
+        /// <summary>Gets the open guard count seen at each apply.</summary>
+        public List<int> GuardsAtApply { get; } = new();
+
+        /// <summary>Gets or sets what verifying a row does, or null to pass.</summary>
+        public Func<TestRecord, Task>? VerifyBody { get; set; }
+
+        private int _openGuards;
+
+        protected override IEnumerable<IReadOnlyList<TestRecord>> SplitIntoBatches(IList<TestRecord> group)
+            => BatchSize <= 1 ? base.SplitIntoBatches(group) : group.Chunk(BatchSize);
+
+        protected override IDisposable? EnterApplyGuard(TestRecord record)
+        {
+            Interlocked.Increment(ref _openGuards);
+            return new GuardExit(() => Interlocked.Decrement(ref _openGuards));
+        }
+
+        protected override Task VerifyAfterApplyAsync(TestRecord record, CancellationToken cancellationToken)
+            => VerifyBody?.Invoke(record) ?? Task.CompletedTask;
+
+        private sealed class GuardExit : IDisposable
+        {
+            private readonly Action _exit;
+
+            public GuardExit(Action exit) => _exit = exit;
+
+            public void Dispose() => _exit();
+        }
+
         public override string Name => "Test Sync";
 
         public override string Key => "TestSync";
@@ -182,6 +217,7 @@ public class SyncQueueTaskBaseTests
             lock (ApplyOrder)
             {
                 ApplyOrder.Add(record);
+                GuardsAtApply.Add(_openGuards);
             }
 
             if (ApplyBody != null)
@@ -266,6 +302,30 @@ public class SyncQueueTaskBaseTests
         Assert.Equal("test: apply exploded", bad.Reason);
         Assert.Equal(SyncStatus.Synced, manager.Upserted.Single(r => r.Key == "good").Status);
         Assert.True(task.RunCompletedRecorded);
+    }
+
+    /// <summary>
+    /// A batch is applied with every row's guard held, and a row that fails to apply or to verify errors on its own.
+    /// True: the change observer sees every save in a batch as a sync, and one bad row does not take the batch down.
+    /// False: a batched save would be announced as a local edit and sent back, or one failure would error every row.
+    /// </summary>
+    [Fact]
+    public async Task Batches_HoldEveryGuardAndErrorOnlyTheFailingRows()
+    {
+        var manager = new FakeManager();
+        manager.Queued.AddRange(new[] { Record(1, "a"), Record(2, "apply-fails"), Record(3, "verify-fails"), Record(4, "d") });
+        var task = new TestableQueueTask(manager) { BatchSize = 4 };
+        task.ApplyBody = (record, _) => record.Key == "apply-fails" ? throw new InvalidOperationException("apply broke") : Task.CompletedTask;
+        task.VerifyBody = record => record.Key == "verify-fails" ? throw new InvalidOperationException("did not read back") : Task.CompletedTask;
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.All(task.GuardsAtApply, open => Assert.Equal(4, open));
+        Assert.Equal(0, task.OpenGuards);
+        Assert.Equal("apply broke", manager.Upserted.Single(r => r.Key == "apply-fails").Reason);
+        Assert.Equal("did not read back", manager.Upserted.Single(r => r.Key == "verify-fails").Reason);
+        Assert.Equal(new[] { "a", "d" }, manager.Upserted.Where(r => r.Status == SyncStatus.Synced).Select(r => r.Key).OrderBy(k => k));
+        Assert.True(manager.Upserted.Single(r => r.Key == "a").MarkedSynced);
     }
 
     /// <summary>

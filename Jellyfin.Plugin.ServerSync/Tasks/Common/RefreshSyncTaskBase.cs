@@ -88,6 +88,25 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         => IsIncrementalRun && source is not null && _changedSince.TryGetValue(source.Key, out var since) ? since : null;
 
     /// <summary>
+    /// Gets the time the last clean listing of a source began, less the overlap, on any kind of run.
+    /// It is null when the source was never listed cleanly or its settings changed since, so nothing about the source can be taken as unchanged.
+    /// </summary>
+    /// <param name="source">The server being read.</param>
+    /// <returns>The time, or null.</returns>
+    protected DateTime? LastListedSince(ScanSource source)
+    {
+        if (!SupportsIncremental || _watermarks is null || source is null)
+        {
+            return null;
+        }
+
+        var mark = _watermarks.Get(Key, source.Key);
+        return mark is null || !string.Equals(mark.ScopeHash, ScopeOf(source), StringComparison.Ordinal)
+            ? null
+            : JPKribs.Jellyfin.Base.UtcTime.AsUtc(mark.ListedFrom) - IncrementalOverlap;
+    }
+
+    /// <summary>
     /// Gets the logger for subclass use.
     /// </summary>
     protected ILogger Logger { get; }

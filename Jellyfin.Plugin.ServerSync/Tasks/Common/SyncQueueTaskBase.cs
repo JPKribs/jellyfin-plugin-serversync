@@ -155,6 +155,56 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     protected virtual int ParallelismFor(IList<TRecord> group) => MaxDegreeOfParallelism;
 
     /// <summary>
+    /// Splits a group applied one row at a time into batches. A batch of one row is applied alone, and a larger one through <see cref="ApplyBatchAsync"/>.
+    /// The default makes a batch of each row.
+    /// </summary>
+    /// <param name="group">The group about to be applied one row at a time.</param>
+    /// <returns>The batches, in apply order.</returns>
+    protected virtual IEnumerable<IReadOnlyList<TRecord>> SplitIntoBatches(IList<TRecord> group)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+        return group.Select(record => (IReadOnlyList<TRecord>)new[] { record });
+    }
+
+    /// <summary>
+    /// Applies a batch of rows while every row's apply guard is held, and records the error of each row that could not be applied.
+    /// Every other row is then verified and stored like a row applied alone. The default applies each row on its own.
+    /// </summary>
+    /// <param name="batch">The rows to apply.</param>
+    /// <param name="failures">Receives the error of each row that could not be applied.</param>
+    /// <param name="cancellationToken">Cancels the apply.</param>
+    /// <returns>A task that ends when every row was applied or failed.</returns>
+    protected virtual async Task ApplyBatchAsync(IReadOnlyList<TRecord> batch, IDictionary<TRecord, Exception> failures, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(failures);
+        foreach (var record in batch)
+        {
+            try
+            {
+                await ApplyAsync(record, null, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                failures[record] = ex;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes the log line for a row's outcome. The default writes only an error, with its stack trace.
+    /// </summary>
+    /// <param name="record">The row that was applied.</param>
+    /// <param name="error">Why the row errored, or null when it synced.</param>
+    protected virtual void LogOutcome(TRecord record, Exception? error)
+    {
+        if (error is not null)
+        {
+            Logger.LogError(error, "{Task}: apply failed for record id {Id}", Name, record?.Id);
+        }
+    }
+
+    /// <summary>
     /// Runs before any row is applied. The default connects every source into <see cref="Sources"/> and
     /// returns <c>false</c> when none connects, and an override with its own checks calls the base.
     /// </summary>
@@ -520,7 +570,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
             if (maxParallel == 1 || group.Count <= 1)
             {
-                for (int i = 0; i < group.Count; i++)
+                foreach (var batch in SplitIntoBatches(group))
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
@@ -528,10 +578,29 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
                         break;
                     }
 
-                    var record = group[i];
-                    var weight = Math.Max(1, GetApplyWeight(record));
-                    var itemProgress = new DelegateProgress(f => OnItemProgress(record, weight, f));
-                    if (await ApplyOneAsync(record, itemProgress, cancellationToken).ConfigureAwait(false))
+                    if (batch.Count > 1)
+                    {
+                        foreach (var (record, ok) in await ApplyManyAsync(batch, cancellationToken).ConfigureAwait(false))
+                        {
+                            if (ok)
+                            {
+                                successes++;
+                            }
+                            else
+                            {
+                                failures++;
+                            }
+
+                            OnItemDone(record, Math.Max(1, GetApplyWeight(record)));
+                        }
+
+                        continue;
+                    }
+
+                    var single = batch[0];
+                    var weight = Math.Max(1, GetApplyWeight(single));
+                    var itemProgress = new DelegateProgress(f => OnItemProgress(single, weight, f));
+                    if (await ApplyOneAsync(single, itemProgress, cancellationToken).ConfigureAwait(false))
                     {
                         successes++;
                     }
@@ -540,7 +609,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
                         failures++;
                     }
 
-                    OnItemDone(record, weight);
+                    OnItemDone(single, weight);
                 }
             }
             else
@@ -631,6 +700,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <summary>Applies and verifies one row, then stores it as Synced or Errored.</summary>
     private async Task<bool> ApplyOneAsync(TRecord record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
     {
+        Exception? error = null;
         try
         {
             using (EnterApplyGuard(record))
@@ -638,35 +708,106 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
                 await ApplyAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
                 await VerifyAfterApplyAsync(record, cancellationToken).ConfigureAwait(false);
             }
-
-            OnApplySucceeded(record);
-            await AfterApplySucceededAsync(record, cancellationToken).ConfigureAwait(false);
-            record.Status = SyncStatus.Synced;
-            record.StatusDate = DateTime.UtcNow;
-            record.LastSyncTime = DateTime.UtcNow;
-            record.Reason = null;
-            Manager.Upsert(record);
-            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // An HTTP timeout cancels without the run's token, so it errors this row only.
-            Logger.LogError(ex, "{Task}: apply failed for record id {Id}", Name, record.Id);
-            OnApplyFailed(record);
-            record.Status = SyncStatus.Errored;
-            record.StatusDate = DateTime.UtcNow;
-            record.Reason = ex.Message;
-            try
+            error = ex;
+        }
+
+        return await StoreOutcomeAsync(record, error, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Applies a batch with every row's apply guard held, verifies each row that applied, then stores each as Synced or Errored.
+    /// </summary>
+    /// <returns>Each row with whether it synced, in batch order.</returns>
+    private async Task<List<(TRecord Record, bool Ok)>> ApplyManyAsync(IReadOnlyList<TRecord> batch, CancellationToken cancellationToken)
+    {
+        var failures = new Dictionary<TRecord, Exception>(ReferenceEqualityComparer.Instance);
+        var guards = new List<IDisposable?>(batch.Count);
+        try
+        {
+            foreach (var record in batch)
             {
-                Manager.Upsert(record);
-            }
-            // A failed write must not stop the rows that remain.
-            catch (Exception persistEx)
-            {
-                Logger.LogError(persistEx, "{Task}: failed to persist Errored status for record id {Id}", Name, record.Id);
+                guards.Add(EnterApplyGuard(record));
             }
 
-            return false;
+            await ApplyBatchAsync(batch, failures, cancellationToken).ConfigureAwait(false);
+
+            foreach (var record in batch)
+            {
+                if (failures.ContainsKey(record))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await VerifyAfterApplyAsync(record, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    failures[record] = ex;
+                }
+            }
         }
+        finally
+        {
+            foreach (var guard in guards)
+            {
+                guard?.Dispose();
+            }
+        }
+
+        var results = new List<(TRecord, bool)>(batch.Count);
+        foreach (var record in batch)
+        {
+            results.Add((record, await StoreOutcomeAsync(record, failures.GetValueOrDefault(record), cancellationToken).ConfigureAwait(false)));
+        }
+
+        return results;
+    }
+
+    /// <summary>Stores a row as Synced, or as Errored with the reason when it failed or its success could not be recorded.</summary>
+    /// <returns><c>true</c> when the row is stored as Synced.</returns>
+    private async Task<bool> StoreOutcomeAsync(TRecord record, Exception? error, CancellationToken cancellationToken)
+    {
+        if (error is null)
+        {
+            try
+            {
+                OnApplySucceeded(record);
+                await AfterApplySucceededAsync(record, cancellationToken).ConfigureAwait(false);
+                record.Status = SyncStatus.Synced;
+                record.StatusDate = DateTime.UtcNow;
+                record.LastSyncTime = DateTime.UtcNow;
+                record.Reason = null;
+                Manager.Upsert(record);
+                LogOutcome(record, null);
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                error = ex;
+            }
+        }
+
+        LogOutcome(record, error);
+        OnApplyFailed(record);
+        record.Status = SyncStatus.Errored;
+        record.StatusDate = DateTime.UtcNow;
+        record.Reason = error.Message;
+        try
+        {
+            Manager.Upsert(record);
+        }
+        // A failed write must not stop the rows that remain.
+        catch (Exception persistEx)
+        {
+            Logger.LogError(persistEx, "{Task}: failed to persist Errored status for record id {Id}", Name, record.Id);
+        }
+
+        return false;
     }
 }

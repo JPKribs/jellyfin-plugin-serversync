@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -33,6 +34,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     private readonly IProviderManager _providerManager;
     private readonly MetadataSyncTableService _metadataService;
     private readonly AppliedVersionRecorder _applied;
+
+    /// <summary>The most items saved in one call to Jellyfin's library.</summary>
+    private const int SaveBatchSize = 50;
+
+    /// <summary>The type that declares each item type's save, found once per type.</summary>
+    private static readonly ConcurrentDictionary<Type, Type?> SaveDeclaredBy = new();
+
+    /// <summary>The categories each row verified, kept until its outcome is logged.</summary>
+    private readonly ConcurrentDictionary<MetadataSyncItem, string> _verified = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SyncMissingMetadataTask"/> class.
@@ -158,6 +168,30 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// <inheritdoc />
     protected override async Task ApplyAsync(MetadataSyncItem record, CancellationToken cancellationToken)
     {
+        var pending = await ApplyChangesAsync(record, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (pending.NeedsSave)
+            {
+                await SaveAloneAsync(pending, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            pending.PeopleScope?.Dispose();
+        }
+
+        pending.ThrowIfFailed();
+    }
+
+    /// <summary>
+    /// Writes each category that is on to the local item in memory, and its cast to the library, without saving the item.
+    /// </summary>
+    /// <param name="record">The row to apply.</param>
+    /// <param name="cancellationToken">Cancels the image downloads and the cast write.</param>
+    /// <returns>The item to save and what failed so far, with the people hold the save must end.</returns>
+    private async Task<PendingSave> ApplyChangesAsync(MetadataSyncItem record, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(record);
 
         var localItem = ResolveLocalItem(record);
@@ -178,7 +212,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.LogError(ex, "Metadata apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                Logger.LogDebug(ex, "Metadata apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
                 failures.Add($"Metadata: apply threw, {ex.Message}");
             }
         }
@@ -192,73 +226,80 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                Logger.LogError(ex, "Images apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                Logger.LogDebug(ex, "Images apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
                 failures.Add($"Images: apply threw, {ex.Message}");
             }
         }
 
         // Held from the cast write through the save, since both touch Person items.
-        using var peopleScope = config.MetadataSyncPeople && record.HasPeopleChanges && localItem.SupportsPeople
+        var peopleScope = config.MetadataSyncPeople && record.HasPeopleChanges && localItem.SupportsPeople
             ? _applied.EnterAll(Models.Queue.HintKind.People)
             : null;
 
-        if (config.MetadataSyncPeople && record.HasPeopleChanges)
+        try
         {
-            anyApplyAttempted = true;
-            if (!localItem.SupportsPeople)
+            if (config.MetadataSyncPeople && record.HasPeopleChanges)
             {
-                failures.Add($"People: item type {localItem.GetType().Name} does not accept manual people writes");
-                Logger.LogWarning(
-                    "Cannot sync people for {ItemName} ({ItemType}): SupportsPeople is false. Local id {LocalItemId}",
-                    FormatUtilities.SanitizeForLog(record.ItemName),
-                    localItem.GetType().Name,
-                    localItem.Id);
+                anyApplyAttempted = true;
+                if (!localItem.SupportsPeople)
+                {
+                    failures.Add($"People: item type {localItem.GetType().Name} does not accept manual people writes");
+                    Logger.LogDebug(
+                        "Cannot sync people for {ItemName} ({ItemType}): SupportsPeople is false. Local id {LocalItemId}",
+                        FormatUtilities.SanitizeForLog(record.ItemName),
+                        localItem.GetType().Name,
+                        localItem.Id);
+                }
+                else
+                {
+                    try
+                    {
+                        peopleChanged = await ApplyPeopleAsync(localItem, record, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                    {
+                        Logger.LogDebug(ex, "People apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                        failures.Add($"People: apply threw, {ex.Message}");
+                    }
+                }
             }
-            else
+
+            if (config.MetadataSyncStudios && record.HasStudiosChanges)
             {
+                anyApplyAttempted = true;
                 try
                 {
-                    peopleChanged = await ApplyPeopleAsync(localItem, record, cancellationToken).ConfigureAwait(false);
+                    studiosChanged = ApplyStudios(localItem, record);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Logger.LogError(ex, "People apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
-                    failures.Add($"People: apply threw, {ex.Message}");
+                    Logger.LogDebug(ex, "Studios apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                    failures.Add($"Studios: apply threw, {ex.Message}");
                 }
             }
-        }
 
-        if (config.MetadataSyncStudios && record.HasStudiosChanges)
-        {
-            anyApplyAttempted = true;
-            try
-            {
-                studiosChanged = ApplyStudios(localItem, record);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.LogError(ex, "Studios apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
-                failures.Add($"Studios: apply threw, {ex.Message}");
-            }
+            // Images saved themselves already, so they take no part in this save.
+            return new PendingSave(record, localItem, anyApplyAttempted && (metadataChanged || peopleChanged || studiosChanged), failures, peopleScope);
         }
-
-        // Images saved themselves already, so they take no part in this save.
-        if (anyApplyAttempted && (metadataChanged || peopleChanged || studiosChanged))
+        catch
         {
-            try
-            {
-                await localItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                Logger.LogError(ex, "UpdateToRepositoryAsync(MetadataEdit) threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
-                failures.Add($"Persist: UpdateToRepositoryAsync threw, {ex.Message}");
-            }
+            // A hold left open would keep every people change from being announced.
+            peopleScope?.Dispose();
+            throw;
         }
+    }
 
-        if (failures.Count > 0)
+    /// <summary>Saves one applied item the way Jellyfin saves an edit, and notes a failed save on its row.</summary>
+    private async Task SaveAloneAsync(PendingSave pending, CancellationToken cancellationToken)
+    {
+        try
         {
-            throw new InvalidOperationException(string.Join("; ", failures));
+            await pending.LocalItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            Logger.LogDebug(ex, "UpdateToRepositoryAsync(MetadataEdit) threw for {ItemName}", FormatUtilities.SanitizeForLog(pending.Record.ItemName));
+            pending.Failures.Add($"Persist: UpdateToRepositoryAsync threw, {ex.Message}");
         }
     }
 
@@ -301,12 +342,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             {
                 record.Metadata.MarkSynced();
                 synced.Add("Metadata");
-                Logger.LogInformation("Apply Metadata verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                Logger.LogDebug("Apply Metadata verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
             }
             else
             {
                 failures.Add($"Metadata: {reason}");
-                Logger.LogWarning("Apply Metadata failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
+                Logger.LogDebug("Apply Metadata failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
             }
         }
 
@@ -317,12 +358,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             {
                 record.Images.MarkSynced();
                 synced.Add("Images");
-                Logger.LogInformation("Apply Images verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                Logger.LogDebug("Apply Images verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
             }
             else
             {
                 failures.Add($"Images: {reason}");
-                Logger.LogWarning("Apply Images failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
+                Logger.LogDebug("Apply Images failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
             }
         }
 
@@ -333,12 +374,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             {
                 record.People.MarkSynced();
                 synced.Add("People");
-                Logger.LogInformation("Apply People verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                Logger.LogDebug("Apply People verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
             }
             else
             {
                 failures.Add($"People: {reason}");
-                Logger.LogWarning("Apply People failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
+                Logger.LogDebug("Apply People failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
             }
         }
 
@@ -349,12 +390,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             {
                 record.Studios.MarkSynced();
                 synced.Add("Studios");
-                Logger.LogInformation("Apply Studios verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                Logger.LogDebug("Apply Studios verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
             }
             else
             {
                 failures.Add($"Studios: {reason}");
-                Logger.LogWarning("Apply Studios failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
+                Logger.LogDebug("Apply Studios failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
             }
         }
 
@@ -366,7 +407,174 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
         if (synced.Count > 0)
         {
-            Logger.LogDebug("Synced {Categories} for {ItemName}", string.Join(", ", synced), FormatUtilities.SanitizeForLog(record.ItemName));
+            _verified[record] = string.Join(", ", synced);
+        }
+    }
+
+    /// <summary>
+    /// Splits rows with no image to download into batches of up to <see cref="SaveBatchSize"/>, so their items are saved in one call.
+    /// A row whose local item is already in the batch starts a new one, so each row still reads back only its own values.
+    /// </summary>
+    /// <inheritdoc />
+    protected override IEnumerable<IReadOnlyList<MetadataSyncItem>> SplitIntoBatches(IList<MetadataSyncItem> group)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+        var batch = new List<MetadataSyncItem>(SaveBatchSize);
+        var held = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var record in group)
+        {
+            // A row with images saves its item while downloading them, so it is applied alone.
+            if (DownloadsImages(record))
+            {
+                if (batch.Count > 0)
+                {
+                    yield return batch;
+                    batch = new List<MetadataSyncItem>(SaveBatchSize);
+                    held.Clear();
+                }
+
+                yield return new[] { record };
+                continue;
+            }
+
+            var key = record.LocalItemId ?? string.Empty;
+            if (batch.Count == SaveBatchSize || (key.Length > 0 && held.Contains(key)))
+            {
+                yield return batch;
+                batch = new List<MetadataSyncItem>(SaveBatchSize);
+                held.Clear();
+            }
+
+            batch.Add(record);
+            if (key.Length > 0)
+            {
+                held.Add(key);
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            yield return batch;
+        }
+    }
+
+    /// <summary>
+    /// Applies each row in memory and writes its cast, then saves the items that share a parent in one call to Jellyfin's library.
+    /// An item whose type saves more than its own row, such as a video with alternate versions, is saved alone, and a batch that cannot be saved is saved one item at a time.
+    /// </summary>
+    /// <inheritdoc />
+    protected override async Task ApplyBatchAsync(IReadOnlyList<MetadataSyncItem> batch, IDictionary<MetadataSyncItem, Exception> failures, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(failures);
+
+        var pendings = new List<PendingSave>(batch.Count);
+        try
+        {
+            foreach (var record in batch)
+            {
+                try
+                {
+                    pendings.Add(await ApplyChangesAsync(record, cancellationToken).ConfigureAwait(false));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    failures[record] = ex;
+                }
+            }
+
+            var together = new List<PendingSave>();
+            foreach (var pending in pendings.Where(p => p.NeedsSave))
+            {
+                if (SavesOnlyItself(pending.LocalItem))
+                {
+                    together.Add(pending);
+                }
+                else
+                {
+                    await SaveAloneAsync(pending, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            foreach (var byParent in together.GroupBy(p => p.LocalItem.ParentId))
+            {
+                var share = byParent.ToList();
+                if (share.Count == 1)
+                {
+                    await SaveAloneAsync(share[0], cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                try
+                {
+                    await _libraryManager.UpdateItemsAsync(share.Select(p => p.LocalItem).ToList(), share[0].LocalItem.GetParent(), ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    // The save is one transaction, so nothing was kept, and saving each alone names the item that fails.
+                    Logger.LogDebug(ex, "Saving {Count} items in one call threw, so each is saved alone", share.Count);
+                    foreach (var pending in share)
+                    {
+                        await SaveAloneAsync(pending, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            foreach (var pending in pendings)
+            {
+                pending.PeopleScope?.Dispose();
+            }
+        }
+
+        foreach (var pending in pendings)
+        {
+            if (pending.Failures.Count > 0)
+            {
+                failures[pending.Record] = new InvalidOperationException(string.Join("; ", pending.Failures));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Says whether saving an item writes only that item, so a save of several items together does the same.
+    /// It is <c>true</c> when the item's type keeps Jellyfin's own save, or is a video with no alternate versions.
+    /// </summary>
+    private bool SavesOnlyItself(BaseItem item)
+    {
+        var declaredBy = SaveDeclaredBy.GetOrAdd(
+            item.GetType(),
+            type => type.GetMethod(nameof(BaseItem.UpdateToRepositoryAsync), new[] { typeof(ItemUpdateType), typeof(CancellationToken) })?.DeclaringType);
+        if (declaredBy == typeof(BaseItem))
+        {
+            return true;
+        }
+
+        return declaredBy == typeof(Video) && item is Video video && !_libraryManager.GetLocalAlternateVersionIds(video).Any();
+    }
+
+    /// <summary>
+    /// Writes one line for a row's outcome. A row that synced names the categories it updated, one with nothing to update is skipped, and one that errored gives the reason.
+    /// </summary>
+    /// <inheritdoc />
+    protected override void LogOutcome(MetadataSyncItem record, Exception? error)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        _verified.TryRemove(record, out var categories);
+        var name = FormatUtilities.SanitizeForLog(record.ItemName);
+        if (error is not null)
+        {
+            Logger.LogError("{Task}: could not update {ItemName}. {Reason}", Name, name, FormatUtilities.SanitizeForLog(error.Message, 500));
+            Logger.LogDebug(error, "{Task}: {ItemName} errored", Name, name);
+        }
+        else if (string.IsNullOrEmpty(categories))
+        {
+            Logger.LogInformation("{Task}: skipped {ItemName}, nothing to update", Name, name);
+        }
+        else
+        {
+            Logger.LogInformation("{Task}: updated {Categories} for {ItemName}", Name, categories, name);
         }
     }
 
@@ -654,5 +862,48 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
 
         return true;
+    }
+
+    /// <summary>An item applied in memory and waiting to be saved, with what failed so far and the people hold its save ends.</summary>
+    private sealed class PendingSave
+    {
+        /// <summary>Initializes a new instance of the <see cref="PendingSave"/> class.</summary>
+        /// <param name="record">The row that was applied.</param>
+        /// <param name="localItem">The local item that holds the changes.</param>
+        /// <param name="needsSave">Whether the item changed and must be saved.</param>
+        /// <param name="failures">What failed so far, one entry per category.</param>
+        /// <param name="peopleScope">The people hold to end once the item is saved, or null.</param>
+        public PendingSave(MetadataSyncItem record, BaseItem localItem, bool needsSave, List<string> failures, IDisposable? peopleScope)
+        {
+            Record = record;
+            LocalItem = localItem;
+            NeedsSave = needsSave;
+            Failures = failures;
+            PeopleScope = peopleScope;
+        }
+
+        /// <summary>Gets the row that was applied.</summary>
+        public MetadataSyncItem Record { get; }
+
+        /// <summary>Gets the local item that holds the changes.</summary>
+        public BaseItem LocalItem { get; }
+
+        /// <summary>Gets a value indicating whether the item changed and must be saved.</summary>
+        public bool NeedsSave { get; }
+
+        /// <summary>Gets what failed so far, one entry per category.</summary>
+        public List<string> Failures { get; }
+
+        /// <summary>Gets the people hold to end once the item is saved, or null.</summary>
+        public IDisposable? PeopleScope { get; }
+
+        /// <summary>Throws with every failure when any category failed.</summary>
+        public void ThrowIfFailed()
+        {
+            if (Failures.Count > 0)
+            {
+                throw new InvalidOperationException(string.Join("; ", Failures));
+            }
+        }
     }
 }
