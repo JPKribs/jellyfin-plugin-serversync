@@ -3129,7 +3129,7 @@ def scenario_link_hints(creds, apis):
 
 
 def scenario_file_changes(creds, apis, storage):
-    """A rename, a new container, a new file time, a rewrite in place, and a removal on source-a reach local's copy or link on hints alone, driven the way Kelp Manager reports them."""
+    """A rename, a new container, a new file time, a rewrite in place, and a removal on source-a reach local's copy or link on hints alone, reported the way a media manager reports them."""
     local, a = apis["local"], apis["source-a"]
     tag = uuid.uuid4().hex[:6]
     titles = {k: f"Change {k} {tag} (2024)" for k in ("R", "X", "T", "W", "D")}
@@ -3164,7 +3164,7 @@ def scenario_file_changes(creds, apis, storage):
         return item["Id"] if item else None
 
     def report(*updates):
-        """Tells source-a about changed paths, as Kelp Manager does."""
+        """Tells source-a about changed paths, as a media manager does."""
         a.post("/Library/Media/Updated", {"Updates": [{"Path": "/media/Movies/" + path, "UpdateType": kind} for path, kind in updates]}, expect=204)
 
     def mtime(path):
@@ -3193,7 +3193,7 @@ def scenario_file_changes(creds, apis, storage):
         before = {k: (mtime(held(k, titles[k] + ".mp4")), mtime(os.path.splitext(held(k, titles[k] + ".mp4"))[0] + ".nfo")) for k in titles}
         time.sleep(2)
 
-        # Each change is made on disk and reported the way Kelp Manager reports it.
+        # Each change is made on disk and reported the way a media manager reports it.
         since = f"{int(time.time()) - 2}"
         r_old, r_new = titles["R"] + ".mp4", titles["R"] + " Remastered.mp4"
         os.rename(os.path.join(src["R"], r_old), os.path.join(src["R"], r_new))
