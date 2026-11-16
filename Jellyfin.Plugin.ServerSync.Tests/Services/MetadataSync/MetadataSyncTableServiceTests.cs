@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -13,6 +14,7 @@ using Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Jellyfin.Sdk.Generated.Models;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -290,6 +292,36 @@ public sealed class MetadataSyncTableServiceTests
         Assert.Null(row);
         Assert.Equal("/local/movies/Film/film.mkv", call.Args[0]);
         Assert.Equal(isFolder, call.Args[1]);
+    }
+
+    /// <summary>
+    /// A local item the caller already holds is used as it is, and the library is asked only for a path the caller does not hold.
+    /// True: a scan that listed every local item makes no library query for each row it builds.
+    /// False: every row would cost a library query, or an item added during the scan would get no row.
+    /// </summary>
+    [Fact]
+    public async Task BuildRecordAsync_KnownLocalItem_IsUsedWithoutAskingTheLibrary()
+    {
+        var held = LocalMovie();
+        var asked = new List<(string Path, bool IsFolder)>();
+        BaseItem? Known(string path, bool isFolder)
+        {
+            asked.Add((path, isFolder));
+            return path == "/local/movies/Film/film.mkv" ? held : null;
+        }
+
+        _items.Answer("FindByPath", _ => new Movie { Id = Guid.NewGuid(), Name = "From The Library", Path = "/local/movies/Other/other.mkv" });
+
+        var known = await _service.BuildRecordAsync(Library(), SourceItem(), false, false, false, false, false, true, true, null, null, false, null!, CancellationToken.None, Known);
+        var libraryCallsForKnown = _items.Calls.Count(c => c.Name == "FindByPath");
+        var unknown = await _service.BuildRecordAsync(Library(), SourceItem("/media/movies/Other/other.mkv"), false, false, false, false, false, true, true, null, null, false, null!, CancellationToken.None, Known);
+
+        Assert.Equal(LocalItemId.ToString("N"), known!.LocalItemId);
+        Assert.Equal(0, libraryCallsForKnown);
+        Assert.Equal(("/local/movies/Film/film.mkv", false), asked[0]);
+        Assert.NotNull(unknown);
+        Assert.NotEqual(LocalItemId.ToString("N"), unknown!.LocalItemId);
+        Assert.Equal(1, _items.Calls.Count(c => c.Name == "FindByPath"));
     }
 
     /// <summary>

@@ -180,6 +180,7 @@ public class MetadataSyncTableService
     /// <param name="deepImageVerification"><c>true</c> to read each image's size from the source.</param>
     /// <param name="client">The client for the source server, used to size its images.</param>
     /// <param name="cancellationToken">Cancels the calls that size the source images.</param>
+    /// <param name="knownLocalItem">Finds a local item by path and whether it is a folder among the items the caller already holds, or null to ask the library for each.</param>
     /// <returns>The row, or null when the item is not to be tracked.</returns>
     public async Task<MetadataSyncItem?> BuildRecordAsync(
         LibraryMapping libraryMapping,
@@ -195,7 +196,8 @@ public class MetadataSyncTableService
         string? priorLocalImagesJson,
         bool deepImageVerification,
         SourceServerClient client,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, bool, BaseItem?>? knownLocalItem = null)
     {
         ArgumentNullException.ThrowIfNull(libraryMapping);
         ArgumentNullException.ThrowIfNull(sourceItem);
@@ -218,7 +220,8 @@ public class MetadataSyncTableService
         var sourceItemId = sourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         var localPath = PathUtilities.TranslatePath(sourcePath, libraryMapping.SourceRootPath, libraryMapping.LocalRootPath);
 
-        var localItem = _localItems.FindByPath(localPath, isFolder: isFolder);
+        // A scan already holds every local item by path, so the library is asked only for one it does not hold.
+        var localItem = knownLocalItem?.Invoke(localPath, isFolder) ?? _localItems.FindByPath(localPath, isFolder: isFolder);
         if (localItem == null)
         {
             return null;

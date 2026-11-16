@@ -148,6 +148,13 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     protected virtual int MaxDegreeOfParallelism => 1;
 
     /// <summary>
+    /// Gets how many rows of one apply group are applied at once, which is <see cref="MaxDegreeOfParallelism"/> unless overridden.
+    /// </summary>
+    /// <param name="group">The group about to be applied.</param>
+    /// <returns>The number of rows applied at once.</returns>
+    protected virtual int ParallelismFor(IList<TRecord> group) => MaxDegreeOfParallelism;
+
+    /// <summary>
     /// Runs before any row is applied. The default connects every source into <see cref="Sources"/> and
     /// returns <c>false</c> when none connects, and an override with its own checks calls the base.
     /// </summary>
@@ -501,9 +508,9 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
             ReportOverall();
         }
 
-        var maxParallel = Math.Max(1, MaxDegreeOfParallelism);
         foreach (var group in GetApplyGroups(queued))
         {
+            var maxParallel = Math.Max(1, ParallelismFor(group));
             if (cancellationToken.IsCancellationRequested)
             {
                 break;

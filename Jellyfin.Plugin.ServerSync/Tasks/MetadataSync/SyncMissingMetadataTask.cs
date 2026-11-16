@@ -78,11 +78,22 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     protected override string ModuleMutexKey => "Metadata";
 
     /// <summary>
-    /// Applies four rows at once, since image downloads dominate the time each item takes.
-    /// Jellyfin's repository locks its own writes, so concurrent applies still store one at a time.
+    /// Applies four rows at once where rows download images, since the downloads dominate the time each of those takes.
     /// </summary>
     /// <inheritdoc />
     protected override int MaxDegreeOfParallelism => 4;
+
+    /// <summary>
+    /// A group with no image to download is applied one row at a time. Its work is all writes to Jellyfin's library database,
+    /// which takes one writer at a time, so more workers only queue behind each other and hold up Jellyfin's own writes.
+    /// </summary>
+    /// <inheritdoc />
+    protected override int ParallelismFor(IList<MetadataSyncItem> group)
+        => group is not null && group.Any(DownloadsImages) ? MaxDegreeOfParallelism : 1;
+
+    /// <summary>Says whether applying a row downloads images.</summary>
+    private bool DownloadsImages(MetadataSyncItem record)
+        => ConfigManager.Configuration.MetadataSyncImages && record.HasImagesChanges;
 
     /// <inheritdoc />
     protected override bool IsEnabled()
@@ -118,14 +129,16 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     }
 
     /// <summary>
-    /// Groups the rows by tier, since a season must not apply while its series is still in flight.
+    /// Groups the rows by tier, since a season must not apply while its series is still in flight, and within a tier by whether a row downloads images.
     /// </summary>
     /// <inheritdoc />
     protected override IEnumerable<IList<MetadataSyncItem>> GetApplyGroups(IList<MetadataSyncItem> items)
     {
+        // Within a tier, the rows with no image to download go first and one at a time, and the rest go together.
         return items
             .GroupBy(i => GetItemTypeOrder(i.ItemType))
             .OrderBy(g => g.Key)
+            .SelectMany(g => g.GroupBy(DownloadsImages).OrderBy(byImages => byImages.Key))
             .Select(g => (IList<MetadataSyncItem>)g.ToList());
     }
 

@@ -56,6 +56,38 @@ public class RefreshMetadataSyncTableTask
         _conflicts = conflicts;
     }
 
+    /// <summary>
+    /// The local items of each mapped library by path, for one run and by source library id.
+    /// <see cref="GetListAsync"/> fills it and <see cref="BuildRecordAsync"/> reads it, so the parallel build does not ask Jellyfin's library database for every item.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders)> _localByLibrary = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Clears the local items a run holds, which each server's listing then fills again.
+    /// </summary>
+    /// <inheritdoc />
+    protected override void OnRunStarting() => _localByLibrary.Clear();
+
+    /// <summary>
+    /// Clears the local items a scan held, so a single item from a hint is read from the library as it is now.
+    /// </summary>
+    /// <inheritdoc />
+    protected override void PrepareForOne(MetadataWork work) => _localByLibrary.Clear();
+
+    /// <summary>
+    /// Lets go of the local items once the scan has built its rows, so they are not held between runs.
+    /// </summary>
+    /// <inheritdoc />
+    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    {
+        _localByLibrary.Clear();
+        return base.FinalizeAsync(cancellationToken);
+    }
+
+    /// <summary>Finds a local item among the ones this run listed, or null when the run did not list it.</summary>
+    private BaseItem? KnownLocalItem(string sourceLibraryId, string path, bool isFolder)
+        => _localByLibrary.TryGetValue(sourceLibraryId, out var local) && (isFolder ? local.Folders : local.Leaves).TryGetValue(path, out var item) ? item : null;
+
     /// <inheritdoc />
     protected override bool SupportsIncremental => true;
 
@@ -189,6 +221,7 @@ public class RefreshMetadataSyncTableTask
             if (string.IsNullOrEmpty(mapping.LocalLibraryId)) continue;
             if (!Guid.TryParse(mapping.LocalLibraryId, out var localLibraryGuid)) continue;
             localByLibrary[mapping.SourceLibraryId] = _metadataService.GetLocalItemsByPath(localLibraryGuid);
+            _localByLibrary[mapping.SourceLibraryId] = localByLibrary[mapping.SourceLibraryId];
         }
 
         progress.Report(8);
@@ -524,7 +557,8 @@ public class RefreshMetadataSyncTableTask
             priorLocalImagesJson: priorRecord?.Images.Local,
             deepImageVerification: config.DeepImageVerification,
             source.Source.Client,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            (path, isFolder) => KnownLocalItem(source.LibraryMapping.SourceLibraryId, path, isFolder)).ConfigureAwait(false);
 
         if (fresh == null)
         {

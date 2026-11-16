@@ -89,6 +89,8 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
 
         public int Parallelism => MaxDegreeOfParallelism;
 
+        public int ParallelismOf(IList<MetadataSyncItem> group) => ParallelismFor(group);
+
         public bool Enabled() => IsEnabled();
 
         public IList<MetadataSyncItem> ToApply() => GetItemsToApply();
@@ -178,6 +180,36 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
         var names = NewTask().ToApply().Select(r => r.ItemName).ToArray();
 
         Assert.Equal(new[] { "y", "z", "c", "m", "Alpha", "beta", "gamma" }, names);
+    }
+
+    /// <summary>
+    /// Within a tier, rows that download no image form their own group and are applied one at a time, and rows that download images are applied four at once.
+    /// True: writes to Jellyfin's library database, which takes one writer at a time, do not queue behind each other, and image downloads still run together.
+    /// False: four workers would wait on one database writer and hold up Jellyfin's own writes, or image downloads would run one at a time.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void GetApplyGroups_RowsWithAndWithoutImages_AreSplitAndPacedApart(bool imagesOn)
+    {
+        _config.Configuration.MetadataSyncImages = imagesOn;
+        var plain = Row("Movie", "plain");
+        var pictured = Row("Movie", "pictured");
+        pictured.Images.UpdateSource("{\"Primary\":[{\"ImageType\":\"Primary\",\"ImageIndex\":0,\"Size\":9,\"Tag\":\"t\"}]}");
+        var task = NewTask();
+
+        var groups = task.Groups(new List<MetadataSyncItem> { pictured, plain });
+
+        if (imagesOn)
+        {
+            Assert.Equal(new[] { "plain", "pictured" }, groups.Select(g => Assert.Single(g).ItemName));
+            Assert.Equal(new[] { 1, 4 }, groups.Select(task.ParallelismOf));
+        }
+        else
+        {
+            Assert.Equal(2, Assert.Single(groups).Count);
+            Assert.Equal(1, task.ParallelismOf(groups[0]));
+        }
     }
 
     /// <summary>
