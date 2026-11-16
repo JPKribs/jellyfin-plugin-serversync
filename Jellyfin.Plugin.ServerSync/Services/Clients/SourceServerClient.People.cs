@@ -14,6 +14,7 @@ public partial class SourceServerClient
 {
     /// <summary>
     /// Reads every person from the source in one unpaged <c>/Persons</c> call, the only route that answers in full for every API Key.
+    /// It is sent once with the client's whole time limit, since a large source takes minutes to start the answer.
     /// Throws on any failure, since a partial list would make the People scan prune rows for people it never saw.
     /// </summary>
     /// <param name="cancellationToken">Cancels the request.</param>
@@ -39,6 +40,9 @@ public partial class SourceServerClient
                         ItemFields.ProductionLocations,
                         ItemFields.Settings
                     };
+
+                    // A source with a large catalog takes minutes to start this answer.
+                    config.Options.Add(new SlowAnswerOption());
                 },
                 cancellationToken).ConfigureAwait(false);
 

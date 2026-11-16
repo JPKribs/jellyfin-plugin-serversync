@@ -129,6 +129,29 @@ public sealed class PluginServiceRegistratorTests
     }
 
     /// <summary>
+    /// Both named clients read the slow answer mark before the retry sees the request.
+    /// True: a marked request is sent once with the client's whole time limit.
+    /// False: the retry would cut the list of every person off at its attempt limit.
+    /// </summary>
+    [Theory]
+    [InlineData(SourceServerClient.HttpClientName)]
+    [InlineData(SourceServerClient.PublicHttpClientName)]
+    public void RegisterServices_NamedClient_ReadsTheSlowAnswerMarkBeforeTheRetry(string name)
+    {
+        using var provider = Provider();
+
+        var order = new System.Collections.Generic.List<Type>();
+        for (var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(name); handler is DelegatingHandler outer; handler = outer.InnerHandler)
+        {
+            order.Add(outer.GetType());
+        }
+
+        var slow = order.IndexOf(typeof(SlowAnswerHandler));
+        Assert.True(slow >= 0);
+        Assert.True(slow < order.IndexOf(typeof(JPKribs.Jellyfin.Base.JpkRetryHandler)));
+    }
+
+    /// <summary>
     /// The two named clients are distinct.
     /// True: the client for public addresses only and the one that allows private networks are configured apart.
     /// False: one name would overwrite the other, and the address check would be the same for both.

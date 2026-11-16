@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.ServerSync;
 
 /// <summary>
 /// Registers every class marked with <see cref="PluginServiceAttribute"/>, the gated background services, and the secret protector.
-/// It also registers the two HTTP clients for other servers, each with a connect timeout, the address check, the redirect refusal, and retries.
+/// It also registers the two HTTP clients for other servers, each with a connect timeout, the address check, the redirect refusal, retries, and one long try for a slow answer.
 /// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
@@ -58,6 +58,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPrivateAllowedAsync
             })
+            .AddHttpMessageHandler(() => new SlowAnswerHandler())
             .AddHttpMessageHandler(() => new JPKribs.Jellyfin.Base.JpkRetryHandler())
             .AddHttpMessageHandler(() => new RedirectRefusingHandler(RedirectAdvice))
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
@@ -73,6 +74,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
             })
+            .AddHttpMessageHandler(() => new SlowAnswerHandler())
             .AddHttpMessageHandler(() => new JPKribs.Jellyfin.Base.JpkRetryHandler())
             .AddHttpMessageHandler(() => new RedirectRefusingHandler(RedirectAdvice))
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));

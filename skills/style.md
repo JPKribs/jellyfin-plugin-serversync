@@ -277,16 +277,23 @@ Every config page uses Jellyfin's page shell.
 
 Pick one model per page and keep it.
 
-| Model | Use it when | Save button |
+| Model | Use it when | Save |
 | :--- | :--- | :--- |
-| One Save per page | Settings depend on each other | `raised base-button primary fill` at the bottom |
-| One Save per section | Sections are independent and long | `raised base-button primary small` in `base-collapsible-actions flush` |
+| One Save per page | Settings depend on each other | One Save Bar, the last thing on the page |
+| One Save per section | Sections are independent and long | One Save Bar, the last thing in each section's content |
 | Editor dialog | Each record is edited on its own | **Done** in `openEditorDialog` |
 
-* Track unsaved changes with `createChangeTracker` and the `base-unsaved` indicator, which reads "Unsaved".
+Every page and section Save is the same:
+
+1. It is Base's `createSaveBar` with `fill: true`. Its button reads **Save**, never **Save Settings** or a noun.
+2. The Save Bar is the last element of what it saves. Nothing sits beside it or below it in that section.
+3. Any other actions that belong with that Save, such as **Reset to Defaults**, **Restart**, or **Test**, go in one `<div class="base-button-row">` directly above it. Each is `raised base-button secondary fill`, or `destructive fill` for one that deletes or resets data. A select that belongs there stays a normal `emby-select` in the row. No `small` buttons in that row. Base spaces that row. Its buttons have no margin of their own, so their edges line up with the Save Bar's, the row sits one `--base-gap-narrow` above the Save Bar, and its buttons use the same font weight as Save. A plugin adds no margin, gap, or weight of its own. The Save Bar's element goes directly after the row, never inside a wrapper, since Base spaces them as siblings.
+4. Never hand place a Save button, a small Save, a Save Bar without `fill`, or a status line or unsaved indicator of its own beside it. No plugin CSS positions a Save or its neighbours.
+
+* Call `setDirty` on the Save Bar on every input and change, from `createChangeTracker` or the page's own check.
+* `onSave` returns the save's promise. It rejects with an Error holding the reason, and the Save Bar shows it.
 * Guard leaving the page with `page.guardUnsaved`.
-* Report the result with `shared.setStatus` next to the button.
-* Use `shared.saveConfigWith` for get, change, save, and report.
+* Use `shared.saveConfigWith` for get, change, and save inside `onSave`.
 
 ## Components
 
@@ -338,6 +345,7 @@ grep -o "export function create[A-Za-z]*" ~/.nuget/packages/jpkribs.jellyfin.bas
 | Destructive action | `raised base-button destructive` |
 | Secondary action | `raised base-button secondary` |
 | Compact action in a section | add `small` |
+| Actions that go with a Save | `raised base-button secondary fill`, or `destructive fill`, in one `base-button-row` directly above the Save Bar |
 | Icon and label in a toolbar | `raised base-button` holding a `material-icons` span and a label |
 | Icon only in a row | `base-row-btn`, with `.dirty` for unsaved and `.success` after saving |
 
