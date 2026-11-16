@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.16.0"
+version: "12.4.16.1"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -29,27 +29,8 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  added:
-  - A Statistics tab, between Storage and Settings. It has one section for each sync type that is on, charting what the last 10 scans found as New, Updated, and Removed
-  - Link Streams, a second chart in the Statistics tab's Content section while a server may link to this one. It draws one line for each such server, counting the streams started for it on each of the last 30 days
-  changed:
-  - A scan compares Metadata and People images by the source's image tag. An image already matched is fetched when its tag changes, and an image never matched is compared by size once, so images already on both servers are matched without a download
-  - A scan asks a source for image sizes only for an image it has never matched. An item or person with no image here costs no call, and neither does one whose tags are unchanged
-  - A user's profile image is downloaded from the source only when its tag changes. Every scan downloaded it before
-  - Deep Image Verification still measures every source image on every scan and compares by size, and with it on every scan still downloads each user's profile image
-  - The People refresh lists every person item a source holds, which can be a few more than before
   fixed:
-  - A People refresh against a source with a large catalog rested on one long request. The people are read 2,000 at a time and each page is retried by itself
-  - A source image replaced by one of the same file size was never synced. Its tag changes, so it is fetched
-  - A Metadata image a source served with no bytes could replace the image here. It counts as a failed download and the image here is kept
-  - A Metadata scan that could not ask a source for image sizes dropped the sizes it already held. It keeps them
+  - The Statistics tab showed no Link Streams on a server with content sync off, which is how a server that only serves links is set up. The chart shows whenever a server may link to this one, under Content when content sync is on and in a section of its own when it is off
   developer:
-  - Database schema 37 adds ScanRuns and LinkStreamDays for the Statistics tab. A database from 12.4.13.0 or later gains the two tables on its first start and nothing else in it changes. The oldest reader is still schema 28, so an older release keeps using the file
-  - GET /Sync/Statistics answers the last scans of each sync type that is on, and the link streams of the last 30 days for each server that may link here
-  - A scan records how many rows it added, how many it found changed once conflicts are settled, and how many it pruned. A link stream is counted when its first request opens it
-  - ImageUtilities holds every image action and comparison for Metadata, People, and user pictures. It replaces ImageManifestEnricher, LocalImageUtilities, the manifest builders in both merge services, and four copies of the profile image rule
-  - A local image entry in LocalImagesValue carries Tag, a mark of its file and when it was written, and SyncedTag, the source tag it was matched to. A ProfileImage row holds the source's image tag in SourceValueHash
-  - GetAllPersonsAsync pages /Items for Person items, asks /Persons/{name} for a name a source holds twice, and falls back to the unpaged /Persons when the paged list is empty
-  - Uses JPKribs.Jellyfin.Base 2026.11.21, and the Statistics tab draws with its Bar Chart and Line Chart
-  - The wire protocol is unchanged, so this release works alongside 12.4.15.0 one server at a time
-  - The suite grows from 4,193 tests to 4,268
+  - GET /Sync/Statistics answers LinkStreams whenever a server entry may link here, whatever sync types are on
+  - The wire protocol and the database schema are unchanged, so this release works alongside 12.4.16.0 one server at a time
