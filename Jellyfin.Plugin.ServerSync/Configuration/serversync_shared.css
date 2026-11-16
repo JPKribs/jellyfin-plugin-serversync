@@ -42,14 +42,6 @@
 .serversync-health-value.serversync-warning { color: var(--base-orange-fg); }
 .serversync-health-value.serversync-success { color: var(--base-green-fg); }
 
-/* serversync-section-separator */
-/* Thin rule between a view's action buttons and its table. */
-/* Example: <div class="serversync-section-separator"></div> */
-.serversync-section-separator {
-    border-bottom: 1px solid var(--base-border);
-    margin-bottom: 16px;
-}
-
 /* serversync-compare-table */
 /* Four column table that sets a property's source, local, and merged values side by side. */
 /* Example: <table class="serversync-compare-table"><tr><td class="serversync-compare-table-property">Played</td></tr></table> */
