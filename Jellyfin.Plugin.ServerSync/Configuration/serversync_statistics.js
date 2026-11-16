@@ -190,7 +190,8 @@ export default function (view) {
 
     // drawStatistics
     // Draws one section for each sync type the route answered with. The link streams go under Content, or in
-    // a section of their own on a server that has content sync off and still serves links.
+    // a section of their own on a server that has content sync off and still serves links. The page's
+    // description shows only while a sync type is on, since the Link Streams section describes itself.
     //
     // Inputs
     // statistics [object]: The route's answer, with Types and LinkStreams.
@@ -199,6 +200,7 @@ export default function (view) {
         var types = (statistics && statistics.Types) || [];
         var linkStreams = statistics && statistics.LinkStreams;
         var hasContent = types.some(function (type) { return type.Key === 'Content'; });
+        setVisible('statisticsIntro', types.length > 0);
         setVisible('statisticsDisabled', types.length === 0 && !linkStreams);
         types.forEach(function (type) {
             var title = TYPE_TITLES[type.Key] || type.Key;
@@ -223,6 +225,7 @@ export default function (view) {
         if (status) status.textContent = '';
         apiRequest('Statistics', 'GET').then(drawStatistics).catch(function () {
             clearCharts();
+            setVisible('statisticsIntro', false);
             setVisible('statisticsDisabled', false);
             if (status) status.textContent = 'The statistics could not be loaded.';
         });

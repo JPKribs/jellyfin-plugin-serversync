@@ -10,7 +10,7 @@ globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
 globalThis.setInterval = function () { return 1; };
 
-var IDS = ['statisticsStatus', 'statisticsDisabled', 'statisticsSections'];
+var IDS = ['statisticsStatus', 'statisticsIntro', 'statisticsDisabled', 'statisticsSections'];
 
 // openPage
 // Loads the Statistics controller over a view that holds the elements it uses, answers the Statistics route, and shows the page.
@@ -51,6 +51,7 @@ test('each sync type the route answers with gets its own section, in order, with
     assert.deepEqual(titles(opened.view), ['Content', 'People', 'Users']);
     assert.equal(opened.view.querySelectorAll('.base-bar-chart').length, 3);
     assert.equal(opened.view.querySelector('#statisticsDisabled').classList.contains('hidden'), true);
+    assert.equal(opened.view.querySelector('#statisticsIntro').classList.contains('hidden'), false);
 });
 
 test('a sync type with no scan yet says so in place of its chart', async function () {
@@ -78,17 +79,21 @@ test('a server with content sync off shows the link streams in a section of thei
     var alone = await openPage({ statistics: { Types: [], LinkStreams: days } });
     assert.deepEqual(titles(alone.view), ['Link Streams']);
     assert.equal(alone.view.querySelector('#statisticsDisabled').classList.contains('hidden'), true);
+    assert.equal(alone.view.querySelector('#statisticsIntro').classList.contains('hidden'), true);
+    assert.equal(other.view.querySelector('#statisticsIntro').classList.contains('hidden'), false);
 });
 
 test('the page says every sync type is off when the route lists none', async function () {
     var opened = await openPage({ statistics: { Types: [] } });
     assert.equal(opened.view.querySelector('#statisticsDisabled').classList.contains('hidden'), false);
+    assert.equal(opened.view.querySelector('#statisticsIntro').classList.contains('hidden'), true);
     assert.equal(opened.view.querySelectorAll('.base-collapsible-section').length, 0);
 });
 
 test('a read that fails says so on the page status and draws nothing', async function () {
     var opened = await openPage({ fail: true });
     assert.equal(opened.view.querySelector('#statisticsStatus').textContent, 'The statistics could not be loaded.');
+    assert.equal(opened.view.querySelector('#statisticsIntro').classList.contains('hidden'), true);
     assert.equal(opened.view.querySelectorAll('.base-collapsible-section').length, 0);
 });
 
