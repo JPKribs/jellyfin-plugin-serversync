@@ -160,15 +160,46 @@ export default function (view) {
         content.appendChild(chart.element);
     }
 
+    // addLinkStreams
+    // Adds the Link Streams chart to a section, with a line for each server that may link to this one.
+    //
+    // Inputs
+    // content [HTMLElement]: The section's content.
+    // linkStreams [object]: Days and Servers, as the route answers.
+    // heading [boolean]: Whether to head the chart, which a section of its own does not need.
+    function addLinkStreams(content, linkStreams, heading) {
+        if (heading) {
+            var title = document.createElement('div');
+            title.className = 'base-subsection-title';
+            title.textContent = 'Link Streams';
+            content.appendChild(title);
+        }
+        var note = document.createElement('div');
+        note.className = 'fieldDescription serversync-mb-md';
+        note.textContent = 'Streams this server started for each server that links to it, on each of the last 30 days.';
+        content.appendChild(note);
+        var streams = streamChartData(linkStreams);
+        addChart(content, serverSyncModule.createLineChart({
+            labels: streams.labels,
+            series: streams.series,
+            max: countAxisMax(streams.series),
+            label: 'Link streams started each day',
+            emptyText: 'No link stream has started yet.'
+        }));
+    }
+
     // drawStatistics
-    // Draws one section for each sync type the route answered with, and the link streams under Content.
+    // Draws one section for each sync type the route answered with. The link streams go under Content, or in
+    // a section of their own on a server that has content sync off and still serves links.
     //
     // Inputs
     // statistics [object]: The route's answer, with Types and LinkStreams.
     function drawStatistics(statistics) {
         clearCharts();
         var types = (statistics && statistics.Types) || [];
-        setVisible('statisticsDisabled', types.length === 0);
+        var linkStreams = statistics && statistics.LinkStreams;
+        var hasContent = types.some(function (type) { return type.Key === 'Content'; });
+        setVisible('statisticsDisabled', types.length === 0 && !linkStreams);
         types.forEach(function (type) {
             var title = TYPE_TITLES[type.Key] || type.Key;
             var content = addSection(title);
@@ -180,24 +211,9 @@ export default function (view) {
                 label: title + ' items found by each of the last scans',
                 emptyText: 'No scan has finished yet.'
             }));
-            if (type.Key !== 'Content' || !statistics.LinkStreams) return;
-            var heading = document.createElement('div');
-            heading.className = 'base-subsection-title';
-            heading.textContent = 'Link Streams';
-            content.appendChild(heading);
-            var note = document.createElement('div');
-            note.className = 'fieldDescription serversync-mb-md';
-            note.textContent = 'Streams this server started for each server that links to it, on each of the last 30 days.';
-            content.appendChild(note);
-            var streams = streamChartData(statistics.LinkStreams);
-            addChart(content, serverSyncModule.createLineChart({
-                labels: streams.labels,
-                series: streams.series,
-                max: countAxisMax(streams.series),
-                label: 'Link streams started each day',
-                emptyText: 'No link stream has started yet.'
-            }));
+            if (type.Key === 'Content' && linkStreams) addLinkStreams(content, linkStreams, true);
         });
+        if (linkStreams && !hasContent) addLinkStreams(addSection('Link Streams'), linkStreams, false);
     }
 
     // loadStatistics

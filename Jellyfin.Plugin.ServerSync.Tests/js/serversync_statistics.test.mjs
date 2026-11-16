@@ -58,7 +58,7 @@ test('a sync type with no scan yet says so in place of its chart', async functio
     assert.match(opened.view.querySelector('#statisticsSections').textContent, /No scan has finished yet\./);
 });
 
-test('the link streams chart shows under Content only, and only when the route lists link streams', async function () {
+test('the link streams chart shows under Content when content sync is on, and only when the route lists link streams', async function () {
     var days = { Days: ['2026-04-01', '2026-04-02'], Servers: [{ Key: 'den', Name: 'Den', Streams: [2, 0] }, { Key: 'attic', Name: 'Attic', Streams: [0, 1] }] };
     var withLinks = await openPage({ statistics: { Types: [{ Key: 'Content', Runs: [run(1, 0, 0)] }, { Key: 'History', Runs: [] }], LinkStreams: days } });
     assert.equal(withLinks.view.querySelectorAll('.base-line-chart').length, 1);
@@ -67,8 +67,17 @@ test('the link streams chart shows under Content only, and only when the route l
     assert.match(withLinks.view.querySelector('.base-line-chart').textContent, /Attic/);
     var without = await openPage({ statistics: { Types: [{ Key: 'Content', Runs: [run(1, 0, 0)] }], LinkStreams: null } });
     assert.equal(without.view.querySelectorAll('.base-line-chart').length, 0);
-    var noContent = await openPage({ statistics: { Types: [{ Key: 'History', Runs: [] }], LinkStreams: days } });
-    assert.equal(noContent.view.querySelectorAll('.base-line-chart').length, 0);
+});
+
+test('a server with content sync off shows the link streams in a section of their own', async function () {
+    var days = { Days: ['2026-04-01'], Servers: [{ Key: 'den', Name: 'Den', Streams: [3] }] };
+    var other = await openPage({ statistics: { Types: [{ Key: 'History', Runs: [] }], LinkStreams: days } });
+    assert.deepEqual(titles(other.view), ['History', 'Link Streams']);
+    assert.equal(other.view.querySelectorAll('.base-line-chart').length, 1);
+    assert.equal(other.view.querySelectorAll('.base-subsection-title').length, 0);
+    var alone = await openPage({ statistics: { Types: [], LinkStreams: days } });
+    assert.deepEqual(titles(alone.view), ['Link Streams']);
+    assert.equal(alone.view.querySelector('#statisticsDisabled').classList.contains('hidden'), true);
 });
 
 test('the page says every sync type is off when the route lists none', async function () {

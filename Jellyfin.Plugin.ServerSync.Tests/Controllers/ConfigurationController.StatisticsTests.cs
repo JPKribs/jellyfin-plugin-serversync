@@ -64,17 +64,17 @@ public sealed class ConfigurationControllerStatisticsTests : IDisposable
     }
 
     /// <summary>
-    /// Link streams are listed only while Content is on and a server entry may link to this server.
-    /// True: the link chart shows where streams can happen.
-    /// False: a server that offers no links would show an empty chart.
+    /// Link streams are listed whenever a server entry may link to this server, with content sync on or off.
+    /// True: a server that only serves links still shows its streams.
+    /// False: such a server would count streams and never show them, or a server that offers no links would show an empty chart.
     /// </summary>
     [Theory]
     [InlineData(true, true, ServerMode.Push, true)]
     [InlineData(true, true, ServerMode.Sync, true)]
     [InlineData(true, true, ServerMode.Pull, false)]
     [InlineData(true, false, ServerMode.Push, false)]
-    [InlineData(false, true, ServerMode.Push, false)]
-    public void GetStatistics_LinkStreams_NeedContentAndAServerThatMayLink(bool content, bool allowLinking, ServerMode mode, bool listed)
+    [InlineData(false, true, ServerMode.Push, true)]
+    public void GetStatistics_LinkStreams_NeedAServerThatMayLink(bool content, bool allowLinking, ServerMode mode, bool listed)
     {
         _harness.Config.Configuration.EnableContentSync = content;
         var peer = _harness.AddPeer(mode);

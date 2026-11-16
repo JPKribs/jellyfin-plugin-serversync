@@ -49,8 +49,9 @@ public partial class ConfigurationController
         };
 
         // The chart counts streams served to servers that link to this one, so it shows only while one may.
+        // A server that only serves links has every sync type off and still shows it.
         var linking = config.Servers.Where(server => server.OffersLinks).ToList();
-        if (config.EnableContentSync && linking.Count > 0)
+        if (linking.Count > 0)
         {
             var today = DateOnly.FromDateTime(DateTime.Now);
             var counted = statistics.LinkStreams(today);

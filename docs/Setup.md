@@ -86,7 +86,7 @@ The **Statistics** tab has one section for each sync type that is on. Each chart
 
 A scan of a sync type runs from its scheduled task or from **Refresh** on the **Sync** tab. An item that is already waiting to sync is not counted again by a later scan.
 
-While content sync is on and a server may link to this one, the **Content** section also charts **Link Streams**: how many streams this server started for each such server on each of the last 30 days, one line for each server. A film counts once however often its player seeks. See [Links](Links.md).
+While a server may link to this one, the tab also charts **Link Streams**, under **Content** when content sync is on and in a section of its own when it is off: how many streams this server started for each such server on each of the last 30 days, one line for each server. A film counts once however often its player seeks. See [Links](Links.md).
 
 ## Settings
 
