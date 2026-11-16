@@ -164,7 +164,7 @@ When no server allows the play, the refusal is the link's own server's reason, f
 
 ## Playback on the Source
 
-Playback of a link shows on the source as a live session named after the viewer's client and their user on the linking server, as in `Jellyfin Web (viewer)`, under the client name **Server Sync**, for the user it streams as. From the source's dashboard:
+Playback of a link shows on the source as a live session named after the viewer's client and their user on the linking server, as in `Jellyfin Web (viewer)`, under the client name **Server Sync** and the linking server's Server Sync version, for the user it streams as. From the source's dashboard:
 
 * **Stop, pause, resume, and seek** reach the viewer on the linking server. So does **Send Message**, which is shown with the source's name. This needs the source's entry for the linking server to have an address and a key.
 * The activity log and playback plugins on the source see the play.

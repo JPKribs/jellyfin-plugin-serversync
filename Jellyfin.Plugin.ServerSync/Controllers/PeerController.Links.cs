@@ -249,7 +249,11 @@ public partial class PeerController
             return StatusCode(StatusCodes.Status403Forbidden, "the source's key for this server belongs to another user");
         }
 
-        var why = await sessions.ApplyAsync(peer, report, HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
+        var why = await sessions.ApplyAsync(
+            peer,
+            report,
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            Request.Headers[Services.Queue.HintProtocol.VersionHeader].ToString()).ConfigureAwait(false);
         if (why is not null)
         {
             _logger.LogDebug("Ignored a playback report from '{Server}': {Reason}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(why, 300));

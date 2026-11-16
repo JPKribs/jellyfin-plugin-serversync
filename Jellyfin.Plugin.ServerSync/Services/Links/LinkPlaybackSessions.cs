@@ -76,8 +76,9 @@ public sealed class LinkPlaybackSessions
     /// <param name="peer">The reporting server's entry here.</param>
     /// <param name="report">The playback report to apply.</param>
     /// <param name="remoteEndPoint">The reporting server's address, shown on the session.</param>
+    /// <param name="peerVersion">The reporting server's Server Sync version, shown on the session. This server's own shows when it sends none.</param>
     /// <returns>Null when applied, otherwise why the report is refused.</returns>
-    public async Task<string?> ApplyAsync(SourceServer peer, PeerPlaybackReport report, string remoteEndPoint)
+    public async Task<string?> ApplyAsync(SourceServer peer, PeerPlaybackReport report, string remoteEndPoint, string? peerVersion = null)
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentNullException.ThrowIfNull(report);
@@ -109,7 +110,7 @@ public sealed class LinkPlaybackSessions
 
         var session = await _sessionManager.LogSessionActivity(
             LinkPolicy.ClientName,
-            _configManager.PluginVersion,
+            Clean(peerVersion) is { Length: > 0 } version ? version : _configManager.PluginVersion,
             DeviceIdFor(peer, report.SessionKey),
             DeviceName(peer, report),
             remoteEndPoint,

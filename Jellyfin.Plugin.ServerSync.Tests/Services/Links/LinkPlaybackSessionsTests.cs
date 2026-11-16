@@ -215,6 +215,27 @@ public sealed class LinkPlaybackSessionsTests
     }
 
     /// <summary>
+    /// A session shows the linking server's Server Sync version, and this server's own when the linking server sends none.
+    /// True: the dashboard shows the version of the server the viewer watches on.
+    /// False: every link session would show the source's version, whatever the viewer's server runs.
+    /// </summary>
+    /// <param name="sent">The version the linking server sends.</param>
+    /// <param name="shown">The version the session shows.</param>
+    [Theory]
+    [InlineData("12.4.16.2", "12.4.16.2")]
+    [InlineData(" 12.4.16.2\n", "12.4.16.2")]
+    [InlineData("", "9.9.9")]
+    [InlineData(null, "9.9.9")]
+    public async Task ApplyAsync_ShowsTheLinkingServersVersion(string? sent, string shown)
+    {
+        var refusal = await _sessions.ApplyAsync(Peer(), Report(), "1.2.3.4", sent);
+
+        var activity = Assert.Single(_managerStub.Calls, c => c.Name == nameof(ISessionManager.LogSessionActivity)).Args;
+        Assert.Null(refusal);
+        Assert.Equal(shown, activity[1]);
+    }
+
+    /// <summary>
     /// A second report on the same session keeps its one controller and does not report capabilities again.
     /// True: a session is set up once however many reports arrive.
     /// False: every progress report would stack another controller on the session.

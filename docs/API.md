@@ -274,7 +274,7 @@ A server that answers `400` to a request by path is listed as tried.
 
 #### POST /Sync/Peer/Playback
 
-Playback of a link, reported by the linking server. The first report opens a session here under the client name **Server Sync**, for the user the stream runs as, and later reports run Jellyfin's own progress and stop handling on it. `SessionKey` is the linking server's session id, so each viewer there is a session of its own here. `Event` is `Start`, `Progress`, or `Stop`. `SessionKey`, `ClientName`, and `UserName` are at most 256 characters. The session is named after `ClientName` and `UserName`, the viewer's user on the linking server, as in `Jellyfin Web (Joe)`.
+Playback of a link, reported by the linking server. The first report opens a session here under the client name **Server Sync** and the linking server's `X-ServerSync-Version`, for the user the stream runs as, and later reports run Jellyfin's own progress and stop handling on it. `SessionKey` is the linking server's session id, so each viewer there is a session of its own here. `Event` is `Start`, `Progress`, or `Stop`. `SessionKey`, `ClientName`, and `UserName` are at most 256 characters. The session is named after `ClientName` and `UserName`, the viewer's user on the linking server, as in `Jellyfin Web (Joe)`.
 
 ```json
 {
