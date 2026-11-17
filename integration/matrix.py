@@ -293,6 +293,9 @@ def clean(creds, apis):
     """Empties every server's media, library, sync table, and peer list, so rounds do not meet."""
     for name in NODES:
         it.configure_server(creds, apis[name], name, [])
+    # A removal still held from the last round goes out now, to no one, rather than land while the next round is set up.
+    for name in NODES:
+        apis[name].post("/Sync/Hints/Run", None)
     for name in NODES:
         root = movies_dir(name)
         os.makedirs(root, exist_ok=True)
