@@ -218,7 +218,8 @@ def configure(creds, apis, shape, storage, hints):
             others = [s for s in followers if s != f] if siblings else []
             order[f] = [ORIGIN] + others
             modes[f] = {ORIGIN: "Pull", **{s: partner for s in others}}
-    for name in members:
+    # The followers go first, so a removal the origin still holds from the last round reaches a server that lists it.
+    for name in sorted(members, key=lambda n: n == ORIGIN):
         pulls = origin_pulls or name != ORIGIN
         flags = dict(CONTENT) if pulls else {}
         it.configure_server(creds, apis[name], name, order[name], modes[name], **flags)
@@ -243,10 +244,11 @@ def set_flag(apis, names, **flags):
 
 
 def quiet(apis, members, timeout=120):
-    """Waits for every hint queue in the round to drain."""
+    """Waits for every hint queue in the round to drain, apart from removals a sender holds back on purpose."""
     def empty():
-        """Returns whether every member has no hint waiting, sent, or pending."""
-        return all(not it.hints(apis[n])["Outbound"] and not it.hints(apis[n])["Inbound"] and it.hints(apis[n])["Pending"] == 0 for n in members)
+        """Returns whether every member has no hint waiting, sent, or gathering, other than a held removal."""
+        return all(not it.hints(apis[n])["Outbound"] and not it.hints(apis[n])["Inbound"]
+                   and all(g.get("ItemType") == "Removed" for g in it.hints(apis[n]).get("Gathering") or []) for n in members)
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -320,8 +322,10 @@ def stays_quiet(apis, members, label, watch=15):
                 for row in overview[side]:
                     key = (n, side, row.get("PeerKey") or row.get("OriginKey") or "", row.get("Category") or row.get("ItemType") or "", row.get("Key") or row.get("ItemPath") or "")
                     raised[key] = raised.get(key, 0) + 1
-            if overview["Pending"]:
-                raised[(n, "Pending", "", "", "")] = overview["Pending"]
+            # A removal a sender holds back is part of the change at rest, not a new one.
+            gathering = [g for g in overview.get("Gathering") or [] if g.get("ItemType") != "Removed"]
+            if gathering:
+                raised[(n, "Pending", "", "", "")] = len(gathering)
         time.sleep(1)
     expect(not raised, f"{label}: nothing was raised in the {watch} seconds after the pool went quiet" + (f" ({sorted(raised)[:8]})" if raised else ""))
 
