@@ -3248,7 +3248,8 @@ def scenario_file_changes(creds, apis, storage):
         wait_until(lambda: not os.path.exists(dst["D"]), HINT_REMOVAL_HOLD + 300,
                    f"a file deleted on source-a takes its {storage.lower()} and its folder once its removal is announced")
         expect(all(old_ids[k] not in json.dumps(hints(a)) for k in ("R", "X")), "the held removals of the renamed files settled")
-        wait_until(queues_empty, 120, "every queue drained after the removals")
+        # Local announces the removal of its own copy in turn, so that removal is still held here.
+        wait_until(settled, 120, "every queue drained after the removals but the ones held back")
         expect(all(os.path.isdir(dst[k]) for k in ("R", "X", "T", "W")), "the other titles keep their folders")
     finally:
         configure_server(creds, a, "source-a", [])
