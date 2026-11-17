@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.16.2"
+version: "12.4.17.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -29,9 +29,23 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  added:
+  - Renames follow the file. A file renamed or given a new container on the source in the same folder moves to its new name here, or is replaced under Changed files, as a copy or a link, instead of downloading again while the old one is deleted
+  - A file rewritten in place on the source is announced as a live change. A copy is replaced under Changed files when its size changed, and a link and its .nfo are written again
+  changed:
+  - Sync Metadata saves items in batches and applies rows with no images to download one at a time, so applying edits to 5,000 films takes about 18 percent less time
+  - A full Metadata scan reads an item's cast only when the item is new, the source saved it since the last scan, or its other details changed, so a full scan of an unchanged library of 5,000 films takes about 3 seconds instead of 11
+  - Scan Metadata reuses the local items it already listed instead of asking Jellyfin's library for each one
+  - A Metadata scan sends as many requests to a server at once as Refresh Parallelism allows, 8 by default. Lower it for a slow server
+  - A file that leaves the library is announced ten minutes later, so a rename reaches the other servers first. Update every server in the pool for renames to follow
+  - A copy whose file left its source follows Removed files as soon as the source announces it, instead of on the next scan
+  - Every change a source announces for a linked file writes the link and its .nfo again
+  - A removed file or link takes its folder only when nothing is left there but files Server Sync wrote. A title deleted by hand from the Sync tab still takes its artwork and .nfo files
+  - After a live change moves, replaces, links, or removes a file, Jellyfin refreshes only that file's folder
+  - Sync Metadata and Sync People write one line for each item in the server log, updated or skipped, and an error with the reason when an item could not be updated. The lines for each category moved to Debug
   fixed:
-  - A link's session on the source showed the source's own Server Sync version. It shows the version of the server the viewer watches on
-  - The Statistics tab described sync type charts on a server with every sync type off. The description shows only while a sync type is on
+  - A file's removal that could not be delivered at once was dropped on its retry, so the other servers kept their copies and links until a scan. It is retried until it is delivered
   developer:
-  - POST /Sync/Peer/Playback reads the caller's X-ServerSync-Version for the session it opens, and falls back to this server's version when the header is empty
-  - The wire protocol and the database schema are unchanged, so this release works alongside 12.4.16.1 one server at a time
+  - The wire protocol and the database schema are unchanged, so this release works alongside 12.4.16.2 one server at a time. A sender on an older release announces removals at once, so its renames still download again
+  - ContentSyncTableManager gains Rekey and GetInSourceFolder, and RenameMatcher pairs a new source file with the row of the file it replaced
+  - Pool scenarios "file changes" drive renames, new containers, rewrites, and removals as a media manager reports them through POST /Library/Media/Updated, for copies and links
