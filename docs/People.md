@@ -4,6 +4,8 @@ People syncing copies person entities from a source Jellyfin server onto this se
 
 ## Settings
 
+![People](screenshots/settings/People.png)
+
 * **Enable People Sync** turns people syncing on.
 * **Images** syncs profile images for people, along with any backdrops a person carries.
 * **Enable Metadata Provider** lets a library fill people from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers. It is on by default and works only while **Enable People Sync** is on. See [Metadata Provider](MetadataProvider.md).

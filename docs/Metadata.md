@@ -4,6 +4,8 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 
 ## Settings
 
+![Metadata](screenshots/settings/Metadata.png)
+
 * **Enable Metadata Sync** turns metadata syncing on.
 * **Metadata** syncs core fields such as titles, overviews, and dates.
 * **Genres** syncs item genres.
