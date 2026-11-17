@@ -39,10 +39,11 @@ public sealed class PeerMetadataSourceTests
         var library = InterfaceStub.Create<ILibraryManager>().Proxy;
         var logger = NullLogger<PeerMetadataSource>.Instance;
 
-        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(null!, _harness.Factory, library, logger));
-        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, null!, library, logger));
-        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, _harness.Factory, null!, logger));
-        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, _harness.Factory, library, null!));
+        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(null!, _harness.Factory, library, _harness.Config, logger));
+        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, null!, library, _harness.Config, logger));
+        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, _harness.Factory, null!, _harness.Config, logger));
+        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, _harness.Factory, library, null!, logger));
+        Assert.Throws<ArgumentNullException>(() => new PeerMetadataSource(_harness.Directory, _harness.Factory, library, _harness.Config, null!));
     }
 
     /// <summary>
@@ -91,6 +92,57 @@ public sealed class PeerMetadataSourceTests
         var body = Assert.Single(server.To("/Sync/Peer/Lookup")).Body;
         Assert.Contains("\"Path\":\"" + ProviderTestHarness.SourceRoot + "/Film (2020)/film.mkv\"", body, StringComparison.Ordinal);
         Assert.Contains("\"ItemType\":\"Movie\"", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The provider asks no server for an item unless Enable Metadata Sync and its provider switch are both on, and for a person unless Enable People Sync and its provider switch are both on.
+    /// True: a server that turned the provider off, or does not sync that type, makes no request and logs nothing.
+    /// False: every library refresh asks the sources, and logs that no source answered.
+    /// </summary>
+    [Theory]
+    [InlineData("Movie", true, true, true, true, true)]
+    [InlineData("Movie", false, true, true, true, false)]
+    [InlineData("Movie", true, false, true, true, false)]
+    [InlineData("Movie", true, true, false, false, true)]
+    [InlineData("Person", true, true, true, true, true)]
+    [InlineData("Person", true, true, false, true, false)]
+    [InlineData("Person", true, true, true, false, false)]
+    [InlineData("Person", false, false, true, true, true)]
+    public async Task FindAllAsync_ProviderSwitches_DecideWhetherAnyServerIsAsked(string itemType, bool metadataSync, bool metadataProvider, bool peopleSync, bool peopleProvider, bool asks)
+    {
+        var server = _harness.AddSource("a").OnJson("/Sync/Peer/Lookup", ProviderTestHarness.FoundItem(ItemOnA));
+        var config = _harness.Config.Configuration;
+        config.EnableMetadataSync = metadataSync;
+        config.MetadataSyncProvider = metadataProvider;
+        config.EnablePeopleSync = peopleSync;
+        config.PeopleSyncProvider = peopleProvider;
+
+        var matches = await _harness.Source.FindAllAsync(Keys() with { ItemType = itemType }, firstOnly: false, CancellationToken.None);
+        var found = await _harness.Source.FindAsync(Keys() with { ItemType = itemType }, CancellationToken.None);
+
+        foreach (var match in matches)
+        {
+            match.Dispose();
+        }
+
+        found?.Dispose();
+        Assert.Equal(asks, matches.Count == 1);
+        Assert.Equal(asks, found is not null);
+        Assert.Equal(asks, server.Seen.Count > 0);
+    }
+
+    /// <summary>
+    /// An image is not fetched while the provider is off for items and for people.
+    /// True: a server with the provider off never calls a source, even for an address Jellyfin kept from earlier.
+    /// False: an image refresh still reaches a source after the provider was turned off.
+    /// </summary>
+    [Fact]
+    public async Task GetImageResponseAsync_ProviderOffForBoth_Refuses()
+    {
+        _harness.Config.Configuration.MetadataSyncProvider = false;
+        _harness.Config.Configuration.PeopleSyncProvider = false;
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => _harness.Source.GetImageResponseAsync("http://a:8096/Items/x/Images/Primary/0", CancellationToken.None));
     }
 
     /// <summary>

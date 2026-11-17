@@ -6,6 +6,7 @@ People syncing copies person entities from a source Jellyfin server onto this se
 
 * **Enable People Sync** turns people syncing on.
 * **Images** syncs profile images for people, along with any backdrops a person carries.
+* **Enable Metadata Provider** lets a library fill people from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers. It is on by default and works only while **Enable People Sync** is on. See [Metadata Provider](MetadataProvider.md).
 * **Precedence** chooses which server is heard for a person that several servers know, either the one whose edit is newest or always the highest ranked. See [Several Servers](SyncTypes.md#several-servers).
 
 ## Images

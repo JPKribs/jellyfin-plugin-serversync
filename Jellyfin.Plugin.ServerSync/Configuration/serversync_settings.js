@@ -371,6 +371,7 @@ export default function (view) {
         setChecked('chkMetadataSyncPeople', config.MetadataSyncPeople === true);
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
+        setChecked('chkMetadataSyncProvider', config.MetadataSyncProvider !== false);
         setValue('selMetadataSyncPrecedence', choiceOf(config.MetadataSyncPrecedence, PRECEDENCE));
     }
 
@@ -384,6 +385,7 @@ export default function (view) {
             config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
             config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
             config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
+            config.MetadataSyncProvider = getChecked('chkMetadataSyncProvider');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
         }, 'saveMetadataStatus', 'Metadata settings saved.', 'Could not save the metadata settings.');
     }
@@ -391,6 +393,7 @@ export default function (view) {
     function loadPeopleSettings(config) {
         setChecked('chkEnablePeopleSync', config.EnablePeopleSync === true);
         setChecked('chkPeopleSyncImages', config.PeopleSyncImages !== false);
+        setChecked('chkPeopleSyncProvider', config.PeopleSyncProvider !== false);
         setValue('selPeopleSyncPrecedence', choiceOf(config.PeopleSyncPrecedence, PRECEDENCE));
     }
 
@@ -398,6 +401,7 @@ export default function (view) {
         saveSection(function (config) {
             config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
             config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
+            config.PeopleSyncProvider = getChecked('chkPeopleSyncProvider');
             config.PeopleSyncPrecedence = getValue('selPeopleSyncPrecedence') || 'Newest';
         }, 'savePeopleStatus', 'People settings saved.', 'Could not save the people settings.');
     }

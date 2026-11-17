@@ -443,6 +443,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncFolderItems { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether Server Sync answers Jellyfin as a metadata and image provider for items, which also needs <see cref="EnableMetadataSync"/>.
+    /// </summary>
+    public bool MetadataSyncProvider { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the time the last Metadata run ended.
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }
@@ -462,6 +467,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Sync person images (Primary, etc.) from source to local.
     /// </summary>
     public bool PeopleSyncImages { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Server Sync answers Jellyfin as a metadata and image provider for people, which also needs <see cref="EnablePeopleSync"/>.
+    /// </summary>
+    public bool PeopleSyncProvider { get; set; } = true;
 
     /// <summary>
     /// Gets or sets the time the last People run ended.

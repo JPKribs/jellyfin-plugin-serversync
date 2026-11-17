@@ -70,6 +70,7 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Stamp | The server and time of the edit a value came from | `ObjectVersion` | Version tag, timestamp |
 | Approvals | Whether new and changed files download on their own, wait, or are left alone | | Confirmations |
 | Removed files | What happens to a local file once its item is gone from the source | | Deletions, orphans |
+| Metadata provider | Server Sync as a Jellyfin metadata and image fetcher that reads from the servers this one pulls from | `PeerMetadataSource` | Fetcher, scraper |
 | Recycling Bin | The folder removed and replaced files move to when it is on | | Trash, recycle bin |
 
 ### Item Statuses

@@ -32,7 +32,10 @@ internal sealed class ProviderTestHarness
         hostStub.Answer("get_SystemId", _ => ThisServerId);
         var (libraryManager, _) = InterfaceStub.Create<ILibraryManager>();
         Directory = new ParentDirectory(Config, Factory, host, NullLogger<ParentDirectory>.Instance);
-        Source = new PeerMetadataSource(Directory, Factory, libraryManager, NullLogger<PeerMetadataSource>.Instance);
+        // The provider answers only while its sync type is on, so tests start with both on.
+        Config.Configuration.EnableMetadataSync = true;
+        Config.Configuration.EnablePeopleSync = true;
+        Source = new PeerMetadataSource(Directory, Factory, libraryManager, Config, NullLogger<PeerMetadataSource>.Instance);
     }
 
     /// <summary>Gets the configuration the sources are listed in.</summary>

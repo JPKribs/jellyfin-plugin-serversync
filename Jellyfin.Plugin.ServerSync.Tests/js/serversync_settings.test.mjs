@@ -19,8 +19,9 @@ async function openPage(opts) {
     opts = opts || {};
     var calls = [];
     var page = installPage({ calls: calls, config: opts.config === undefined ? { Servers: [] } : opts.config, storage: opts.storage });
-    var children = IDS.map(function (id) { return page.dom.el('div', { id: id }); })
-        .concat(BUTTONS.map(function (id) { return page.dom.el('button', { id: id }); }))
+    var children = IDS.concat(opts.ids || []).map(function (id) { return page.dom.el('div', { id: id }); })
+        .concat(BUTTONS.concat(opts.buttons || []).map(function (id) { return page.dom.el('button', { id: id }); }))
+        .concat((opts.checkboxes || []).map(function (id) { return page.dom.el('input', { id: id, type: 'checkbox' }); }))
         .concat([page.dom.el('input', { id: 'txtMaxDownloadSpeed' })]);
     var view = page.dom.el('div', {}, children);
     page.dom.document.documentElement.appendChild(view);
@@ -154,6 +155,31 @@ test('saving the bandwidth posts the changed fields and reports it beside the Sa
     var status = opened.view.querySelector('#saveBandwidthStatus');
     assert.equal(statusText(status), 'Bandwidth saved.');
     assert.ok(status.classList.contains('base-status-ok'));
+});
+
+test('the provider switches show on when never saved, and each section saves its own switch', async function () {
+    var opened = await openPage({
+        config: { Servers: [] },
+        checkboxes: ['chkMetadataSyncProvider', 'chkPeopleSyncProvider'],
+        buttons: ['btnSaveMetadataSettings', 'btnSavePeopleSettings'],
+        ids: ['saveMetadataStatus', 'savePeopleStatus']
+    });
+    var saved = null;
+    globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
+    var metadata = opened.view.querySelector('#chkMetadataSyncProvider');
+    var people = opened.view.querySelector('#chkPeopleSyncProvider');
+    assert.equal(metadata.checked, true);
+    assert.equal(people.checked, true);
+
+    metadata.checked = false;
+    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    await settle(20);
+    assert.equal(saved.MetadataSyncProvider, false);
+
+    people.checked = false;
+    opened.view.querySelector('#btnSavePeopleSettings').click();
+    await settle(20);
+    assert.equal(saved.PeopleSyncProvider, false);
 });
 
 test('a bandwidth save that fails says so and does not claim success', async function () {

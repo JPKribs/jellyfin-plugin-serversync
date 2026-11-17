@@ -197,7 +197,7 @@ Server Sync is also a metadata and image provider that Jellyfin calls on a refre
 | Find the item on a source and read its metadata and images | `PeerMetadataSource`, through `POST /Sync/Peer/Lookup` |
 | Keep the fill from being announced as an edit made here | `ProviderFills` |
 
-While the plugin is held, a lookup finds nothing.
+While the plugin is held, a lookup finds nothing. So does a lookup for an item while `EnableMetadataSync` or `MetadataSyncProvider` is off, and for a person while `EnablePeopleSync` or `PeopleSyncProvider` is off, and no server is asked.
 
 ## Database
 

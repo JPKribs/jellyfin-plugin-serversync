@@ -9,6 +9,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
@@ -67,6 +68,7 @@ public sealed class PeerMetadataSource
     private readonly ParentDirectory _parents;
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly ILibraryManager _libraryManager;
+    private readonly IPluginConfigurationManager _configManager;
     private readonly ILogger<PeerMetadataSource> _logger;
 
     /// <summary>
@@ -75,18 +77,34 @@ public sealed class PeerMetadataSource
     /// <param name="parents">Lists the sources that can answer a lookup.</param>
     /// <param name="clientFactory">Builds the client that reads from each source.</param>
     /// <param name="libraryManager">Resolves the people a source names.</param>
+    /// <param name="configManager">Reads whether the provider is on for items and for people.</param>
     /// <param name="logger">Writes why an item had no match.</param>
-    public PeerMetadataSource(ParentDirectory parents, ISourceServerClientFactory clientFactory, ILibraryManager libraryManager, ILogger<PeerMetadataSource> logger)
+    public PeerMetadataSource(ParentDirectory parents, ISourceServerClientFactory clientFactory, ILibraryManager libraryManager, IPluginConfigurationManager configManager, ILogger<PeerMetadataSource> logger)
     {
         ArgumentNullException.ThrowIfNull(parents);
         ArgumentNullException.ThrowIfNull(clientFactory);
         ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(configManager);
         ArgumentNullException.ThrowIfNull(logger);
 
         _parents = parents;
         _clientFactory = clientFactory;
         _libraryManager = libraryManager;
+        _configManager = configManager;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Says whether the provider answers for an item type. A person needs Enable People Sync and its provider switch on, and any other item needs Enable Metadata Sync and its provider switch on.
+    /// </summary>
+    /// <param name="itemType">The item's type name.</param>
+    /// <returns><c>true</c> when the provider may ask the sources.</returns>
+    public bool Answers(string? itemType)
+    {
+        var config = _configManager.Configuration;
+        return string.Equals(itemType, nameof(Person), StringComparison.Ordinal)
+            ? config.EnablePeopleSync && config.PeopleSyncProvider
+            : config.EnableMetadataSync && config.MetadataSyncProvider;
     }
 
     /// <summary>Translates a local path to the path the item has on a source.</summary>
@@ -145,6 +163,11 @@ public sealed class PeerMetadataSource
     public async Task<PeerMatch?> FindAsync(PeerItemKeys keys, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        if (!Answers(keys.ItemType))
+        {
+            return null;
+        }
+
         if (Pinned(keys.ProviderIds) is { } pinned)
         {
             var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
@@ -166,7 +189,8 @@ public sealed class PeerMetadataSource
     {
         ArgumentNullException.ThrowIfNull(keys);
         var matches = new List<PeerMatch>();
-        if (Plugin.Held)
+        // A provider switched off asks no server and says nothing.
+        if (Plugin.Held || !Answers(keys.ItemType))
         {
             return matches;
         }
@@ -409,12 +433,17 @@ public sealed class PeerMetadataSource
         return found;
     }
 
-    /// <summary>Fetches an image from a source.</summary>
+    /// <summary>Fetches an image from a source, and refuses while the provider is off for items and for people.</summary>
     /// <param name="url">The image's address, which must be under a source's Server URL.</param>
     /// <param name="cancellationToken">Cancels the fetch.</param>
     /// <returns>The response, which the caller disposes.</returns>
     public async Task<HttpResponseMessage> GetImageResponseAsync(string url, CancellationToken cancellationToken)
     {
+        if (!Answers(nameof(Person)) && !Answers(null))
+        {
+            throw new HttpRequestException("Server Sync's metadata provider is off");
+        }
+
         var parent = _parents.FindByUrl(url) ?? throw new HttpRequestException("The image address is not on a server this one pulls from");
         using var client = _clientFactory.Create(parent);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
