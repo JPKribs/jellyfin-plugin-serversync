@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.18.2",
+        "changelog": "\n## Developer\n- Raises Microsoft.NET.Test.Sdk to 18.12.0 and SQLitePCLRaw.bundle_e_sqlite3 to 2.1.14 in the tests",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.18.2/jellyfin-plugin-serversync-12.4.18.2.zip",
+        "checksum": "718154810ee74929a280fac335eaa953",
+        "timestamp": "2026-11-19T21:01:17Z"
+      },
+      {
         "version": "12.4.18.1",
         "changelog": "\n## Added\n- Replace Existing Segments and Remove Segments No Server Has, under Enable Media Segment Provider, decide whether segments another provider gave a file are replaced, and whether a file's segments are removed when no server has any. Both are off by default\n- Media segments show on each Metadata row, with a Segments badge and a Media Segments section in the item dialog, and Queue and Ignore work on them\n\n## Changed\n- Refresh reads media segments into each Metadata row and Sync writes them, instead of the scan writing them at once\n- A file takes the media segments of the highest ranked server that has segments for it, instead of the highest ranked server that holds it\n\n## Fixed\n- A server with no segments for a file cleared the segments other providers gave that file here. They stay unless Remove Segments No Server Has is on\n- A synced episode, or another item inside a folder, was queued again on every Metadata scan, because the scan read an older cached copy of it. The scan reads the copy Sync writes to\n- A Metadata row kept showing Studios as changed right after Sync, until the next scan\n- The Metadata scan did not run when Enable Media Segment Provider was the only category on\n\n## Developer\n- The database schema is v39, which adds four nullable media segment columns to MetadataSyncItems. Older releases can still read it\n- The wire protocol is unchanged, so this release works alongside 12.4.18.0 one server at a time",
         "targetAbi": "12.4.0.0",
