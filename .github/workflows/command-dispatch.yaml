@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/command-dispatch.yaml@master
+    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/command-dispatch.yaml@5f6990aa467ae0a6b62c91ad0502e3e1a53117ce # master
     secrets:
       # Dispatching repository_dispatch events needs a real PAT: events created with the workflow's
       # own GITHUB_TOKEN never trigger other workflows, and a placeholder value silently breaks
