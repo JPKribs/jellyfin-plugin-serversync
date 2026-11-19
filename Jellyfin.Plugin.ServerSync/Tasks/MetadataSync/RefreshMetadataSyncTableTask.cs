@@ -225,7 +225,7 @@ public class RefreshMetadataSyncTableTask
         if (config.GetPullServers().Count == 0) return false;
         if (config.GetEnabledLibraryMappings().Count == 0) return false;
         return config.MetadataSyncMetadata || config.MetadataSyncImages
-            || config.MetadataSyncPeople || config.MetadataSyncStudios;
+            || config.MetadataSyncPeople || config.MetadataSyncStudios || config.MetadataSyncSegmentProvider;
     }
 
     /// <summary>

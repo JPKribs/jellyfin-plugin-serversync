@@ -165,7 +165,7 @@ public sealed class RefreshMetadataSyncTableTaskTests : IDisposable
     }
 
     /// <summary>
-    /// The scan runs when Metadata is on, a source and a library mapping exist, and at least one of metadata, images, people, or studios is on.
+    /// The scan runs when Metadata is on, a source and a library mapping exist, and at least one of metadata, images, people, studios, or media segments is on.
     /// True: any one applicable category is enough to scan.
     /// False: the scan stays off although a category is on, or runs with nothing it could apply.
     /// </summary>
@@ -174,9 +174,11 @@ public sealed class RefreshMetadataSyncTableTaskTests : IDisposable
     [InlineData(false, true, false, false)]
     [InlineData(false, false, true, false)]
     [InlineData(false, false, false, true)]
-    public void IsEnabled_AnyOneApplicableCategory_IsEnough(bool metadata, bool images, bool people, bool studios)
+    [InlineData(false, false, false, false, true)]
+    public void IsEnabled_AnyOneApplicableCategory_IsEnough(bool metadata, bool images, bool people, bool studios, bool segments = false)
     {
         SetCategories(metadata, images, people, studios);
+        _config.Configuration.MetadataSyncSegmentProvider = segments;
 
         Assert.True(new Probe(this).Enabled());
     }
