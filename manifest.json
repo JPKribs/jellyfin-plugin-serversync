@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.19.0",
+        "changelog": "\n## Added\n- Consolidate Duplicate Intros and Consolidate Duplicate Outros, under Enable Media Segment Provider, shrink overlapping intros or outros to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. Both are off by default\n- Consolidate Other Segments joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45. It is off by default\n\n## Developer\n- MediaSegmentsValue.Consolidate applies the three settings to the value Refresh chooses for each row, so the dialog, Sync, and the provider all see the consolidated segments\n- Changing a Consolidate setting starts a full Refresh, since the settings are part of the scan's scope\n- Raises every GitHub Action in the workflows to its latest major version, pinned to a commit digest\n- Builds the docs with Python 3.15 and mkdocs-material 9.8.2\n- Renovate brings every update in one pull request, and leaves the packages Jellyfin ships to the Jellyfin version",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.19.0/jellyfin-plugin-serversync-12.4.19.0.zip",
+        "checksum": "1b8c88b3e176f72b8a405c3d8bfd845d",
+        "timestamp": "2026-11-19T22:24:10Z"
+      },
+      {
         "version": "12.4.18.2",
         "changelog": "\n## Developer\n- Raises Microsoft.NET.Test.Sdk to 18.12.0 and SQLitePCLRaw.bundle_e_sqlite3 to 2.1.14 in the tests",
         "targetAbi": "12.4.0.0",
