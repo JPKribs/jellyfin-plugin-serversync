@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.18.1"
+version: "12.4.18.2"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -29,17 +29,5 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  added:
-  - Replace Existing Segments and Remove Segments No Server Has, under Enable Media Segment Provider, decide whether segments another provider gave a file are replaced, and whether a file's segments are removed when no server has any. Both are off by default
-  - Media segments show on each Metadata row, with a Segments badge and a Media Segments section in the item dialog, and Queue and Ignore work on them
-  changed:
-  - Refresh reads media segments into each Metadata row and Sync writes them, instead of the scan writing them at once
-  - A file takes the media segments of the highest ranked server that has segments for it, instead of the highest ranked server that holds it
-  fixed:
-  - A server with no segments for a file cleared the segments other providers gave that file here. They stay unless Remove Segments No Server Has is on
-  - A synced episode, or another item inside a folder, was queued again on every Metadata scan, because the scan read an older cached copy of it. The scan reads the copy Sync writes to
-  - A Metadata row kept showing Studios as changed right after Sync, until the next scan
-  - The Metadata scan did not run when Enable Media Segment Provider was the only category on
   developer:
-  - The database schema is v39, which adds four nullable media segment columns to MetadataSyncItems. Older releases can still read it
-  - The wire protocol is unchanged, so this release works alongside 12.4.18.0 one server at a time
+  - Raises Microsoft.NET.Test.Sdk to 18.12.0 and SQLitePCLRaw.bundle_e_sqlite3 to 2.1.14 in the tests
