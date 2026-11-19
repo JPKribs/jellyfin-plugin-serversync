@@ -16,7 +16,9 @@ Server Sync is also a media segment provider. It copies intros, credits, recaps,
 2. Keep **Server Sync** on in the library's media segment providers. It is on unless it was turned off there.
 3. Run **Sync Information**, then **Media Segment Scan** under **Dashboard > Scheduled Tasks**, or wait for both.
 
-Media segments are a category of each Metadata row, like images and people.
+Media segments are a category of each Metadata row, like images and people. A row's dialog lists them under **Media Segments**.
+
+![Metadata Item](screenshots/Metadata%20Item.png)
 
 * **Refresh** reads the segments of every video and audio file it lists, 200 files to a request. A file takes the segments of the highest ranked server that holds it and has segments for it. When no server has any, the row holds none.
 * **Sync** writes a row's segments into the sync database, where they survive a restart. **Queue** and **Ignore** work on them as on any category, and the row shows **Segments: Changes** until they are written.
