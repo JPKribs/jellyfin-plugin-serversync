@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.18.1",
+        "changelog": "\n## Added\n- Replace Existing Segments and Remove Segments No Server Has, under Enable Media Segment Provider, decide whether segments another provider gave a file are replaced, and whether a file's segments are removed when no server has any. Both are off by default\n- Media segments show on each Metadata row, with a Segments badge and a Media Segments section in the item dialog, and Queue and Ignore work on them\n\n## Changed\n- Refresh reads media segments into each Metadata row and Sync writes them, instead of the scan writing them at once\n- A file takes the media segments of the highest ranked server that has segments for it, instead of the highest ranked server that holds it\n\n## Fixed\n- A server with no segments for a file cleared the segments other providers gave that file here. They stay unless Remove Segments No Server Has is on\n- A synced episode, or another item inside a folder, was queued again on every Metadata scan, because the scan read an older cached copy of it. The scan reads the copy Sync writes to\n- A Metadata row kept showing Studios as changed right after Sync, until the next scan\n- The Metadata scan did not run when Enable Media Segment Provider was the only category on\n\n## Developer\n- The database schema is v39, which adds four nullable media segment columns to MetadataSyncItems. Older releases can still read it\n- The wire protocol is unchanged, so this release works alongside 12.4.18.0 one server at a time",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.18.1/jellyfin-plugin-serversync-12.4.18.1.zip",
+        "checksum": "dbc150bd44de8002264a387afe17a824",
+        "timestamp": "2026-11-19T08:48:15Z"
+      },
+      {
         "version": "12.4.18.0",
         "changelog": "\n## Added\n- Enable Media Segment Provider, under Metadata, copies intros, credits, recaps, previews, and commercials from the same file on the servers this one pulls from. Each metadata scan keeps them in the sync database, and Jellyfin's Media Segment Scan takes them from there without asking any server. For such a file the source's segments are the only ones kept. It is off by default\n\n## Developer\n- POST /Sync/Peer/Segments returns the media segments of up to 200 items, with each file's size, runtime, and the server the segments were first made on. A source on an older release answers 404, and the segments already kept stay\n- The database schema is v38, which adds the SourceMediaSegments table. Older releases can still read it\n- The wire protocol is unchanged, so this release works alongside 12.4.17.1 one server at a time",
         "targetAbi": "12.4.0.0",
