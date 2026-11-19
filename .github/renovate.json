@@ -1,6 +1,43 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
-        "github>jellyfin/.github//renovate-presets/default"
+        "github>jellyfin/.github//renovate-presets/default",
+        ":dependencyDashboard"
+    ],
+    "prHourlyLimit": 0,
+    "prConcurrentLimit": 0,
+    "packageRules": [
+        {
+            "description": "Bring every update in one pull request",
+            "matchPackageNames": ["*"],
+            "groupName": "dependencies",
+            "groupSlug": "all"
+        },
+        {
+            "description": "Bring each Base release on its own, as soon as it is out",
+            "matchPackageNames": ["JPKribs.Jellyfin.Base"],
+            "groupName": "JPKribs.Jellyfin.Base",
+            "groupSlug": "base"
+        },
+        {
+            "description": "Jellyfin ships these, so they move only with the Jellyfin version",
+            "matchPackageNames": [
+                "Jellyfin.**",
+                "Microsoft.Extensions.**",
+                "Microsoft.Data.Sqlite**",
+                "SkiaSharp**"
+            ],
+            "enabled": false
+        },
+        {
+            "description": "Jellyfin 12.4 builds on .NET 10",
+            "matchPackageNames": ["dotnet-sdk"],
+            "allowedVersions": "<11"
+        },
+        {
+            "description": "Microsoft.Data.Sqlite 10 runs on SQLitePCLRaw 2",
+            "matchPackageNames": ["SQLitePCLRaw.**"],
+            "allowedVersions": "<3"
+        }
     ]
 }
