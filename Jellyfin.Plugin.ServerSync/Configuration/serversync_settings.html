@@ -580,6 +580,27 @@
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription">Removes a file's segments when no server this one pulls from has any for the same file.</div>
                                         </div>
+                                        <div class="checkboxContainer checkboxContainer-withDescription">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncConsolidateIntros" />
+                                                <span class="checkboxLabel">Consolidate Duplicate Intros</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription">Shrinks intros that overlap to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30.</div>
+                                        </div>
+                                        <div class="checkboxContainer checkboxContainer-withDescription">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncConsolidateOutros" />
+                                                <span class="checkboxLabel">Consolidate Duplicate Outros</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription">Shrinks outros that overlap to the part they share, the same way as intros.</div>
+                                        </div>
+                                        <div class="checkboxContainer checkboxContainer-withDescription">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncConsolidateOtherSegments" />
+                                                <span class="checkboxLabel">Consolidate Other Segments</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription">Joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45.</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

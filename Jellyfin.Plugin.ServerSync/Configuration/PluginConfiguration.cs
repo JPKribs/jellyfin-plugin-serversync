@@ -463,6 +463,21 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncRemoveSegments { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether overlapping intros copied from a server shrink to the part they share.
+    /// </summary>
+    public bool MetadataSyncConsolidateIntros { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether overlapping outros copied from a server shrink to the part they share.
+    /// </summary>
+    public bool MetadataSyncConsolidateOutros { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether overlapping segments of the same type, other than intros and outros, copied from a server join into one that covers both.
+    /// </summary>
+    public bool MetadataSyncConsolidateOtherSegments { get; set; }
+
+    /// <summary>
     /// Gets or sets the time the last Metadata run ended.
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }

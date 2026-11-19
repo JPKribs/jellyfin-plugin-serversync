@@ -62,6 +62,72 @@ public sealed record MediaSegmentsValue(
         => new(localItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, at, OriginServerId);
 
     /// <summary>
+    /// Gives the value with its overlapping segments consolidated, as the Consolidate settings ask.
+    /// </summary>
+    /// <param name="intros">Whether overlapping intros shrink to the part they share.</param>
+    /// <param name="outros">Whether overlapping outros shrink to the part they share.</param>
+    /// <param name="others">Whether overlapping segments of any other type, of the same type, join into one that covers both.</param>
+    /// <returns>The value, the same one when nothing is consolidated.</returns>
+    public MediaSegmentsValue Consolidate(bool intros, bool outros, bool others)
+        => !intros && !outros && !others ? this : this with { Segments = ConsolidateSegments(Segments, intros, outros, others) };
+
+    /// <summary>
+    /// Consolidates overlapping segments of the same type. Intros and outros shrink to the part every overlapping one shares,
+    /// so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. Any other type joins into one segment covering both, so 1:00 to 1:30
+    /// and 1:05 to 1:45 become 1:00 to 1:45. Segments that do not overlap, or whose type is not consolidated, are kept as they are.
+    /// </summary>
+    /// <param name="segments">The segments.</param>
+    /// <param name="intros">Whether overlapping intros shrink to the part they share.</param>
+    /// <param name="outros">Whether overlapping outros shrink to the part they share.</param>
+    /// <param name="others">Whether overlapping segments of any other type join into one.</param>
+    /// <returns>The segments, ordered by where they start.</returns>
+    public static IReadOnlyList<PeerSegment> ConsolidateSegments(IEnumerable<PeerSegment> segments, bool intros, bool outros, bool others)
+    {
+        ArgumentNullException.ThrowIfNull(segments);
+        var result = new List<PeerSegment>();
+        foreach (var group in segments.Where(s => s is not null).GroupBy(s => s.Type ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            var isIntro = string.Equals(group.Key, "Intro", StringComparison.OrdinalIgnoreCase);
+            var isOutro = string.Equals(group.Key, "Outro", StringComparison.OrdinalIgnoreCase);
+            var shrink = (isIntro && intros) || (isOutro && outros);
+            var join = !isIntro && !isOutro && others;
+            if (!shrink && !join)
+            {
+                result.AddRange(group);
+                continue;
+            }
+
+            // A segment with no length overlaps nothing, so it is kept as it is.
+            result.AddRange(group.Where(s => s.EndTicks <= s.StartTicks));
+            PeerSegment? current = null;
+            foreach (var segment in group.Where(s => s.EndTicks > s.StartTicks).OrderBy(s => s.StartTicks).ThenBy(s => s.EndTicks))
+            {
+                if (current is not null && segment.StartTicks < current.EndTicks && segment.EndTicks > current.StartTicks)
+                {
+                    current = shrink
+                        ? new PeerSegment { Type = current.Type, StartTicks = Math.Max(current.StartTicks, segment.StartTicks), EndTicks = Math.Min(current.EndTicks, segment.EndTicks) }
+                        : new PeerSegment { Type = current.Type, StartTicks = current.StartTicks, EndTicks = Math.Max(current.EndTicks, segment.EndTicks) };
+                    continue;
+                }
+
+                if (current is not null)
+                {
+                    result.Add(current);
+                }
+
+                current = new PeerSegment { Type = segment.Type, StartTicks = segment.StartTicks, EndTicks = segment.EndTicks };
+            }
+
+            if (current is not null)
+            {
+                result.Add(current);
+            }
+        }
+
+        return result.OrderBy(s => s.StartTicks).ThenBy(s => s.EndTicks).ToList();
+    }
+
+    /// <summary>
     /// Gives the pool's value for a row, or null when it would change nothing: no server has segments, none are kept here, and removing is off.
     /// </summary>
     /// <param name="chosen">What the pool holds for the file, or null.</param>

@@ -146,7 +146,10 @@ public class RefreshMetadataSyncTableTask
                 config.MetadataSyncPeople,
                 config.MetadataSyncImages,
                 config.MetadataSyncFolderItems,
-                config.MetadataSyncSegmentProvider
+                config.MetadataSyncSegmentProvider,
+                config.MetadataSyncConsolidateIntros,
+                config.MetadataSyncConsolidateOutros,
+                config.MetadataSyncConsolidateOtherSegments
             });
         }
     }
@@ -763,8 +766,10 @@ public class RefreshMetadataSyncTableTask
         var local = MediaSegmentsValue.FromRow(_segments!.Get(fresh.LocalItemId!));
         if (_segmentAnswers.TryGetValue(fresh.LocalPath ?? string.Empty, out var answers))
         {
-            var chosen = MediaSegmentsValue.Choose(answers.OrderBy(a => a.Rank).Select(a => (a.ServerKey, a.ServerId, a.SourceItemId, a.Answer)), _thisServerId);
-            fresh.Segments.UpdateSource(MediaSegmentsValue.Worth(chosen, local, ConfigManager.Configuration.MetadataSyncRemoveSegments)?.ToJson());
+            var config = ConfigManager.Configuration;
+            var chosen = MediaSegmentsValue.Choose(answers.OrderBy(a => a.Rank).Select(a => (a.ServerKey, a.ServerId, a.SourceItemId, a.Answer)), _thisServerId)
+                ?.Consolidate(config.MetadataSyncConsolidateIntros, config.MetadataSyncConsolidateOutros, config.MetadataSyncConsolidateOtherSegments);
+            fresh.Segments.UpdateSource(MediaSegmentsValue.Worth(chosen, local, config.MetadataSyncRemoveSegments)?.ToJson());
         }
         else
         {

@@ -27,6 +27,9 @@ Media segments are a category of each Metadata row, like images and people. A ro
 * A segment that runs past the end of the file here is cut at the end, and one that starts there or later is left out. A segment two providers marked is kept once.
 * **Replace Existing Segments** replaces the segments another provider gave a file. While it is off, those segments stay and nothing is added beside them. When they already match, nothing changes either way.
 * **Remove Segments No Server Has** removes a file's segments when no server has any for it. While it is off, the file keeps what it has.
+* **Consolidate Duplicate Intros** shrinks intros that overlap to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. **Consolidate Duplicate Outros** does the same for outros.
+* **Consolidate Other Segments** joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45. Segments of different types are never joined.
+* Only segments that overlap are consolidated. Each setting is off by default, works on the segments copied from a server, and is applied at the next **Refresh**, which lists every item again after one changes.
 * Server Sync runs after the other providers, so its version stands. A library that sets its own provider order decides instead.
 * A server that cannot be reached, or runs a release without media segments, leaves each row's segments as they were.
 * A server shares every segment it holds, including ones Server Sync copied there, and names the server they were first made on. A server never takes back segments it made itself, so one it deleted cannot return through another server.

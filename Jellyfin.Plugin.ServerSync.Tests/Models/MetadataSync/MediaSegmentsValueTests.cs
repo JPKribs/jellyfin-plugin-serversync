@@ -102,6 +102,86 @@ public sealed class MediaSegmentsValueTests
         Assert.Null(MediaSegmentsValue.Worth(null, local, remove));
     }
 
+    /// <summary>
+    /// Overlapping intros, and overlapping outros, shrink to the part they share.
+    /// True: 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30, which every provider agrees is the intro.
+    /// False: two providers' intros would both be skipped, or one would win at random.
+    /// </summary>
+    [Theory]
+    [InlineData("Intro")]
+    [InlineData("Outro")]
+    public void Consolidate_OverlappingIntrosOrOutros_ShrinkToTheSharedPart(string type)
+    {
+        var segments = MediaSegmentsValue.ConsolidateSegments(new[] { Seg(type, 0, 30), Seg(type, 5, 45) }, intros: true, outros: true, others: false);
+
+        var only = Assert.Single(segments);
+        Assert.Equal((type, S(5), S(30)), (only.Type, only.StartTicks, only.EndTicks));
+    }
+
+    /// <summary>
+    /// Overlapping segments of the same other type join into one that covers both.
+    /// True: 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45.
+    /// False: a recap would be split across two segments that a client skips one at a time.
+    /// </summary>
+    [Fact]
+    public void Consolidate_OverlappingOtherSegmentsOfOneType_JoinIntoOne()
+    {
+        var segments = MediaSegmentsValue.ConsolidateSegments(new[] { Seg("Recap", 60, 90), Seg("Recap", 65, 105) }, intros: false, outros: false, others: true);
+
+        var only = Assert.Single(segments);
+        Assert.Equal(("Recap", S(60), S(105)), (only.Type, only.StartTicks, only.EndTicks));
+    }
+
+    /// <summary>
+    /// Only overlapping segments of the same type are consolidated, and a type whose setting is off is kept as it is.
+    /// True: separate intros, segments that only touch, and overlapping segments of different types all stay.
+    /// False: a cold open and a later intro, or a recap and a preview, would merge into one wrong segment.
+    /// </summary>
+    [Fact]
+    public void Consolidate_NoOverlapOrDifferentTypesOrSettingOff_KeepsSegments()
+    {
+        var apart = MediaSegmentsValue.ConsolidateSegments(new[] { Seg("Intro", 0, 30), Seg("Intro", 30, 60), Seg("Intro", 100, 130) }, true, true, true);
+        var mixed = MediaSegmentsValue.ConsolidateSegments(new[] { Seg("Recap", 0, 30), Seg("Preview", 10, 40) }, true, true, true);
+        var off = MediaSegmentsValue.ConsolidateSegments(new[] { Seg("Intro", 0, 30), Seg("Intro", 5, 45), Seg("Recap", 0, 30), Seg("Recap", 5, 45) }, intros: false, outros: true, others: false);
+
+        Assert.Equal(3, apart.Count);
+        Assert.Equal(2, mixed.Count);
+        Assert.Equal(4, off.Count);
+    }
+
+    /// <summary>
+    /// Three overlapping intros shrink to the part all three share, and an intro that overlaps only the last starts its own.
+    /// True: the shared part narrows with each intro that overlaps it.
+    /// False: a long intro could stretch the shared part past where another provider ends it.
+    /// </summary>
+    [Fact]
+    public void Consolidate_ChainOfIntros_NarrowsThenStartsAgain()
+    {
+        var segments = MediaSegmentsValue.ConsolidateSegments(new[] { Seg("Intro", 0, 30), Seg("Intro", 5, 45), Seg("Intro", 10, 25), Seg("Intro", 28, 50) }, true, false, false);
+
+        Assert.Equal(new[] { (S(10), S(25)), (S(28), S(50)) }, segments.Select(s => (s.StartTicks, s.EndTicks)));
+    }
+
+    /// <summary>
+    /// A value with every setting off is the same value, and one with a setting on keeps its source and only changes its segments.
+    /// True: rows are unchanged until a Consolidate setting is turned on.
+    /// False: turning the feature on would also lose where the segments came from.
+    /// </summary>
+    [Fact]
+    public void Consolidate_Value_KeepsSourceAndIsUnchangedWhenOff()
+    {
+        var value = new MediaSegmentsValue("a", "a-item", "a-id", 10, 20, new[] { Seg("Intro", 0, 30), Seg("Intro", 5, 45) });
+
+        Assert.Same(value, value.Consolidate(false, false, false));
+        var consolidated = value.Consolidate(true, false, false);
+        Assert.Equal(("a", "a-item", "a-id"), (consolidated.ServerKey, consolidated.SourceItemId, consolidated.OriginServerId));
+        Assert.Single(consolidated.Segments);
+    }
+
+    private static long S(int seconds) => seconds * 10_000_000L;
+
+    private static PeerSegment Seg(string type, int start, int end) => new() { Type = type, StartTicks = S(start), EndTicks = S(end) };
+
     private static (string ServerKey, string? ServerId, string SourceItemId, PeerSegmentsItem Answer) Answer(string key, string id, int segments)
         => (key, id, key + "-item", new PeerSegmentsItem
         {

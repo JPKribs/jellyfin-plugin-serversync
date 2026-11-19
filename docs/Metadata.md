@@ -18,6 +18,9 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 * **Enable Media Segment Provider** lets Jellyfin's media segment scan copy intros, credits, and other segments from the same file on the servers this one pulls from. It is off by default and works only while **Enable Metadata Sync** is on. See [Media Segments](MetadataProvider.md#media-segments).
     * **Replace Existing Segments** replaces the segments another provider gave a file with the ones copied from a server. It is off by default.
     * **Remove Segments No Server Has** removes a file's segments when no server this one pulls from has any for the same file. It is off by default.
+    * **Consolidate Duplicate Intros** shrinks intros that overlap to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. It is off by default.
+    * **Consolidate Duplicate Outros** shrinks outros that overlap to the part they share, the same way as intros. It is off by default.
+    * **Consolidate Other Segments** joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45. It is off by default.
 * **Precedence** chooses which server is heard for an item that several servers hold, either the one whose edit is newest or always the highest ranked. See [Several Servers](SyncTypes.md#several-servers).
 
 The library filter on the **Storage** tab applies to metadata as it does to content.

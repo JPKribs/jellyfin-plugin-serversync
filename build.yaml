@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.18.3"
+version: "12.4.19.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -29,7 +29,12 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  added:
+  - Consolidate Duplicate Intros and Consolidate Duplicate Outros, under Enable Media Segment Provider, shrink overlapping intros or outros to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. Both are off by default
+  - Consolidate Other Segments joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45. It is off by default
   developer:
+  - MediaSegmentsValue.Consolidate applies the three settings to the value Refresh chooses for each row, so the dialog, Sync, and the provider all see the consolidated segments
+  - Changing a Consolidate setting starts a full Refresh, since the settings are part of the scan's scope
   - Raises every GitHub Action in the workflows to its latest major version, pinned to a commit digest
   - Builds the docs with Python 3.15 and mkdocs-material 9.8.2
   - Renovate brings every update in one pull request, and leaves the packages Jellyfin ships to the Jellyfin version

@@ -375,6 +375,9 @@ export default function (view) {
         setChecked('chkMetadataSyncSegmentProvider', config.MetadataSyncSegmentProvider === true);
         setChecked('chkMetadataSyncReplaceSegments', config.MetadataSyncReplaceSegments === true);
         setChecked('chkMetadataSyncRemoveSegments', config.MetadataSyncRemoveSegments === true);
+        setChecked('chkMetadataSyncConsolidateIntros', config.MetadataSyncConsolidateIntros === true);
+        setChecked('chkMetadataSyncConsolidateOutros', config.MetadataSyncConsolidateOutros === true);
+        setChecked('chkMetadataSyncConsolidateOtherSegments', config.MetadataSyncConsolidateOtherSegments === true);
         setValue('selMetadataSyncPrecedence', choiceOf(config.MetadataSyncPrecedence, PRECEDENCE));
     }
 
@@ -392,6 +395,9 @@ export default function (view) {
             config.MetadataSyncSegmentProvider = getChecked('chkMetadataSyncSegmentProvider');
             config.MetadataSyncReplaceSegments = getChecked('chkMetadataSyncReplaceSegments');
             config.MetadataSyncRemoveSegments = getChecked('chkMetadataSyncRemoveSegments');
+            config.MetadataSyncConsolidateIntros = getChecked('chkMetadataSyncConsolidateIntros');
+            config.MetadataSyncConsolidateOutros = getChecked('chkMetadataSyncConsolidateOutros');
+            config.MetadataSyncConsolidateOtherSegments = getChecked('chkMetadataSyncConsolidateOtherSegments');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
         }, 'saveMetadataStatus', 'Metadata settings saved.', 'Could not save the metadata settings.');
     }
