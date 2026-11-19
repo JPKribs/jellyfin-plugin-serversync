@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.18.2"
+version: "12.4.18.3"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -30,4 +30,6 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Raises Microsoft.NET.Test.Sdk to 18.12.0 and SQLitePCLRaw.bundle_e_sqlite3 to 2.1.14 in the tests
+  - Raises every GitHub Action in the workflows to its latest major version, pinned to a commit digest
+  - Builds the docs with Python 3.15 and mkdocs-material 9.8.2
+  - Renovate brings every update in one pull request, and leaves the packages Jellyfin ships to the Jellyfin version
