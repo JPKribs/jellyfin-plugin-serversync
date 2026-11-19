@@ -92,7 +92,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                         if (config.MetadataSyncImages !== false && item.HasImagesChanges) changes.push('Images');
                         if (config.MetadataSyncPeople === true && item.HasPeopleChanges) changes.push('People');
                         if (config.MetadataSyncStudios !== false && item.HasStudiosChanges) changes.push('Studios');
-                        if (config.MetadataSyncSegmentProvider === true && item.HasSegmentsChanges) changes.push('Media segments');
+                        if (config.MetadataSyncSegmentProvider === true && item.HasSegmentsChanges) changes.push('Segments');
                         return renderChangeBadges(changes);
                     }
                 },
@@ -196,7 +196,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 if (config.MetadataSyncImages !== false) badge('Images', item.HasImagesChanges === true);
                 if (config.MetadataSyncPeople === true) badge('People', item.HasPeopleChanges === true);
                 if (config.MetadataSyncStudios !== false) badge('Studios', item.HasStudiosChanges === true);
-                if (config.MetadataSyncSegmentProvider === true) badge('Media segments', item.HasSegmentsChanges === true);
+                if (config.MetadataSyncSegmentProvider === true) badge('Segments', item.HasSegmentsChanges === true);
 
                 container.innerHTML = html;
             },

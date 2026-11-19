@@ -19,7 +19,7 @@ Server Sync is also a media segment provider. It copies intros, credits, recaps,
 Media segments are a category of each Metadata row, like images and people.
 
 * **Refresh** reads the segments of every video and audio file it lists, 200 files to a request. A file takes the segments of the highest ranked server that holds it and has segments for it. When no server has any, the row holds none.
-* **Sync** writes a row's segments into the sync database, where they survive a restart. **Queue** and **Ignore** work on them as on any category, and the row shows **Media segments: Changes** until they are written.
+* **Sync** writes a row's segments into the sync database, where they survive a restart. **Queue** and **Ignore** work on them as on any category, and the row shows **Segments: Changes** until they are written.
 * Jellyfin's **Media Segment Scan** then takes them from the sync database and asks no server.
 * Segments are used only when the source's file has the same size and runtime as the one here. A link is matched by runtime alone.
 * A segment that runs past the end of the file here is cut at the end, and one that starts there or later is left out. A segment two providers marked is kept once.
