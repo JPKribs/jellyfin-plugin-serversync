@@ -85,9 +85,15 @@ public sealed class RefreshMetadataSyncTableTaskTests : IDisposable
 
     private sealed class Probe : RefreshMetadataSyncTableTask
     {
-        public Probe(RefreshMetadataSyncTableTaskTests test)
-            : base(NullLogger<RefreshMetadataSyncTableTask>.Instance, test._config, test._factory, test._service, test._manager, null!, null!)
+        public Probe(RefreshMetadataSyncTableTaskTests test, MediaSegmentRefresher? segments = null)
+            : base(NullLogger<RefreshMetadataSyncTableTask>.Instance, test._config, test._factory, test._service, test._manager, null!, null!, null, segments)
         {
+        }
+
+        public Task Finalize(IReadOnlyList<ScanSource> sources)
+        {
+            Sources = sources;
+            return FinalizeAsync(CancellationToken.None);
         }
 
         public string MutexKey => ModuleMutexKey;
@@ -113,6 +119,29 @@ public sealed class RefreshMetadataSyncTableTaskTests : IDisposable
         public bool Outranks(MetadataSyncItem record) => MayOutrankOwner(record);
 
         public void Completed(PluginConfiguration config, DateTime at) => RecordRunCompleted(config, at);
+    }
+
+    /// <summary>
+    /// Finishing a scan reads the sources' media segments for the matched files only while Enable Media Segment Provider is on.
+    /// True: the media segment provider has the latest segments after each scan, and a server that left it off asks for none.
+    /// False: the provider would answer from segments never read, or every scan would ask the sources for segments nobody uses.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FinalizeAsync_SegmentProviderSwitch_DecidesWhetherSegmentsAreRead(bool on)
+    {
+        _config.Configuration.MetadataSyncSegmentProvider = on;
+        _manager.Upsert(new MetadataSyncItem { SourceLibraryId = "lib", LocalLibraryId = "local", SourceItemId = "film-on-a", LocalItemId = "local-film", ItemType = "Movie", ServerKey = _server.Key, StatusDate = DateTime.UtcNow });
+        var store = new MediaSegmentStore(new FixedProvider(_database), NullLogger<MediaSegmentStore>.Instance);
+        var stub = new ClientStubServer().OnJson("/Sync/Peer/Segments", "{\"Items\":[{\"ItemId\":\"film-on-a\",\"Found\":true,\"Segments\":[{\"Type\":\"Intro\",\"StartTicks\":1,\"EndTicks\":2}]}]}");
+        var source = new ScanSource(_server, stub.Client(), 0);
+        _sources.Add(source);
+
+        await new Probe(this, new MediaSegmentRefresher(store, QueueSamples.Host("this-server"), NullLogger<MediaSegmentRefresher>.Instance)).Finalize(new[] { source });
+
+        Assert.Equal(on, store.Get("local-film") is not null);
+        Assert.Equal(on ? 1 : 0, stub.To("/Sync/Peer/Segments").Count);
     }
 
     private ScanSource Source()

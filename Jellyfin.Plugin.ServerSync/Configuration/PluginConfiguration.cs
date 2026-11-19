@@ -448,6 +448,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncProvider { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether Server Sync answers Jellyfin's media segment scan with each item's segments from the sources, which also needs <see cref="EnableMetadataSync"/>.
+    /// </summary>
+    public bool MetadataSyncSegmentProvider { get; set; }
+
+    /// <summary>
     /// Gets or sets the time the last Metadata run ended.
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }

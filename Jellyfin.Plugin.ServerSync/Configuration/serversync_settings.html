@@ -547,8 +547,8 @@
                                     </div>
                                 </div>
 
-                                <!-- Metadata Provider -->
-                                <h3 class="base-subsection-title">Metadata Provider</h3>
+                                <!-- Providers -->
+                                <h3 class="base-subsection-title">Providers</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -556,6 +556,13 @@
                                             <span class="checkboxLabel">Enable Metadata Provider</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription">Lets a library fill items from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers.</div>
+                                    </div>
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncSegmentProvider" />
+                                            <span class="checkboxLabel">Enable Media Segment Provider</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Lets Jellyfin's media segment scan copy intros, credits, and other segments from the same file on the servers this one pulls from.</div>
                                     </div>
                                 </div>
                             </div>

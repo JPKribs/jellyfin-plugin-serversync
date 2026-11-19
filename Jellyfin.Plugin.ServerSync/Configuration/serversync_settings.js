@@ -372,6 +372,7 @@ export default function (view) {
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
         setChecked('chkMetadataSyncProvider', config.MetadataSyncProvider !== false);
+        setChecked('chkMetadataSyncSegmentProvider', config.MetadataSyncSegmentProvider === true);
         setValue('selMetadataSyncPrecedence', choiceOf(config.MetadataSyncPrecedence, PRECEDENCE));
     }
 
@@ -386,6 +387,7 @@ export default function (view) {
             config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
             config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
             config.MetadataSyncProvider = getChecked('chkMetadataSyncProvider');
+            config.MetadataSyncSegmentProvider = getChecked('chkMetadataSyncSegmentProvider');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
         }, 'saveMetadataStatus', 'Metadata settings saved.', 'Could not save the metadata settings.');
     }

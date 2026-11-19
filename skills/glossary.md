@@ -71,6 +71,8 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Approvals | Whether new and changed files download on their own, wait, or are left alone | | Confirmations |
 | Removed files | What happens to a local file once its item is gone from the source | | Deletions, orphans |
 | Metadata provider | Server Sync as a Jellyfin metadata and image fetcher that reads from the servers this one pulls from | `PeerMetadataSource` | Fetcher, scraper |
+| Media segment provider | Server Sync as a Jellyfin media segment provider that copies segments from the same file on the servers this one pulls from | `PeerSegmentProvider` | Segment plugin, intro provider |
+| Media segment | A marked part of a file, such as an intro or credits, as Jellyfin names it | `MediaSegmentDto` | Chapter, marker, skip |
 | Recycling Bin | The folder removed and replaced files move to when it is on | | Trash, recycle bin |
 
 ### Item Statuses

@@ -20,9 +20,9 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Services.Database;
 /// </summary>
 public sealed class SyncSchemaTests : IDisposable
 {
-    // The fingerprint of every table, column, and index at schema v37. A change to the schema changes
+    // The fingerprint of every table, column, and index at schema v38. A change to the schema changes
     // it, which is the moment to raise SyncSchema.CurrentSchemaVersion and decide what older files do.
-    private const string SchemaFingerprint = "70C50BD8CCDE215ED9F64E74430F5A00F857DB2B2A098BCD152E08A0064F8F91";
+    private const string SchemaFingerprint = "9F85219F05C9753815D36C0284544F8AC7746FCFEC1E38F54AA75302ACE1D5BA";
 
     private readonly string _dataPath;
     private readonly string _dbPath;
@@ -63,7 +63,7 @@ public sealed class SyncSchemaTests : IDisposable
             {
                 "HistorySyncItems", "InboundHints", "LinkStreamDays", "MetadataSyncItems", "ObjectVersions", "OutboundHints", "PeerPairings",
                 "PendingVersions", "PeopleSyncItems", "PlaylistCopies", "RemovedItems", "RemovedItemsLog", "ScanRuns", "ScanWatermarks",
-                "SyncAttention", "SyncItems", "UserSyncItems"
+                "SourceMediaSegments", "SyncAttention", "SyncItems", "UserSyncItems"
             },
             tables);
         Assert.Equal(1L, Scalar(conn, "SELECT COUNT(*) FROM RemovedItemsLog"));
@@ -102,7 +102,7 @@ public sealed class SyncSchemaTests : IDisposable
             File.WriteAllText(dump, described);
         }
 
-        Assert.Equal(37, SyncSchema.CurrentSchemaVersion);
+        Assert.Equal(38, SyncSchema.CurrentSchemaVersion);
         Assert.Equal(SchemaFingerprint, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(described))));
     }
 
@@ -142,7 +142,7 @@ public sealed class SyncSchemaTests : IDisposable
         new SyncDatabase(NullLogger<SyncDatabase>.Instance, _dataPath).Dispose();
         using (var conn = Raw())
         {
-            Exec(conn, "DROP TABLE ScanRuns; DROP TABLE LinkStreamDays; CREATE TABLE Marker (Id INTEGER); INSERT INTO Marker VALUES (7);");
+            Exec(conn, "DROP TABLE ScanRuns; DROP TABLE LinkStreamDays; DROP TABLE SourceMediaSegments; CREATE TABLE Marker (Id INTEGER); INSERT INTO Marker VALUES (7);");
             DatabaseSchema.SetVersion(conn, SyncSchema.OldestUpgradableSchema);
         }
 
@@ -154,7 +154,7 @@ public sealed class SyncSchemaTests : IDisposable
         Assert.Equal(SyncSchema.CurrentSchemaVersion, DatabaseSchema.GetVersion(after));
         Assert.Equal(SyncSchema.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(after));
         Assert.Equal(7L, Scalar(after, "SELECT Id FROM Marker"));
-        Assert.Equal(2L, Scalar(after, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('ScanRuns', 'LinkStreamDays')"));
+        Assert.Equal(3L, Scalar(after, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('ScanRuns', 'LinkStreamDays', 'SourceMediaSegments')"));
     }
 
     /// <summary>

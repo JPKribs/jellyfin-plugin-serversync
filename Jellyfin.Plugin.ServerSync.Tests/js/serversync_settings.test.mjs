@@ -182,6 +182,28 @@ test('the provider switches show on when never saved, and each section saves its
     assert.equal(saved.PeopleSyncProvider, false);
 });
 
+test('the media segment provider switch shows off when never saved, and the Metadata save keeps what it shows', async function () {
+    var opened = await openPage({
+        config: { Servers: [] },
+        checkboxes: ['chkMetadataSyncSegmentProvider'],
+        buttons: ['btnSaveMetadataSettings'],
+        ids: ['saveMetadataStatus']
+    });
+    var saved = null;
+    globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
+    var segments = opened.view.querySelector('#chkMetadataSyncSegmentProvider');
+    assert.equal(segments.checked, false);
+
+    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    await settle(20);
+    assert.equal(saved.MetadataSyncSegmentProvider, false);
+
+    segments.checked = true;
+    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    await settle(20);
+    assert.equal(saved.MetadataSyncSegmentProvider, true);
+});
+
 test('a bandwidth save that fails says so and does not claim success', async function () {
     var opened = await openPage();
     globalThis.ApiClient.updatePluginConfiguration = function () { return Promise.reject(new Error('refused')); };

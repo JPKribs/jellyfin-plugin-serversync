@@ -14,7 +14,7 @@ public static class SyncSchema
     /// <summary>
     /// The schema version. Raise it when the schema changes.
     /// </summary>
-    public const int CurrentSchemaVersion = 37;
+    public const int CurrentSchemaVersion = 38;
 
     /// <summary>
     /// The oldest schema version this release brings forward itself, which is the one <see cref="OldestUpgradableRelease"/> writes.
@@ -113,6 +113,7 @@ public static class SyncSchema
         CreateMetadataTable(connection);
         CreateSharedTables(connection);
         CreateStatisticsTables(connection);
+        CreateMediaSegmentTable(connection);
     }
 
     /// <summary>
@@ -130,6 +131,7 @@ public static class SyncSchema
         }
 
         CreateStatisticsTables(connection);
+        CreateMediaSegmentTable(connection);
     }
 
     /// <summary>
@@ -501,6 +503,27 @@ public static class SyncSchema
                 ServerKey TEXT NOT NULL,
                 Streams INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(Day, ServerKey)
+            );";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Creates the table the media segment provider answers from, added in schema 38: for each local item, the segments its source holds
+    /// with the size and runtime of the source's file, so they are used only for the same file, and the server they were first made on.
+    /// </summary>
+    private static void CreateMediaSegmentTable(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS SourceMediaSegments (
+                LocalItemId TEXT PRIMARY KEY,
+                ServerKey TEXT NOT NULL,
+                SourceItemId TEXT NOT NULL,
+                Segments TEXT NOT NULL,
+                Size INTEGER,
+                RunTimeTicks INTEGER,
+                FetchedAt TEXT NOT NULL,
+                OriginServerId TEXT
             );";
         cmd.ExecuteNonQuery();
     }

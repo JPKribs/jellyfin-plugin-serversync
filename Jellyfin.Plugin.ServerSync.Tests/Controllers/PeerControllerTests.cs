@@ -523,6 +523,51 @@ public sealed class PeerControllerTests : IDisposable
     }
 
     /// <summary>
+    /// A media segment read with no body, no ids, too many ids, or an id too long to be one is refused with 400.
+    /// True: a malformed request reads nothing.
+    /// False: a huge batch would read every file's segments in one request.
+    /// </summary>
+    [Theory]
+    [InlineData("no-body")]
+    [InlineData("empty")]
+    [InlineData("too-many")]
+    [InlineData("too-long")]
+    public async Task Segments_MalformedRequest_Answers400(string scenario)
+    {
+        var request = scenario switch
+        {
+            "no-body" => null,
+            "empty" => new PeerSegmentsRequest(),
+            "too-many" => new PeerSegmentsRequest { ItemIds = Enumerable.Range(0, PeerSegmentsRequest.MaxItems + 1).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList() },
+            _ => new PeerSegmentsRequest { ItemIds = { new string('a', 65) } }
+        };
+        var (segments, segmentsStub) = InterfaceStub.Create<MediaBrowser.Controller.MediaSegments.IMediaSegmentManager>();
+
+        var result = await _harness.PeerRoutes().Segments(request!, new Jellyfin.Plugin.ServerSync.Services.Peer.PeerSegmentReader(_harness.Library, _harness.UserManager, segments, new Jellyfin.Plugin.ServerSync.Services.MetadataSync.MediaSegmentStore(_harness.Provider, Microsoft.Extensions.Logging.Abstractions.NullLogger<Jellyfin.Plugin.ServerSync.Services.MetadataSync.MediaSegmentStore>.Instance)));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(segmentsStub.Calls);
+    }
+
+    /// <summary>
+    /// A media segment read of the most ids allowed is answered, one entry for each id.
+    /// True: the limit holds at its edge, and an item this server lacks is a plain answer.
+    /// False: a full batch would be refused, or a miss would fail the batch.
+    /// </summary>
+    [Fact]
+    public async Task Segments_FullBatch_AnswersEachId()
+    {
+        var ids = Enumerable.Range(0, PeerSegmentsRequest.MaxItems).Select(_ => Guid.NewGuid().ToString("N")).ToList();
+        var segments = InterfaceStub.Create<MediaBrowser.Controller.MediaSegments.IMediaSegmentManager>().Proxy;
+
+        var result = await _harness.PeerRoutes().Segments(new PeerSegmentsRequest { ItemIds = ids }, new Jellyfin.Plugin.ServerSync.Services.Peer.PeerSegmentReader(_harness.Library, _harness.UserManager, segments, new Jellyfin.Plugin.ServerSync.Services.MetadataSync.MediaSegmentStore(_harness.Provider, Microsoft.Extensions.Logging.Abstractions.NullLogger<Jellyfin.Plugin.ServerSync.Services.MetadataSync.MediaSegmentStore>.Instance)));
+
+        var body = Assert.IsType<PeerSegmentsResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(ids, body.Items.Select(i => i.ItemId));
+        Assert.All(body.Items, i => Assert.False(i.Found));
+    }
+
+    /// <summary>
     /// A lookup at the longest allowed path is answered, and a path this server does not hold is not found.
     /// True: the length limit holds at its edge, and a miss is a plain answer.
     /// False: a long but valid path would be refused, or a miss would be an error.

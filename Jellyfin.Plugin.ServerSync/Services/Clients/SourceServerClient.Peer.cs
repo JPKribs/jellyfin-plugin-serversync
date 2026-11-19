@@ -324,6 +324,25 @@ public partial class SourceServerClient
     }
 
     /// <summary>
+    /// Reads the media segments a peer holds for a batch of its items, throwing when it gives no answer, such as a peer on a release without the route.
+    /// </summary>
+    /// <param name="itemIds">The peer's ids of the items, at most <see cref="PeerSegmentsRequest.MaxItems"/>.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The peer's answer, one entry for each item.</returns>
+    public async Task<PeerSegmentsResponse> GetPeerSegmentsAsync(IReadOnlyList<string> itemIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(itemIds);
+        var request = new PeerSegmentsRequest { ItemIds = itemIds.ToList() };
+        var (status, parsed, body) = await PeerRequestAsync<PeerSegmentsResponse>(HttpMethod.Post, "/Sync/Peer/Segments", request, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        if (status is < 200 or >= 300 || parsed is null)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the media segment read: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
     /// Sends an authorized GET to an address on this server entry's server.
     /// </summary>
     /// <param name="url">The address, which must start with the server URL.</param>

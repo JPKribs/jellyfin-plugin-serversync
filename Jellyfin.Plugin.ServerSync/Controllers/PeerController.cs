@@ -479,6 +479,30 @@ public partial class PeerController : ControllerBase
         return Ok(found);
     }
 
+    /// <summary>Reads the media segments of a batch of this server's items, leaving out the ones Server Sync copied here.</summary>
+    /// <param name="request">The items whose segments are read.</param>
+    /// <param name="reader">Reads each item's segments.</param>
+    /// <returns>One entry for each item, in order.</returns>
+    [HttpPost("Segments")]
+    [RequireCompatibleProtocol]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PeerSegmentsResponse>> Segments([FromBody] PeerSegmentsRequest request, [FromServices] Services.Peer.PeerSegmentReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        if (request?.ItemIds is not { Count: > 0 } ids)
+        {
+            return BadRequest("A request body with ItemIds is required.");
+        }
+
+        if (ids.Count > PeerSegmentsRequest.MaxItems || ids.Any(id => id is null || id.Length > 64))
+        {
+            return BadRequest($"At most {PeerSegmentsRequest.MaxItems} ItemIds, each an item id, are allowed.");
+        }
+
+        return Ok(await reader.ReadAsync(ids, PeerCallerGuard.ScopedUser(HttpContext)).ConfigureAwait(false));
+    }
+
     /// <summary>Returns the stamps this server holds for a batch of its own keys, leaving out keys with none.</summary>
     /// <param name="request">The kind and the keys to read.</param>
     /// <returns>The stamp of each key that has one.</returns>

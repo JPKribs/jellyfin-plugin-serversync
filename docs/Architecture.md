@@ -130,7 +130,7 @@ Every later request carries the secret in `X-ServerSync-Pairing`. `PeerControlle
 
 | Controller | Route | Serves |
 | :--- | :--- | :--- |
-| `PeerController` | `/Sync/Peer` | Hints, completion, status, interest, versions, history, playlists, lookups |
+| `PeerController` | `/Sync/Peer` | Hints, completion, status, interest, versions, history, playlists, lookups, media segments |
 | `PeerController.Links` | `/Sync/Peer` | Streams, stream checks, playback reports, remote control, link details, images, removals, copies |
 | `PeerPairController` | `/Sync/Peer/Pair` | Pairing |
 | `LinkController` | `/Sync/Link` | The address a `.strm` holds, for this server only |
@@ -196,8 +196,13 @@ Server Sync is also a metadata and image provider that Jellyfin calls on a refre
 | List the sources that can answer a lookup | `ParentDirectory` |
 | Find the item on a source and read its metadata and images | `PeerMetadataSource`, through `POST /Sync/Peer/Lookup` |
 | Keep the fill from being announced as an edit made here | `ProviderFills` |
+| Read the sources' media segments for every matched file after each metadata scan | `MediaSegmentRefresher`, called from `RefreshMetadataSyncTableTask.FinalizeAsync`, through `POST /Sync/Peer/Segments`, kept in `MediaSegmentStore` |
+| Answer the source's media segments, with the server they were first made on | `PeerSegmentReader` |
+| Answer Jellyfin's **Media Segment Scan** from the kept segments | `PeerSegmentProvider`, registered with `[PluginService]` as an `IMediaSegmentProvider` |
 
 While the plugin is held, a lookup finds nothing. So does a lookup for an item while `EnableMetadataSync` or `MetadataSyncProvider` is off, and for a person while `EnablePeopleSync` or `PeopleSyncProvider` is off, and no server is asked.
+
+The media segment provider answers only while `EnableMetadataSync` and `MetadataSyncSegmentProvider` are on, and never asks a source itself. It uses kept segments only when the source's file has the same size and runtime as the local one. For a file the source speaks for, it runs last, as `IHasOrder` with `int.MaxValue`, and deletes the segments other providers gave the file. When nothing is kept for an item, it gives back the segments Jellyfin holds, so nothing is removed. `PeerSegmentReader` serves every segment a file shows, with `OriginServerId` set to the server they were first made on when Server Sync copied them, and null when they were made there. `MediaSegmentRefresher` keeps that origin, or the source's id when it is null, and refuses segments whose origin is this server, so a server never takes back its own.
 
 ## Database
 
@@ -227,6 +232,7 @@ While the plugin is held, a lookup finds nothing. So does a lookup for an item w
 | `RemovedItems`, `RemovedItemsLog` | Media removed from the library in the last 30 days | `RemovedItemsStore` |
 | `ScanRuns` | What each of the last 10 scans of a sync type found | `SyncStatisticsStore` |
 | `LinkStreamDays` | Link streams started for each server on each of the last 30 days | `SyncStatisticsStore` |
+| `SourceMediaSegments` | The media segments a source holds for each local file, with the size and runtime of the source's file | `MediaSegmentStore` |
 
 The five sync table managers extend `SyncTableManagerBase`, and every other store extends `QueueStoreBase`. Both write under the database's one write lock, and neither opens the database until it is first used.
 

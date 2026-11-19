@@ -464,6 +464,30 @@ public sealed class SourceServerClientPeerTests : IDisposable
     }
 
     /// <summary>
+    /// A media segment read sends the item ids and returns the peer's answer, and a refusal, such as a peer on a release without the route, throws with its status.
+    /// True: the metadata scan keeps what it held for a peer that cannot answer.
+    /// False: a peer without the route would read as one whose files have no segments, and every segment copied from it would be removed.
+    /// </summary>
+    [Fact]
+    public async Task GetPeerSegmentsAsync_AnswerOrRefusal_ParsesOrThrows()
+    {
+        var server = new ClientStubServer().OnJson("/Sync/Peer/Segments", "{\"Items\":[{\"ItemId\":\"abc\",\"Found\":true,\"Size\":5,\"RunTimeTicks\":9,\"Segments\":[{\"Type\":\"Intro\",\"StartTicks\":1,\"EndTicks\":2}]}]}");
+        using var client = server.Client();
+        using var refusing = new ClientStubServer().OnStatus("/Sync/Peer/Segments", HttpStatusCode.NotFound).Client();
+
+        var answer = await client.GetPeerSegmentsAsync(new[] { "abc" });
+        var refused = await Assert.ThrowsAsync<HttpRequestException>(() => refusing.GetPeerSegmentsAsync(new[] { "abc" }));
+
+        var item = Assert.Single(answer.Items);
+        Assert.True(item.Found);
+        Assert.Equal(5, item.Size);
+        Assert.Equal("Intro", Assert.Single(item.Segments).Type);
+        Assert.Contains("\"ItemIds\":[\"abc\"]", Assert.Single(server.Seen).Body, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
+        await Assert.ThrowsAsync<ArgumentNullException>(() => client.GetPeerSegmentsAsync(null!));
+    }
+
+    /// <summary>
     /// An authorized GET only goes to an address under this entry's Server URL.
     /// True: the API Key is never sent to another host.
     /// False: an image address a peer supplied could collect the key on any server it names.

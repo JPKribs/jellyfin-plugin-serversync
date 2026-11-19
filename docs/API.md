@@ -192,6 +192,25 @@ Every playlist on this server with its owner, shares, open access, and items in 
 { "Playlists": [ { "Id": "5d2c…", "Name": "Road Trip", "MediaType": "Audio", "OwnerUserId": "0f8f…", "OpenAccess": false, "Shares": [ { "UserId": "7c9e…", "CanEdit": false } ], "Entries": [ { "ItemId": "9c1e…", "Path": "/media/Music/Artist/Album/01 Song.flac" } ] } ] }
 ```
 
+### POST /Sync/Peer/Segments
+
+The media segments of a batch of this server's items, so the metadata scan on a server that pulls from this one can keep them for its media segment provider. Any whitelisted caller may call it, and it records nothing. Segments Server Sync copied here are served too, with the server they were first made on. A standard user only finds items they can see. At most 200 ids per request.
+
+```json
+{ "ItemIds": ["9c1e0f…", "77ab12…"] }
+```
+
+Answers one entry for each id, in order. `Found` is false for an id that is not a video or audio file here. `Size` and `RunTimeTicks` describe the file, so the caller uses the segments only for the same file. `OriginServerId` is the Jellyfin id of the server the segments were first made on, or null when they were made here. A caller never takes segments whose origin is itself.
+
+```json
+{ "Items": [ { "ItemId": "9c1e0f…", "Found": true, "Size": 1073741824, "RunTimeTicks": 72000000000, "OriginServerId": null, "Segments": [ { "Type": "Intro", "StartTicks": 0, "EndTicks": 900000000 } ] }, { "ItemId": "77ab12…", "Found": false } ] }
+```
+
+| Status | Meaning |
+| :--- | :--- |
+| `200` | The segments of each item |
+| `400` | No ids, more than 200, or an id too long to be one |
+
 ### POST /Sync/Peer/Versions
 
 The versions this server holds for a batch of its own keys. Used by the full scan against a peer that carries versions, so conflicts resolve on where and when a value was last edited rather than on saved dates. Keys with no recorded version are left out. At most 500 keys per request.

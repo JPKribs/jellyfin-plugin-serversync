@@ -29,6 +29,7 @@ public class RefreshMetadataSyncTableTask
 {
     private readonly MetadataSyncTableService _metadataService;
     private readonly ScanConflictSettler _conflicts;
+    private readonly MediaSegmentRefresher? _segments;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RefreshMetadataSyncTableTask"/> class.
@@ -41,6 +42,7 @@ public class RefreshMetadataSyncTableTask
     /// <param name="conflicts">Settles which server speaks for an item both sides changed.</param>
     /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
     /// <param name="statistics">Keeps what each scan found for the Statistics tab, or null to keep nothing.</param>
+    /// <param name="segments">Reads the sources' media segments for the media segment provider, or null to read none.</param>
     public RefreshMetadataSyncTableTask(
         ILogger<RefreshMetadataSyncTableTask> logger,
         IPluginConfigurationManager configManager,
@@ -49,11 +51,13 @@ public class RefreshMetadataSyncTableTask
         MetadataSyncTableManager manager,
         ScanConflictSettler conflicts,
         ScanWatermarkStore watermarks,
-        SyncStatisticsStore? statistics = null)
+        SyncStatisticsStore? statistics = null,
+        MediaSegmentRefresher? segments = null)
         : base(logger, manager, clientFactory, configManager, watermarks, statistics)
     {
         _metadataService = metadataService;
         _conflicts = conflicts;
+        _segments = segments;
     }
 
     /// <summary>
@@ -75,13 +79,34 @@ public class RefreshMetadataSyncTableTask
     protected override void PrepareForOne(MetadataWork work) => _localByLibrary.Clear();
 
     /// <summary>
-    /// Lets go of the local items once the scan has built its rows, so they are not held between runs.
+    /// Lets go of the local items once the scan has built its rows, so they are not held between runs, and reads the sources' media segments when the provider is on.
     /// </summary>
     /// <inheritdoc />
-    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    protected override async Task FinalizeAsync(CancellationToken cancellationToken)
     {
         _localByLibrary.Clear();
-        return base.FinalizeAsync(cancellationToken);
+        await RefreshMediaSegmentsAsync(cancellationToken).ConfigureAwait(false);
+        await base.FinalizeAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the sources' media segments for every matched file while Enable Media Segment Provider is on. A failure is logged and never fails the scan.
+    /// </summary>
+    private async Task RefreshMediaSegmentsAsync(CancellationToken cancellationToken)
+    {
+        if (_segments is null || !ConfigManager.Configuration.MetadataSyncSegmentProvider)
+        {
+            return;
+        }
+
+        try
+        {
+            await _segments.RefreshAsync(Sources, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or System.Text.Json.JsonException)
+        {
+            Logger.LogWarning(ex, "{Task}: could not keep the media segments read from the sources", Name);
+        }
     }
 
     /// <summary>Finds a local item among the ones this run listed, or null when the run did not list it.</summary>
