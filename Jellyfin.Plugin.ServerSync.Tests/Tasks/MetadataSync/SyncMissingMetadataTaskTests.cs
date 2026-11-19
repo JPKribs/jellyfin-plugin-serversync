@@ -542,6 +542,7 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
 
         Assert.Equal(row.Studios.SourceHash, row.Studios.SyncedHash);
         Assert.Equal(row.Studios.Source, row.Studios.Synced);
+        Assert.Equal(row.Studios.Source, row.Studios.Local);
         Assert.Null(row.Metadata.SyncedHash);
     }
 

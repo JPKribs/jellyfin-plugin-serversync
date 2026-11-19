@@ -128,21 +128,38 @@ public class MetadataSyncTableService
     /// <summary>
     /// Builds lookups of a local library's files and folders by path, so a scan can skip source items with no local match.
     /// Each link is also listed under its source path, and folders are not because their paths match on every server.
+    /// Each item is the copy the library hands out by id, which is the one Sync writes to, never a folder's older cached child.
     /// </summary>
     /// <param name="localLibraryId">The id of the local library to read.</param>
     /// <returns>The leaves and the folders, each by path.</returns>
     public (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders) GetLocalItemsByPath(Guid localLibraryId)
     {
-        var leaves = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
-        var folders = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
-
         if (_libraryManager.GetItemById(localLibraryId) is not Folder root)
         {
-            return (leaves, folders);
+            return (new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase));
         }
 
-        foreach (var item in root.GetRecursiveChildren())
+        var (leaves, folders) = IndexByPath(root.GetRecursiveChildren(), _libraryManager.GetItemById);
+        LinkPaths.AddAliases(leaves, _links);
+        return (leaves, folders);
+    }
+
+    /// <summary>
+    /// Sorts a library's items into files and folders by path, each as the copy the library hands out by id.
+    /// A folder's cached child can be an older copy than the one Sync writes to, so it is used only when the library has no other.
+    /// </summary>
+    /// <param name="children">The library's items, as its folders list them.</param>
+    /// <param name="byId">Gives the library's own copy of an item by id, or null.</param>
+    /// <returns>The files and the folders, each by path.</returns>
+    public static (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders) IndexByPath(IEnumerable<BaseItem> children, Func<Guid, BaseItem?> byId)
+    {
+        ArgumentNullException.ThrowIfNull(children);
+        ArgumentNullException.ThrowIfNull(byId);
+        var leaves = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
+        var folders = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (var child in children)
         {
+            var item = byId(child.Id) ?? child;
             if (string.IsNullOrEmpty(item.Path))
             {
                 continue;
@@ -158,7 +175,6 @@ public class MetadataSyncTableService
             }
         }
 
-        LinkPaths.AddAliases(leaves, _links);
         return (leaves, folders);
     }
 

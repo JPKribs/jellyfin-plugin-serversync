@@ -237,6 +237,26 @@ public sealed class MetadataSyncTableServiceTests
     }
 
     /// <summary>
+    /// Each local item is the copy the library hands out by id, not the copy a folder caches among its children, and a cached child stands in only when the library has no other.
+    /// True: the scan sees what Sync wrote, so a synced episode stays Synced on the next scan.
+    /// False: a folder's older cached copy would hide the sync, and the row would be queued again on every scan.
+    /// </summary>
+    [Fact]
+    public void IndexByPath_CachedChildIsOlder_UsesTheLibrarysCopy()
+    {
+        var stale = new MediaBrowser.Controller.Entities.TV.Episode { Id = Guid.NewGuid(), Path = "/local/shows/pilot.mkv" };
+        var current = new MediaBrowser.Controller.Entities.TV.Episode { Id = stale.Id, Path = stale.Path, Overview = "Synced" };
+        var orphan = new MediaBrowser.Controller.Entities.TV.Episode { Id = Guid.NewGuid(), Path = "/local/shows/other.mkv", Overview = "Cached" };
+        var season = new MediaBrowser.Controller.Entities.TV.Season { Id = Guid.NewGuid(), Path = "/local/shows/Season 01" };
+
+        var (leaves, folders) = MetadataSyncTableService.IndexByPath(new BaseItem[] { stale, orphan, season }, id => id == stale.Id ? current : null);
+
+        Assert.Equal("Synced", leaves[stale.Path].Overview);
+        Assert.Equal("Cached", leaves[orphan.Path].Overview);
+        Assert.Same(season, Assert.Single(folders).Value);
+    }
+
+    /// <summary>
     /// A source item with no path builds no row and looks nothing up.
     /// True: a virtual season or artist is not tracked.
     /// False: a pathless item would be matched against the library root.

@@ -408,6 +408,8 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             var (ok, reason) = VerifyStudiosApplied(freshLocal, record);
             if (ok)
             {
+                // The studios read back as the source's, so the row's local value is the source's and its badge clears.
+                record.Studios.Local = record.Studios.Source;
                 record.Studios.MarkSynced();
                 synced.Add("Studios");
                 Logger.LogDebug("Apply Studios verified for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
