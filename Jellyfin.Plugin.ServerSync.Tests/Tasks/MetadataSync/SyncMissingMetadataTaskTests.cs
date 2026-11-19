@@ -80,8 +80,8 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
 
     private sealed class Probe : SyncMissingMetadataTask
     {
-        public Probe(SyncMissingMetadataTaskTests test)
-            : base(NullLogger<SyncMissingMetadataTask>.Instance, test._library, InterfaceStub.Create<IProviderManager>().Proxy, test._factory, test._config, test._service, test._manager, null!)
+        public Probe(SyncMissingMetadataTaskTests test, MediaSegmentStore? segments = null)
+            : base(NullLogger<SyncMissingMetadataTask>.Instance, test._library, InterfaceStub.Create<IProviderManager>().Proxy, test._factory, test._config, test._service, test._manager, null!, segments)
         {
         }
 
@@ -496,6 +496,35 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => NewTask().Verify(row));
 
         Assert.Equal(reason, thrown.Message);
+    }
+
+    /// <summary>
+    /// Syncing a row writes its media segments into the local segment table, reads them back, and marks them synced, and needs Enable Media Segment Provider on.
+    /// True: Queue applies the pool's segments, and Jellyfin's Media Segment Scan picks them up from the local table.
+    /// False: a queued row would never change the segments here, or would write them with the provider off.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ApplyThenVerify_Segments_WritesTheLocalTableAndMarksThemSynced(bool providerOn)
+    {
+        SetCategories(metadata: false, images: false, people: false, studios: false);
+        _config.Configuration.MetadataSyncSegmentProvider = providerOn;
+        var store = new MediaSegmentStore(new FixedProvider(_database), NullLogger<MediaSegmentStore>.Instance);
+        var task = new Probe(this, store);
+        var localId = _movie.Id.ToString("N");
+        var value = new MediaSegmentsValue(ServerKey, "src-1", "origin-id", 10, 20, new List<Jellyfin.Plugin.ServerSync.Models.Peer.PeerSegment> { new() { Type = "Intro", StartTicks = 1, EndTicks = 2 } });
+        var row = new MetadataSyncItem { SourceLibraryId = "lib-1", SourceItemId = "src-1", LocalItemId = localId, ItemName = "Film", ServerKey = ServerKey, StatusDate = DateTime.UtcNow };
+        row.Segments.UpdateSource(value.ToJson());
+
+        Assert.Equal(providerOn, task.Enabled());
+        await task.Apply(row);
+        await task.Verify(row);
+
+        var held = store.Get(localId);
+        Assert.Equal(providerOn, held is not null);
+        Assert.Equal(providerOn ? row.Segments.SourceHash : null, row.Segments.SyncedHash);
+        Assert.Equal(providerOn ? "origin-id" : null, held?.OriginServerId);
     }
 
     /// <summary>

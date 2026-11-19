@@ -137,16 +137,21 @@ public sealed class PeerSegmentProviderTests : IDisposable
     }
 
     /// <summary>
-    /// A source that holds the file with no segments gives none.
-    /// True: a segment removed on the source is removed here on the next scan.
-    /// False: a segment removed on the source would stay here forever.
+    /// When no server has segments for the file, its segments stay unless Remove Segments No Server Has is on.
+    /// True: a pool with no intro tool never clears this server's segments, and one that asks for removal gets it.
+    /// False: turning the provider on would wipe every segment here, or a removed segment would never go.
     /// </summary>
-    [Fact]
-    public async Task GetMediaSegments_KeptEmpty_GivesNone()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetMediaSegments_NoServerHasAny_KeepsUnlessRemoving(bool remove)
     {
+        _config.Configuration.MetadataSyncRemoveSegments = remove;
         Keep(Size, RunTime);
 
-        Assert.Empty(await _provider.GetMediaSegments(Request(), CancellationToken.None));
+        var segments = await _provider.GetMediaSegments(Request(), CancellationToken.None);
+
+        Assert.Equal(remove ? 0 : 1, segments.Count);
     }
 
     /// <summary>
@@ -268,7 +273,7 @@ public sealed class PeerSegmentProviderTests : IDisposable
     }
 
     /// <summary>
-    /// For a file the source speaks for, the segments other providers gave it are removed, even when the source has none, and Server Sync's own are never read for removal.
+    /// With both switches on, the segments other providers gave a file are removed for the source's, or for nothing when no server has any.
     /// True: the file keeps only the source's version, with no second intro from a local tool.
     /// False: a local provider's intro would sit beside the source's, and players would show both.
     /// </summary>
@@ -277,6 +282,8 @@ public sealed class PeerSegmentProviderTests : IDisposable
     [InlineData(false)]
     public async Task GetMediaSegments_SourceSpeaks_RemovesOtherProvidersSegments(bool sourceHasSegments)
     {
+        _config.Configuration.MetadataSyncReplaceSegments = true;
+        _config.Configuration.MetadataSyncRemoveSegments = true;
         var other = new MediaSegmentDto { Id = Guid.NewGuid(), ItemId = LocalId, Type = MediaSegmentType.Intro, StartTicks = 3, EndTicks = 4 };
         _others = new List<MediaSegmentDto> { other };
         if (sourceHasSegments)
@@ -332,6 +339,48 @@ public sealed class PeerSegmentProviderTests : IDisposable
 
         Assert.Empty(segments);
         Assert.Empty(_deleted);
+    }
+
+    /// <summary>
+    /// With both switches off, segments another provider gave a file stay and nothing is added beside them.
+    /// True: a local intro tool's segments are never replaced or doubled unless asked for.
+    /// False: turning the provider on would replace every local segment, or show two intros.
+    /// </summary>
+    [Fact]
+    public async Task GetMediaSegments_OthersExistAndReplaceOff_KeepsThemAndAddsNothing()
+    {
+        _others = new List<MediaSegmentDto> { new() { Id = Guid.NewGuid(), ItemId = LocalId, Type = MediaSegmentType.Intro, StartTicks = 3, EndTicks = 4 } };
+        Keep(Size, RunTime, new PeerSegment { Type = "Intro", StartTicks = 100, EndTicks = 200 });
+
+        var segments = await _provider.GetMediaSegments(Request(), CancellationToken.None);
+
+        Assert.Empty(segments);
+        Assert.Empty(_deleted);
+    }
+
+    /// <summary>
+    /// The plan for each case: the source's segments go on a file with none, stay off a file another provider covers unless replacing,
+    /// and with nothing in the pool the file keeps what it has unless removing.
+    /// True: the two switches decide exactly what changes, and nothing else does.
+    /// False: a switch would remove or replace segments while off.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, false, false, 1, false)]
+    [InlineData(true, true, false, false, 0, false)]
+    [InlineData(true, true, true, false, 1, true)]
+    [InlineData(false, true, false, false, 2, false)]
+    [InlineData(false, true, false, true, 0, true)]
+    [InlineData(false, false, false, true, 0, false)]
+    public void Plan_Cases_FollowTheSwitches(bool sourceHasAny, bool othersExist, bool replace, bool remove, int ours, bool removeOthers)
+    {
+        var fitted = sourceHasAny ? new List<MediaSegmentDto> { new() { Type = MediaSegmentType.Intro, StartTicks = 1, EndTicks = 2 } } : new List<MediaSegmentDto>();
+        var others = othersExist ? new List<MediaSegmentDto> { new() { Type = MediaSegmentType.Outro, StartTicks = 5, EndTicks = 6 } } : new List<MediaSegmentDto>();
+        var existing = new List<MediaSegmentDto> { new() { Type = MediaSegmentType.Recap, StartTicks = 1, EndTicks = 2 }, new() { Type = MediaSegmentType.Preview, StartTicks = 3, EndTicks = 4 } };
+
+        var plan = PeerSegmentProvider.Plan(fitted, others, existing, replace, remove);
+
+        Assert.Equal(ours, plan.Ours.Count);
+        Assert.Equal(removeOthers, plan.RemoveOthers);
     }
 
     /// <summary>

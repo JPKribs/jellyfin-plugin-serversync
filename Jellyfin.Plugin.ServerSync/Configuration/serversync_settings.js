@@ -373,6 +373,8 @@ export default function (view) {
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
         setChecked('chkMetadataSyncProvider', config.MetadataSyncProvider !== false);
         setChecked('chkMetadataSyncSegmentProvider', config.MetadataSyncSegmentProvider === true);
+        setChecked('chkMetadataSyncReplaceSegments', config.MetadataSyncReplaceSegments === true);
+        setChecked('chkMetadataSyncRemoveSegments', config.MetadataSyncRemoveSegments === true);
         setValue('selMetadataSyncPrecedence', choiceOf(config.MetadataSyncPrecedence, PRECEDENCE));
     }
 
@@ -388,6 +390,8 @@ export default function (view) {
             config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
             config.MetadataSyncProvider = getChecked('chkMetadataSyncProvider');
             config.MetadataSyncSegmentProvider = getChecked('chkMetadataSyncSegmentProvider');
+            config.MetadataSyncReplaceSegments = getChecked('chkMetadataSyncReplaceSegments');
+            config.MetadataSyncRemoveSegments = getChecked('chkMetadataSyncRemoveSegments');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
         }, 'saveMetadataStatus', 'Metadata settings saved.', 'Could not save the metadata settings.');
     }
@@ -609,7 +613,8 @@ export default function (view) {
             // A sync type's options only show while it is on.
             [['chkEnableContentSync', 'contentSyncOptions'], ['chkEnableHistorySync', 'historySyncOptions'],
                 ['chkEnableMetadataSync', 'metadataSyncOptions'], ['chkEnablePeopleSync', 'peopleSyncOptions'],
-                ['chkEnableUserSync', 'userSyncOptions'], ['chkEnablePlaylistSync', 'playlistSyncOptions']].forEach(function (pair) {
+                ['chkEnableUserSync', 'userSyncOptions'], ['chkEnablePlaylistSync', 'playlistSyncOptions'],
+                ['chkMetadataSyncSegmentProvider', 'segmentProviderOptions']].forEach(function (pair) {
                 ServerSyncShared.bindReveal(pair[0], pair[1]);
             });
             loadCallerAccessSettings(config);

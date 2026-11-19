@@ -12,6 +12,23 @@
 // Output
 // [object]: The view's module, with table, currentConfig, init, loadAll, loadStatus, loadItems, and the
 // modal and bulk actions.
+// formatSegmentTime
+// Writes a time in ticks as minutes and seconds, with hours when it has any.
+//
+// Inputs
+// ticks [number]: The time, in ticks of 100 nanoseconds.
+//
+// Output
+// [string]: The time, such as 1:05 or 1:02:05.
+function formatSegmentTime(ticks) {
+    var total = Math.max(0, Math.floor((Number(ticks) || 0) / 10000000));
+    var hours = Math.floor(total / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var seconds = total % 60;
+    var pad = function(n) { return n < 10 ? '0' + n : String(n); };
+    return hours > 0 ? hours + ':' + pad(minutes) + ':' + pad(seconds) : minutes + ':' + pad(seconds);
+}
+
 export function createMetadataSyncTableModule(ctx, kit) {
     'use strict';
 
@@ -75,6 +92,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                         if (config.MetadataSyncImages !== false && item.HasImagesChanges) changes.push('Images');
                         if (config.MetadataSyncPeople === true && item.HasPeopleChanges) changes.push('People');
                         if (config.MetadataSyncStudios !== false && item.HasStudiosChanges) changes.push('Studios');
+                        if (config.MetadataSyncSegmentProvider === true && item.HasSegmentsChanges) changes.push('Media segments');
                         return renderChangeBadges(changes);
                     }
                 },
@@ -178,6 +196,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 if (config.MetadataSyncImages !== false) badge('Images', item.HasImagesChanges === true);
                 if (config.MetadataSyncPeople === true) badge('People', item.HasPeopleChanges === true);
                 if (config.MetadataSyncStudios !== false) badge('Studios', item.HasStudiosChanges === true);
+                if (config.MetadataSyncSegmentProvider === true) badge('Media segments', item.HasSegmentsChanges === true);
 
                 container.innerHTML = html;
             },
@@ -194,6 +213,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var studiosEnabled = config.MetadataSyncStudios !== false;
                 var peopleEnabled = config.MetadataSyncPeople === true;
                 var imagesEnabled = config.MetadataSyncImages !== false;
+                var segmentsEnabled = config.MetadataSyncSegmentProvider === true;
 
                 var sourceMetadata = parseJsonSafe(item.SourceMetadataValue) || {};
                 var localMetadata = parseJsonSafe(item.LocalMetadataValue) || {};
@@ -238,6 +258,11 @@ export function createMetadataSyncTableModule(ctx, kit) {
                     if (item.HasImagesChanges) {
                         html += self.buildChangeDetailRow(item.ImagesChangesDetail);
                     }
+                }
+
+                if (segmentsEnabled) {
+                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Media Segments</td></tr>';
+                    html += self.buildSegmentsRows(parseJsonSafe(item.SourceSegmentsValue), parseJsonSafe(item.LocalSegmentsValue));
                 }
 
                 if (html === '') {
@@ -491,6 +516,46 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 if (value === '') return true;
                 if (Array.isArray(value) && value.length === 0) return true;
                 return false;
+            },
+
+            // buildSegmentsRows
+            // Builds one row for each media segment type on either side, with the times of each segment of that type.
+            //
+            // Inputs
+            // source [object]: The segments the pool holds for the file, with a Segments list, or null.
+            // local [object]: The segments the local segment table holds, with a Segments list, or null.
+            //
+            // Output
+            // [string]: The rows' HTML.
+            buildSegmentsRows: function(source, local) {
+                var html = '';
+                var timesOf = function(value, type) {
+                    var list = (value && Array.isArray(value.Segments) ? value.Segments : []).filter(function(s) { return s && s.Type === type; });
+                    return list.map(function(s) { return formatSegmentTime(s.StartTicks) + ' to ' + formatSegmentTime(s.EndTicks); }).join(', ');
+                };
+
+                var types = new Set();
+                [source, local].forEach(function(value) {
+                    (value && Array.isArray(value.Segments) ? value.Segments : []).forEach(function(s) { if (s && s.Type) types.add(s.Type); });
+                });
+
+                Array.from(types).sort().forEach(function(type) {
+                    var src = timesOf(source, type);
+                    var loc = timesOf(local, type);
+                    var after = source ? src : loc;
+                    html += '<tr class="' + (src !== loc && source ? 'serversync-modal-changed-row' : '') + '">';
+                    html += '<td class="serversync-compare-table-property">' + ServerSyncShared.escapeHtml(type) + '</td>';
+                    html += '<td class="serversync-compare-table-value">' + ServerSyncShared.escapeHtml(src || '-') + '</td>';
+                    html += '<td class="serversync-compare-table-value">' + ServerSyncShared.escapeHtml(loc || '-') + '</td>';
+                    html += '<td class="serversync-compare-table-value serversync-compare-table-merged">' + ServerSyncShared.escapeHtml(after || '-') + '</td>';
+                    html += '</tr>';
+                });
+
+                if (types.size === 0) {
+                    html += '<tr><td colspan="4" class="serversync-empty-cell">No media segments</td></tr>';
+                }
+
+                return html;
             },
 
             buildImagesRows: function(sourceImages, localImages) {

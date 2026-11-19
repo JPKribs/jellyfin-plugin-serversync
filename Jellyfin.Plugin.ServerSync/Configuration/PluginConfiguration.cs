@@ -453,6 +453,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncSegmentProvider { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the media segment provider replaces the segments another provider gave a file with the ones copied from a server.
+    /// </summary>
+    public bool MetadataSyncReplaceSegments { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the media segment provider removes a file's segments when no server it pulls from has any for the same file.
+    /// </summary>
+    public bool MetadataSyncRemoveSegments { get; set; }
+
+    /// <summary>
     /// Gets or sets the time the last Metadata run ended.
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }

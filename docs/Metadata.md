@@ -16,6 +16,8 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 * **Folder Items** also syncs metadata for container items such as series and seasons.
 * **Enable Metadata Provider** lets a library fill items from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers. It is on by default and works only while **Enable Metadata Sync** is on. See [Metadata Provider](MetadataProvider.md).
 * **Enable Media Segment Provider** lets Jellyfin's media segment scan copy intros, credits, and other segments from the same file on the servers this one pulls from. It is off by default and works only while **Enable Metadata Sync** is on. See [Media Segments](MetadataProvider.md#media-segments).
+    * **Replace Existing Segments** replaces the segments another provider gave a file with the ones copied from a server. It is off by default.
+    * **Remove Segments No Server Has** removes a file's segments when no server this one pulls from has any for the same file. It is off by default.
 * **Precedence** chooses which server is heard for an item that several servers hold, either the one whose edit is newest or always the highest ranked. See [Several Servers](SyncTypes.md#several-servers).
 
 The library filter on the **Storage** tab applies to metadata as it does to content.

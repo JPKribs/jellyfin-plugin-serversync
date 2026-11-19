@@ -126,3 +126,14 @@ test('buildPropertyTable says no category is on when every one is off', function
     module.buildPropertyTable({});
     assert.match(env.view.querySelector('#metadataSyncModalTableBody').innerHTML, /No sync categories are on\./);
 });
+
+test('buildSegmentsRows lists each segment type with its times, marks a change, and says when there are none', function () {
+    var source = { Segments: [{ Type: 'Intro', StartTicks: 50000000, EndTicks: 650000000 }, { Type: 'Outro', StartTicks: 36000000000, EndTicks: 36600000000 }] };
+    var local = { Segments: [{ Type: 'Intro', StartTicks: 50000000, EndTicks: 650000000 }] };
+    var html = module.buildSegmentsRows(source, local);
+    assert.match(html, /Intro/);
+    assert.match(html, /0:05 to 1:05/);
+    assert.match(html, /1:00:00 to 1:01:00/);
+    assert.equal((html.match(/serversync-modal-changed-row/g) || []).length, 1);
+    assert.match(module.buildSegmentsRows(null, null), /No media segments/);
+});

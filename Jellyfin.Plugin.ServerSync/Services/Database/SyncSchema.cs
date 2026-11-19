@@ -14,11 +14,11 @@ public static class SyncSchema
     /// <summary>
     /// The schema version. Raise it when the schema changes.
     /// </summary>
-    public const int CurrentSchemaVersion = 38;
+    public const int CurrentSchemaVersion = 39;
 
     /// <summary>
     /// The oldest schema version this release brings forward itself, which is the one <see cref="OldestUpgradableRelease"/> writes.
-    /// Each version since then only added tables, so <see cref="Upgrade"/> creates what is missing and changes nothing else.
+    /// Each version since then only added tables and nullable columns, so <see cref="Upgrade"/> adds what is missing and changes nothing else.
     /// </summary>
     public const int OldestUpgradableSchema = 36;
 
@@ -132,6 +132,31 @@ public static class SyncSchema
 
         CreateStatisticsTables(connection);
         CreateMediaSegmentTable(connection);
+        AddColumnIfMissing(connection, "MetadataSyncItems", "SourceSegmentsValue");
+        AddColumnIfMissing(connection, "MetadataSyncItems", "LocalSegmentsValue");
+        AddColumnIfMissing(connection, "MetadataSyncItems", "SourceSegmentsHash");
+        AddColumnIfMissing(connection, "MetadataSyncItems", "SyncedSegmentsHash");
+    }
+
+    /// <summary>
+    /// Adds a nullable text column to a table unless the table already has it, so an older database gains a column added in a later schema.
+    /// </summary>
+    /// <param name="connection">The open database.</param>
+    /// <param name="table">The table, one of the schema's own names.</param>
+    /// <param name="column">The column, one of the schema's own names.</param>
+    private static void AddColumnIfMissing(SqliteConnection connection, string table, string column)
+    {
+        using var check = connection.CreateCommand();
+        check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = @column";
+        check.Parameters.AddWithValue("@column", column);
+        if (Convert.ToInt64(check.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
+        {
+            return;
+        }
+
+        using var add = connection.CreateCommand();
+        add.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT";
+        add.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -308,7 +333,7 @@ public static class SyncSchema
     }
 
     /// <summary>
-    /// Creates the Metadata sync table, one row for each item, holding Metadata, Images, People, and Studios.
+    /// Creates the Metadata sync table, one row for each item, holding Metadata, Images, People, Studios, and media segments, the last added in schema 39.
     /// Each category has its own hashes, so a scan skips the categories that match what was synced.
     /// </summary>
     private static void CreateMetadataTable(SqliteConnection connection)
@@ -342,6 +367,10 @@ public static class SyncSchema
                 LocalStudiosValue TEXT,
                 SourceStudiosHash TEXT,
                 SyncedStudiosHash TEXT,
+                SourceSegmentsValue TEXT,
+                LocalSegmentsValue TEXT,
+                SourceSegmentsHash TEXT,
+                SyncedSegmentsHash TEXT,
                 Status INTEGER NOT NULL DEFAULT 0,
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,

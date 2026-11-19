@@ -32,6 +32,7 @@ public static class MetadataSyncItemExtensions
         var hasImagesChanges = item.HasImagesChanges;
         var hasPeopleChanges = item.HasPeopleChanges;
         var hasStudiosChanges = item.HasStudiosChanges;
+        var hasSegmentsChanges = item.HasSegmentsChanges;
         var changesSummary = item.ChangesSummary;
 
         return new MetadataSyncItemDto
@@ -54,6 +55,8 @@ public static class MetadataSyncItemExtensions
             LocalPeopleValue = includeBlobs ? item.People.Local : null,
             SourceStudiosValue = includeBlobs ? item.Studios.Source : null,
             LocalStudiosValue = includeBlobs ? item.Studios.Local : null,
+            SourceSegmentsValue = includeBlobs ? item.Segments.Source : null,
+            LocalSegmentsValue = includeBlobs ? item.Segments.Local : null,
             HasMetadataChanges = hasMetadataChanges,
             HasImagesChanges = hasImagesChanges,
             ImagesChangesDetail = includeBlobs && hasImagesChanges
@@ -64,7 +67,8 @@ public static class MetadataSyncItemExtensions
                 : null,
             HasPeopleChanges = hasPeopleChanges,
             HasStudiosChanges = hasStudiosChanges,
-            HasChanges = hasMetadataChanges || hasImagesChanges || hasPeopleChanges || hasStudiosChanges,
+            HasSegmentsChanges = hasSegmentsChanges,
+            HasChanges = hasMetadataChanges || hasImagesChanges || hasPeopleChanges || hasStudiosChanges || hasSegmentsChanges,
             ChangesSummary = changesSummary,
             SourceServerUrl = sourceServerUrl,
             ServerKey = item.ServerKey,

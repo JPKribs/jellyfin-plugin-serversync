@@ -119,6 +119,21 @@ public class MetadataSyncItemDto
     public bool HasStudiosChanges { get; set; }
 
     /// <summary>
+    /// Gets or sets the media segments the pool holds for the file, as a <see cref="MediaSegmentsValue"/>.
+    /// </summary>
+    public string? SourceSegmentsValue { get; set; }
+
+    /// <summary>
+    /// Gets or sets the media segments the local segment table holds for the file, as a <see cref="MediaSegmentsValue"/>.
+    /// </summary>
+    public string? LocalSegmentsValue { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the media segments have changes to sync.
+    /// </summary>
+    public bool HasSegmentsChanges { get; set; }
+
+    /// <summary>
     /// Gets or sets whether there are any changes to sync.
     /// </summary>
     public bool HasChanges { get; set; }

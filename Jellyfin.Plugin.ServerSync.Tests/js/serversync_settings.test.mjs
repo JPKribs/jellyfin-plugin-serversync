@@ -272,3 +272,24 @@ test('the whitelist is a Repeater that saves each row with a user, its name, and
     ]);
     assert.equal(statusText(opened.view.querySelector('#saveCallerAccessStatus')), 'Whitelist saved.');
 });
+
+test('the two media segment switches show off when never saved, and the Metadata save keeps what they show', async function () {
+    var opened = await openPage({
+        config: { Servers: [] },
+        checkboxes: ['chkMetadataSyncReplaceSegments', 'chkMetadataSyncRemoveSegments'],
+        buttons: ['btnSaveMetadataSettings'],
+        ids: ['saveMetadataStatus']
+    });
+    var saved = null;
+    globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
+    var replace = opened.view.querySelector('#chkMetadataSyncReplaceSegments');
+    var remove = opened.view.querySelector('#chkMetadataSyncRemoveSegments');
+    assert.equal(replace.checked, false);
+    assert.equal(remove.checked, false);
+
+    replace.checked = true;
+    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    await settle(20);
+    assert.equal(saved.MetadataSyncReplaceSegments, true);
+    assert.equal(saved.MetadataSyncRemoveSegments, false);
+});

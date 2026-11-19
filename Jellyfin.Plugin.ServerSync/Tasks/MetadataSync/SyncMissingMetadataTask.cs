@@ -34,6 +34,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     private readonly IProviderManager _providerManager;
     private readonly MetadataSyncTableService _metadataService;
     private readonly AppliedVersionRecorder _applied;
+    private readonly MediaSegmentStore? _segments;
 
     /// <summary>The most items saved in one call to Jellyfin's library.</summary>
     private const int SaveBatchSize = 50;
@@ -55,6 +56,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// <param name="metadataService">Builds and compares metadata sync rows.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="applied">Records the stamp each applied value carries.</param>
+    /// <param name="segments">Holds the local segment table media segments are written to, or null to write none.</param>
     public SyncMissingMetadataTask(
         ILogger<SyncMissingMetadataTask> logger,
         ILibraryManager libraryManager,
@@ -63,9 +65,11 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         IPluginConfigurationManager configManager,
         MetadataSyncTableService metadataService,
         MetadataSyncTableManager manager,
-        AppliedVersionRecorder applied)
+        AppliedVersionRecorder applied,
+        MediaSegmentStore? segments = null)
         : base(logger, manager, clientFactory, configManager)
     {
+        _segments = segments;
         _libraryManager = libraryManager;
         _providerManager = providerManager;
         _metadataService = metadataService;
@@ -113,7 +117,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         if (config.GetPullServers().Count == 0) return false;
         if (config.GetEnabledLibraryMappings().Count == 0) return false;
         return config.MetadataSyncMetadata || config.MetadataSyncImages
-            || config.MetadataSyncPeople || config.MetadataSyncStudios;
+            || config.MetadataSyncPeople || config.MetadataSyncStudios || config.MetadataSyncSegmentProvider;
     }
 
     /// <summary>
@@ -278,6 +282,21 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                 }
             }
 
+            if (WritesSegments(record))
+            {
+                anyApplyAttempted = true;
+                try
+                {
+                    var value = MediaSegmentsValue.FromJson(record.Segments.Source) ?? throw new InvalidOperationException("the media segments could not be read");
+                    _segments!.Save(new[] { value.ToRow(record.LocalItemId!, DateTime.UtcNow) });
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogDebug(ex, "Media segments apply threw for {ItemName}", FormatUtilities.SanitizeForLog(record.ItemName));
+                    failures.Add($"Media segments: apply threw, {ex.Message}");
+                }
+            }
+
             // Images saved themselves already, so they take no part in this save.
             return new PendingSave(record, localItem, anyApplyAttempted && (metadataChanged || peopleChanged || studiosChanged), failures, peopleScope);
         }
@@ -318,7 +337,8 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         var anyCandidate = (config.MetadataSyncMetadata && record.HasMetadataChanges)
             || (config.MetadataSyncImages && record.HasImagesChanges)
             || (config.MetadataSyncPeople && record.HasPeopleChanges)
-            || (config.MetadataSyncStudios && record.HasStudiosChanges);
+            || (config.MetadataSyncStudios && record.HasStudiosChanges)
+            || WritesSegments(record);
         if (!anyCandidate)
         {
             return;
@@ -396,6 +416,20 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             {
                 failures.Add($"Studios: {reason}");
                 Logger.LogDebug("Apply Studios failed verification for {ItemName}: {Reason}", FormatUtilities.SanitizeForLog(record.ItemName), FormatUtilities.SanitizeForLog(reason, 300));
+            }
+        }
+
+        if (WritesSegments(record))
+        {
+            record.Segments.Local = MediaSegmentsValue.FromRow(_segments!.Get(record.LocalItemId!))?.ToJson();
+            if (record.Segments.Comparator.Equals(record.Segments.Source, record.Segments.Local))
+            {
+                record.Segments.MarkSynced();
+                synced.Add("Media segments");
+            }
+            else
+            {
+                failures.Add("Media segments: the local segment table does not hold the source's segments after apply");
             }
         }
 
@@ -577,6 +611,10 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             Logger.LogInformation("{Task}: updated {Categories} for {ItemName}", Name, categories, name);
         }
     }
+
+    /// <summary>Says whether applying a row writes media segments, which needs the store, Enable Media Segment Provider on, and a change.</summary>
+    private bool WritesSegments(MetadataSyncItem record)
+        => _segments is not null && ConfigManager.Configuration.MetadataSyncSegmentProvider && record.HasSegmentsChanges;
 
     /// <summary>Finds the row's local item, or throws with the reason the row carries.</summary>
     private BaseItem ResolveLocalItem(MetadataSyncItem record)

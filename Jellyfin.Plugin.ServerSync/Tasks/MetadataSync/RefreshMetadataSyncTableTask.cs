@@ -29,7 +29,8 @@ public class RefreshMetadataSyncTableTask
 {
     private readonly MetadataSyncTableService _metadataService;
     private readonly ScanConflictSettler _conflicts;
-    private readonly MediaSegmentRefresher? _segments;
+    private readonly MediaSegmentStore? _segments;
+    private readonly string _thisServerId;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RefreshMetadataSyncTableTask"/> class.
@@ -42,7 +43,8 @@ public class RefreshMetadataSyncTableTask
     /// <param name="conflicts">Settles which server speaks for an item both sides changed.</param>
     /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
     /// <param name="statistics">Keeps what each scan found for the Statistics tab, or null to keep nothing.</param>
-    /// <param name="segments">Reads the sources' media segments for the media segment provider, or null to read none.</param>
+    /// <param name="segments">Holds the local segment table, which each row's media segments are compared with, or null to read no segments.</param>
+    /// <param name="applicationHost">Gives this server's id, so its own segments are never taken back, or null.</param>
     public RefreshMetadataSyncTableTask(
         ILogger<RefreshMetadataSyncTableTask> logger,
         IPluginConfigurationManager configManager,
@@ -52,13 +54,24 @@ public class RefreshMetadataSyncTableTask
         ScanConflictSettler conflicts,
         ScanWatermarkStore watermarks,
         SyncStatisticsStore? statistics = null,
-        MediaSegmentRefresher? segments = null)
+        MediaSegmentStore? segments = null,
+        MediaBrowser.Controller.IServerApplicationHost? applicationHost = null)
         : base(logger, manager, clientFactory, configManager, watermarks, statistics)
     {
         _metadataService = metadataService;
         _conflicts = conflicts;
         _segments = segments;
+        _thisServerId = applicationHost?.SystemId ?? string.Empty;
     }
+
+    /// <summary>
+    /// What each server holding a file answered for its media segments in this run, by local path, with the server's rank.
+    /// <see cref="GetListAsync"/> fills it and <see cref="BuildRecordAsync"/> reads it.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, ConcurrentBag<(int Rank, string ServerKey, string? ServerId, string SourceItemId, Models.Peer.PeerSegmentsItem Answer)>> _segmentAnswers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Says whether rows carry media segments, which needs the store and Enable Media Segment Provider on.</summary>
+    private bool ReadsSegments => _segments is not null && ConfigManager.Configuration.MetadataSyncSegmentProvider;
 
     /// <summary>
     /// The local items of each mapped library by path, for one run and by source library id.
@@ -70,43 +83,45 @@ public class RefreshMetadataSyncTableTask
     /// Clears the local items a run holds, which each server's listing then fills again.
     /// </summary>
     /// <inheritdoc />
-    protected override void OnRunStarting() => _localByLibrary.Clear();
+    protected override void OnRunStarting()
+    {
+        _localByLibrary.Clear();
+        _segmentAnswers.Clear();
+    }
 
     /// <summary>
     /// Clears the local items a scan held, so a single item from a hint is read from the library as it is now.
     /// </summary>
     /// <inheritdoc />
-    protected override void PrepareForOne(MetadataWork work) => _localByLibrary.Clear();
+    protected override void PrepareForOne(MetadataWork work)
+    {
+        _localByLibrary.Clear();
+        _segmentAnswers.Clear();
+    }
 
     /// <summary>
-    /// Lets go of the local items once the scan has built its rows, so they are not held between runs, and reads the sources' media segments when the provider is on.
+    /// Lets go of the local items and segment answers once the scan has built its rows, so they are not held between runs.
     /// </summary>
     /// <inheritdoc />
     protected override async Task FinalizeAsync(CancellationToken cancellationToken)
     {
         _localByLibrary.Clear();
-        await RefreshMediaSegmentsAsync(cancellationToken).ConfigureAwait(false);
+        _segmentAnswers.Clear();
+
+        // Segments kept for files the Metadata table no longer holds are forgotten. A failure never fails the scan.
+        if (ReadsSegments)
+        {
+            try
+            {
+                _segments!.RemoveUntracked();
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex)
+            {
+                Logger.LogWarning(ex, "{Task}: could not forget the media segments of files no longer tracked", Name);
+            }
+        }
+
         await base.FinalizeAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Reads the sources' media segments for every matched file while Enable Media Segment Provider is on. A failure is logged and never fails the scan.
-    /// </summary>
-    private async Task RefreshMediaSegmentsAsync(CancellationToken cancellationToken)
-    {
-        if (_segments is null || !ConfigManager.Configuration.MetadataSyncSegmentProvider)
-        {
-            return;
-        }
-
-        try
-        {
-            await _segments.RefreshAsync(Sources, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or System.Text.Json.JsonException)
-        {
-            Logger.LogWarning(ex, "{Task}: could not keep the media segments read from the sources", Name);
-        }
     }
 
     /// <summary>Finds a local item among the ones this run listed, or null when the run did not list it.</summary>
@@ -130,7 +145,8 @@ public class RefreshMetadataSyncTableTask
                 config.MetadataSyncStudios,
                 config.MetadataSyncPeople,
                 config.MetadataSyncImages,
-                config.MetadataSyncFolderItems
+                config.MetadataSyncFolderItems,
+                config.MetadataSyncSegmentProvider
             });
         }
     }
@@ -403,8 +419,52 @@ public class RefreshMetadataSyncTableTask
             Logger.LogInformation("{Task}: read the cast of {Count} of {Total} items from '{Server}', since the rest are unchanged since the last scan", Name, castFetches, totalMatched, source.Name);
         }
 
+        var listed = work.ToList();
+        if (ReadsSegments)
+        {
+            await ReadSegmentsAsync(source, listed, cancellationToken).ConfigureAwait(false);
+        }
+
         progress.Report(100);
-        return work.ToList();
+        return listed;
+    }
+
+    /// <summary>
+    /// Reads the media segments of the files a source listed, 200 to a request, and notes each answer under the file's local path.
+    /// A source that cannot answer notes nothing, so its files keep the segments their rows held.
+    /// </summary>
+    private async Task ReadSegmentsAsync(ScanSource source, IReadOnlyList<MetadataWork> listed, CancellationToken cancellationToken)
+    {
+        var files = listed
+            .Where(w => !w.IsFolder && w.SourceItem.Id is not null && PriorityKeyOf(w) is { Length: > 0 })
+            .GroupBy(w => w.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(w => PriorityKeyOf(w)!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
+        foreach (var batch in files.Keys.Chunk(Models.Peer.PeerSegmentsRequest.MaxItems))
+        {
+            Models.Peer.PeerSegmentsResponse answer;
+            try
+            {
+                answer = await source.Client.GetPeerSegmentsAsync(batch, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                Logger.LogWarning("{Task}: could not read media segments from '{Server}', so its files keep the ones their rows held: {Reason}", Name, source.Name, JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(ex.Message, 300));
+                return;
+            }
+
+            foreach (var item in answer.Items)
+            {
+                if (item is null || !files.TryGetValue(item.ItemId ?? string.Empty, out var paths))
+                {
+                    continue;
+                }
+
+                foreach (var path in paths)
+                {
+                    _segmentAnswers.GetOrAdd(path, _ => new()).Add((source.Priority, source.Key, source.Server.ServerId, item.ItemId!, item));
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -667,6 +727,10 @@ public class RefreshMetadataSyncTableTask
         }
 
         fresh.ServerKey = source.Source.Key;
+        if (ReadsSegments && !fresh.IsFolder && !string.IsNullOrEmpty(fresh.LocalItemId))
+        {
+            FillSegments(fresh, priorRecord);
+        }
 
         // Without the synced values carried over, every scan would discard the baseline.
         var key = (fresh.SourceLibraryId, fresh.SourceItemId);
@@ -682,9 +746,32 @@ public class RefreshMetadataSyncTableTask
             fresh.People.SyncedHash = prev.People.SyncedHash;
             fresh.Studios.Synced = prev.Studios.Synced;
             fresh.Studios.SyncedHash = prev.Studios.SyncedHash;
+            fresh.Segments.Synced = prev.Segments.Synced;
+            fresh.Segments.SyncedHash = prev.Segments.SyncedHash;
         }
 
         return fresh;
+    }
+
+    /// <summary>
+    /// Sets a row's media segments: the source value is what the pool holds for the file, picked across every server that answered for it in rank order,
+    /// and the local value is what the local segment table holds. With no answer for the file this run, the row keeps the source value it held.
+    /// A pool with no segments for a file that has none kept here is no change, unless Remove Segments No Server Has is on.
+    /// </summary>
+    private void FillSegments(MetadataSyncItem fresh, MetadataSyncItem? prior)
+    {
+        var local = MediaSegmentsValue.FromRow(_segments!.Get(fresh.LocalItemId!));
+        if (_segmentAnswers.TryGetValue(fresh.LocalPath ?? string.Empty, out var answers))
+        {
+            var chosen = MediaSegmentsValue.Choose(answers.OrderBy(a => a.Rank).Select(a => (a.ServerKey, a.ServerId, a.SourceItemId, a.Answer)), _thisServerId);
+            fresh.Segments.UpdateSource(MediaSegmentsValue.Worth(chosen, local, ConfigManager.Configuration.MetadataSyncRemoveSegments)?.ToJson());
+        }
+        else
+        {
+            fresh.Segments.UpdateSource(prior?.Segments.Source);
+        }
+
+        fresh.Segments.Local = local?.ToJson();
     }
 
     /// <inheritdoc />

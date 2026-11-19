@@ -39,7 +39,8 @@ public sealed class MetadataSyncTableManager
         "SyncedMetadataHash = NULL",
         "SyncedImagesHash = NULL",
         "SyncedPeopleHash = NULL",
-        "SyncedStudiosHash = NULL"
+        "SyncedStudiosHash = NULL",
+        "SyncedSegmentsHash = NULL"
     };
 
     /// <inheritdoc />
@@ -106,6 +107,11 @@ public sealed class MetadataSyncTableManager
         item.Studios.Local = ReadNullableString(reader, "LocalStudiosValue");
         item.Studios.SourceHash = ReadNullableString(reader, "SourceStudiosHash");
         item.Studios.SyncedHash = ReadNullableString(reader, "SyncedStudiosHash");
+
+        item.Segments.Source = ReadNullableString(reader, "SourceSegmentsValue");
+        item.Segments.Local = ReadNullableString(reader, "LocalSegmentsValue");
+        item.Segments.SourceHash = ReadNullableString(reader, "SourceSegmentsHash");
+        item.Segments.SyncedHash = ReadNullableString(reader, "SyncedSegmentsHash");
 
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
@@ -184,6 +190,10 @@ public sealed class MetadataSyncTableManager
             .Set("LocalStudiosValue", record.Studios.Local)
             .Set("SourceStudiosHash", record.Studios.SourceHash)
             .SetUnlessNull("SyncedStudiosHash", record.Studios.SyncedHash)
+            .Set("SourceSegmentsValue", record.Segments.Source)
+            .Set("LocalSegmentsValue", record.Segments.Local)
+            .Set("SourceSegmentsHash", record.Segments.SourceHash)
+            .SetUnlessNull("SyncedSegmentsHash", record.Segments.SyncedHash)
             .SyncColumns(record);
         ExecuteWrite(upsert.Execute);
     }

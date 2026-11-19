@@ -20,9 +20,9 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Services.Database;
 /// </summary>
 public sealed class SyncSchemaTests : IDisposable
 {
-    // The fingerprint of every table, column, and index at schema v38. A change to the schema changes
+    // The fingerprint of every table, column, and index at schema v39. A change to the schema changes
     // it, which is the moment to raise SyncSchema.CurrentSchemaVersion and decide what older files do.
-    private const string SchemaFingerprint = "9F85219F05C9753815D36C0284544F8AC7746FCFEC1E38F54AA75302ACE1D5BA";
+    private const string SchemaFingerprint = "4C54FF6448E55EC775EC3F840D553C1552E62198941258514ECB49B158D9208B";
 
     private readonly string _dataPath;
     private readonly string _dbPath;
@@ -102,7 +102,7 @@ public sealed class SyncSchemaTests : IDisposable
             File.WriteAllText(dump, described);
         }
 
-        Assert.Equal(38, SyncSchema.CurrentSchemaVersion);
+        Assert.Equal(39, SyncSchema.CurrentSchemaVersion);
         Assert.Equal(SchemaFingerprint, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(described))));
     }
 
@@ -142,7 +142,7 @@ public sealed class SyncSchemaTests : IDisposable
         new SyncDatabase(NullLogger<SyncDatabase>.Instance, _dataPath).Dispose();
         using (var conn = Raw())
         {
-            Exec(conn, "DROP TABLE ScanRuns; DROP TABLE LinkStreamDays; DROP TABLE SourceMediaSegments; CREATE TABLE Marker (Id INTEGER); INSERT INTO Marker VALUES (7);");
+            Exec(conn, "DROP TABLE ScanRuns; DROP TABLE LinkStreamDays; DROP TABLE SourceMediaSegments; ALTER TABLE MetadataSyncItems DROP COLUMN SourceSegmentsValue; ALTER TABLE MetadataSyncItems DROP COLUMN LocalSegmentsValue; ALTER TABLE MetadataSyncItems DROP COLUMN SourceSegmentsHash; ALTER TABLE MetadataSyncItems DROP COLUMN SyncedSegmentsHash; CREATE TABLE Marker (Id INTEGER); INSERT INTO Marker VALUES (7);");
             DatabaseSchema.SetVersion(conn, SyncSchema.OldestUpgradableSchema);
         }
 
@@ -155,6 +155,7 @@ public sealed class SyncSchemaTests : IDisposable
         Assert.Equal(SyncSchema.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(after));
         Assert.Equal(7L, Scalar(after, "SELECT Id FROM Marker"));
         Assert.Equal(3L, Scalar(after, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('ScanRuns', 'LinkStreamDays', 'SourceMediaSegments')"));
+        Assert.Equal(4L, Scalar(after, "SELECT COUNT(*) FROM pragma_table_info('MetadataSyncItems') WHERE name LIKE '%Segments%'"));
     }
 
     /// <summary>

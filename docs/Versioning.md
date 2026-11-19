@@ -20,7 +20,7 @@ A server that reports no protocol is compatible only when it runs exactly the sa
 
 ## Updating From an Older Release
 
-Version 12.4.18.0 carries no upgrade steps for anything older than 12.4.13.0. It opens the database and settings that 12.4.13.0 leaves behind, and nothing before them. On its first start it adds the two tables the **Statistics** tab reads and the table of media segments to that database, and changes nothing else in it.
+Version 12.4.18.0 carries no upgrade steps for anything older than 12.4.13.0. It opens the database and settings that 12.4.13.0 leaves behind, and nothing before them. On its first start it adds the two tables the **Statistics** tab reads, the table of media segments, and four media segment columns to the Metadata table, and changes nothing else in it.
 
 To update a server that runs a release before 12.4.13.0:
 

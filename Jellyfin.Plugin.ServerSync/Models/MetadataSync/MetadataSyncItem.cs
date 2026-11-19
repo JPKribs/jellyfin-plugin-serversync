@@ -6,7 +6,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 
 /// <summary>
-/// One row per source library and source item, holding the metadata, images, people, and studios as separate JSON values.
+/// One row per source library and source item, holding the metadata, images, people, studios, and media segments as separate JSON values.
 /// Each value keeps its own source, local, and synced copies with the hashes of what was last applied.
 /// </summary>
 public class MetadataSyncItem : SyncRecord
@@ -79,6 +79,11 @@ public class MetadataSyncItem : SyncRecord
     public SyncableValue<string> Studios { get; } = new() { Comparator = new JsonBlobComparator() };
 
     /// <summary>
+    /// Gets the media segments, as a <see cref="MediaSegmentsValue"/>, where the local value is what the local segment table holds.
+    /// </summary>
+    public SyncableValue<string> Segments { get; } = new() { Comparator = new JsonBlobComparator() };
+
+    /// <summary>
     /// Gets a value indicating whether the metadata blob has changes to sync, which takes a local item to apply them to.
     /// </summary>
     public bool HasMetadataChanges
@@ -106,8 +111,14 @@ public class MetadataSyncItem : SyncRecord
     public bool HasStudiosChanges
         => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(Studios.Source) && Studios.Source != "[]" && Studios.HasChanges;
 
+    /// <summary>
+    /// Gets a value indicating whether the media segments have changes to sync, which takes a local item to apply them to.
+    /// </summary>
+    public bool HasSegmentsChanges
+        => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(Segments.Source) && Segments.HasChanges;
+
     /// <inheritdoc />
-    public override bool HasChanges => HasMetadataChanges || HasImagesChanges || HasPeopleChanges || HasStudiosChanges;
+    public override bool HasChanges => HasMetadataChanges || HasImagesChanges || HasPeopleChanges || HasStudiosChanges || HasSegmentsChanges;
 
     /// <inheritdoc />
     public override void MarkSynced()
@@ -116,6 +127,7 @@ public class MetadataSyncItem : SyncRecord
         Images.MarkSynced();
         People.MarkSynced();
         Studios.MarkSynced();
+        Segments.MarkSynced();
     }
 
     /// <summary>
@@ -156,6 +168,11 @@ public class MetadataSyncItem : SyncRecord
             if (HasStudiosChanges)
             {
                 changes.Add("Studios");
+            }
+
+            if (HasSegmentsChanges)
+            {
+                changes.Add("Media segments");
             }
 
             return string.Join(", ", changes);

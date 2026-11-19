@@ -24,7 +24,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
 /// <summary>
 /// Answers Jellyfin's media segment scan with the segments the metadata scan read from a source for the same file, without asking the source.
-/// For such a file the source's segments are the only ones kept, so it runs last and removes the segments other providers gave the file, unless they already match the source's.
+/// It runs last, and replaces or removes the segments other providers gave a file only while Replace Existing Segments or Remove Segments No Server Has is on.
 /// When it holds nothing for an item, it gives back the segments Jellyfin holds, so nothing is removed.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(IMediaSegmentProvider))]
@@ -126,25 +126,54 @@ public sealed class PeerSegmentProvider : IMediaSegmentProvider, IHasOrder
         }
 
         var others = (await manager.GetSegmentsAsync(item, null, OthersOnly(_libraryManager.GetLibraryOptions(item)), filterByProvider: true).ConfigureAwait(false)).ToList();
-
-        // Another provider already holds exactly the source's version, so nothing is replaced.
-        if (others.Count > 0 && SameSegments(others, fitted))
+        var config = _configManager.Configuration;
+        var plan = Plan(fitted, others, kept, config.MetadataSyncReplaceSegments, config.MetadataSyncRemoveSegments);
+        if (plan.RemoveOthers)
         {
-            return Array.Empty<MediaSegmentDto>();
+            foreach (var segment in others)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await manager.DeleteSegmentAsync(segment.Id).ConfigureAwait(false);
+            }
+
+            _logger.LogDebug("Removed {Count} media segments other providers gave {Path}", others.Count, item.Path);
         }
 
-        foreach (var segment in others)
+        return plan.Ours;
+    }
+
+    /// <summary>
+    /// Decides what a file's segments become. The source's segments are added when the file has no others. Segments another provider gave it stay
+    /// unless replacing is on, and nothing is added beside them. When no server has segments for the file, its segments stay unless removing is on.
+    /// </summary>
+    /// <param name="fitted">The source's segments, fitted to the file, empty when no server has any.</param>
+    /// <param name="others">The segments other providers gave the file.</param>
+    /// <param name="ours">The segments Server Sync gave the file before.</param>
+    /// <param name="replace">Whether Replace Existing Segments is on.</param>
+    /// <param name="remove">Whether Remove Segments No Server Has is on.</param>
+    /// <returns>Server Sync's segments for the file, and whether the other providers' are removed.</returns>
+    public static SegmentPlan Plan(IReadOnlyList<MediaSegmentDto> fitted, IReadOnlyList<MediaSegmentDto> others, IReadOnlyList<MediaSegmentDto> ours, bool replace, bool remove)
+    {
+        ArgumentNullException.ThrowIfNull(fitted);
+        ArgumentNullException.ThrowIfNull(others);
+        ArgumentNullException.ThrowIfNull(ours);
+        if (fitted.Count == 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await manager.DeleteSegmentAsync(segment.Id).ConfigureAwait(false);
+            return remove ? new SegmentPlan(Array.Empty<MediaSegmentDto>(), others.Count > 0) : new SegmentPlan(ours, false);
         }
 
-        if (others.Count > 0)
+        if (others.Count == 0)
         {
-            _logger.LogDebug("Removed {Count} media segments other providers gave {Path}, since the source's are the only ones kept", others.Count, item.Path);
+            return new SegmentPlan(fitted, false);
         }
 
-        return fitted;
+        // Another provider's segments stay when they already match the source's, or when replacing is off.
+        if (!replace || SameSegments(others, fitted))
+        {
+            return new SegmentPlan(Array.Empty<MediaSegmentDto>(), false);
+        }
+
+        return new SegmentPlan(fitted, true);
     }
 
     /// <summary>
