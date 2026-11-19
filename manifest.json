@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.18.0",
+        "changelog": "\n## Added\n- Enable Media Segment Provider, under Metadata, copies intros, credits, recaps, previews, and commercials from the same file on the servers this one pulls from. Each metadata scan keeps them in the sync database, and Jellyfin's Media Segment Scan takes them from there without asking any server. For such a file the source's segments are the only ones kept. It is off by default\n\n## Developer\n- POST /Sync/Peer/Segments returns the media segments of up to 200 items, with each file's size, runtime, and the server the segments were first made on. A source on an older release answers 404, and the segments already kept stay\n- The database schema is v38, which adds the SourceMediaSegments table. Older releases can still read it\n- The wire protocol is unchanged, so this release works alongside 12.4.17.1 one server at a time",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.18.0/jellyfin-plugin-serversync-12.4.18.0.zip",
+        "checksum": "fc091f875e972e3360200f71b84cd1d1",
+        "timestamp": "2026-11-19T06:26:38Z"
+      },
+      {
         "version": "12.4.17.1",
         "changelog": "\n## Added\n- Enable Metadata Provider, under Metadata and under People, decides whether Server Sync answers Jellyfin as a metadata and image fetcher for items and for people. Both are on by default\n\n## Fixed\n- The metadata provider asked the servers this one pulls from, and logged that none answered, while Metadata or People syncing was off. It asks nothing and stays quiet unless the sync type and its Enable Metadata Provider are both on\n\n## Developer\n- PeerMetadataSource takes the plugin configuration and answers for an item type only while its sync type and provider switch are on\n- The wire protocol and the database schema are unchanged, so this release works alongside 12.4.17.0 one server at a time",
         "targetAbi": "12.4.0.0",
