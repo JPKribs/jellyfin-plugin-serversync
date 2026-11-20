@@ -276,7 +276,6 @@ export default function (view) {
         confirmDialog(ServerSyncShared.t.tr('ConfirmDeleteCachedFiles'), {
             title: ServerSyncShared.t.tr('ButtonDeleteCachedFiles'),
             confirmText: ServerSyncShared.t.tr('Delete'),
-            cancelText: ServerSyncShared.t.tr('ButtonCancel'),
             destructive: true
         }).then(function (confirmed) {
             if (!confirmed) return;
@@ -646,7 +645,6 @@ export default function (view) {
             html: true,
             title: title,
             confirmText: ServerSyncShared.t.tr('Reset'),
-            cancelText: ServerSyncShared.t.tr('ButtonCancel'),
             destructive: true
         });
     }

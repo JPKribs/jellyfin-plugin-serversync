@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
 /// Writes the Change Queue's events to the Activity page.
-/// Changes from peers are summed into one entry for each outcome, such as "12 Items Synced", so a busy sync never floods it.
+/// Changes from peers are summed into one entry for each outcome, such as "12 items synced", so a busy sync never floods it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HintActivityLog : IDisposable
@@ -39,19 +39,22 @@ public sealed class HintActivityLog : IDisposable
         ArgumentNullException.ThrowIfNull(activity);
         _activity = activity;
         _serverConfig = serverConfig;
-        _summary = new ActivitySummary(activity);
+        _summary = new ActivitySummary(activity, language: () => Language);
         _synced = new ActivityOutcome(
             "ServerSync.HintsApplied",
-            "Synced",
-            t => Text(t.Total == 1 ? TranslationKeys.ActivitySyncedOne : TranslationKeys.ActivitySyncedMany, CountItems(t.Total, Language), ActivityText.CountedList(t.Sources)));
+            TranslationKeys.ActivitySyncedNameOne,
+            TranslationKeys.ActivitySyncedNameMany,
+            (t, language) => BaseTranslations.Format(t.Total == 1 ? TranslationKeys.ActivitySyncedOne : TranslationKeys.ActivitySyncedMany, language, CountItems(t.Total, language), ActivityText.CountedList(t.Sources)));
         _notSynced = new ActivityOutcome(
             "ServerSync.HintsDropped",
-            "Not Synced",
-            t => Text(t.Total == 1 ? TranslationKeys.ActivityNotSyncedOne : TranslationKeys.ActivityNotSyncedMany, CountItems(t.Total, Language), ActivityText.CountedList(t.Sources), ActivityText.CountedList(t.Reasons)));
+            TranslationKeys.ActivityNotSyncedNameOne,
+            TranslationKeys.ActivityNotSyncedNameMany,
+            (t, language) => BaseTranslations.Format(t.Total == 1 ? TranslationKeys.ActivityNotSyncedOne : TranslationKeys.ActivityNotSyncedMany, language, CountItems(t.Total, language), ActivityText.CountedList(t.Sources), ActivityText.CountedList(t.Reasons)));
         _retrying = new ActivityOutcome(
             "ServerSync.HintsRetrying",
-            "Retrying",
-            t => Text(TranslationKeys.ActivityRetrying, CountItems(t.Total, Language), ActivityText.CountedList(t.Sources)),
+            TranslationKeys.ActivityRetryingNameOne,
+            TranslationKeys.ActivityRetryingNameMany,
+            (t, language) => BaseTranslations.Format(TranslationKeys.ActivityRetrying, language, CountItems(t.Total, language), ActivityText.CountedList(t.Sources)),
             LogLevel.Warning);
     }
 
@@ -139,7 +142,7 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer was applied here, written together with the others as "12 Items Synced".
+    /// Records that a hint from a peer was applied here, written together with the others as "12 items synced".
     /// </summary>
     /// <param name="hint">The hint that was applied.</param>
     /// <param name="originName">The name the entry gives the origin.</param>
@@ -153,7 +156,7 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer was dropped here, written together with the others as "3 Items Not Synced".
+    /// Records that a hint from a peer was dropped here, written together with the others as "3 items not synced".
     /// </summary>
     /// <param name="hint">The hint that was dropped.</param>
     /// <param name="originName">The name the entry gives the origin.</param>
@@ -167,7 +170,7 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer keeps failing here, on its second and sixth try, as "4 Items Retrying".
+    /// Records that a hint from a peer keeps failing here, on its second and sixth try, as "4 items retrying".
     /// The first failure is often a passing one, so it writes nothing.
     /// </summary>
     /// <param name="hint">The hint that failed, whose attempts decide whether to write.</param>

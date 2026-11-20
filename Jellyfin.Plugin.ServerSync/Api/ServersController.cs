@@ -92,7 +92,7 @@ public class ServersController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            return BadRequest(BaseTranslations.Get(TranslationKeys.ErrorServerKeyRequired, RequestLanguage.Of(Request)));
+            return BadRequest(BaseTranslations.Get(TranslationKeys.ErrorServerKeyRequired, BaseTranslations.RequestLanguage(Request)));
         }
 
         var links = 0;

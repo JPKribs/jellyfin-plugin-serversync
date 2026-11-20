@@ -168,6 +168,8 @@ export function createSyncTableKit(ctx) {
                 };
                 if (spec.searchPlaceholder) {
                     options.search = { placeholder: spec.searchPlaceholder };
+                } else if (spec.search) {
+                    options.search = {};
                 }
                 if (spec.tableOptions) {
                     Object.assign(options, spec.tableOptions(self));

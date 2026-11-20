@@ -963,7 +963,6 @@ export default function (view) {
             html: true,
             title: ServerSyncShared.t.tr('ButtonRemoveServer'),
             confirmText: ServerSyncShared.t.tr('ButtonRemove'),
-            cancelText: ServerSyncShared.t.tr('ButtonCancel'),
             destructive: true
         }).then(function (confirmed) {
             // A save landing while the dialog is open replaces the entries with fresh copies, so the

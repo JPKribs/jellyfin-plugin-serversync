@@ -78,7 +78,6 @@ export function createQueueModule(ctx) {
                     confirmDialog(t.tr('ConfirmDismissFailed'), {
                         title: t.tr('TitleDismissFailed'),
                         confirmText: t.tr('ButtonDismiss'),
-                        cancelText: t.tr('ButtonCancel'),
                         destructive: true
                     }).then(function(confirmed) {
                         if (confirmed) self.failedAction('Hints/Failed', 'DELETE', 'Removed', 'ToastFailedDismissedOne', 'ToastFailedDismissedMany');

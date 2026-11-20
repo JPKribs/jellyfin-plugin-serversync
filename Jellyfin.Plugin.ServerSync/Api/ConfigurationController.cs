@@ -197,7 +197,7 @@ public partial class ConfigurationController : ControllerBase
     {
         var held = Plugin.Instance?.HeldReason;
         var version = Plugin.Instance?.HeldVersion;
-        return Ok(new { Ready = held is null, Message = version is { } found ? SchemaTooOldException.Describe(found, RequestLanguage.Of(Request)) : held });
+        return Ok(new { Ready = held is null, Message = version is { } found ? SchemaTooOldException.Describe(found, BaseTranslations.RequestLanguage(Request)) : held });
     }
 
     /// <summary>
@@ -295,7 +295,7 @@ public partial class ConfigurationController : ControllerBase
     /// <summary>
     /// Gets a string in the language the page asked in, with its placeholders filled.
     /// </summary>
-    private string Text(string key, params object?[] args) => BaseTranslations.Format(key, RequestLanguage.Of(Request), args);
+    private string Text(string key, params object?[] args) => BaseTranslations.Format(key, BaseTranslations.RequestLanguage(Request), args);
 
     /// <summary>
     /// Makes text from a request safe to log.

@@ -572,4 +572,10 @@ Whether Server Sync can run here. Every page asks, and shows `Message` at its to
 
 ### GET /Sync/Translations?language={code}
 
-The strings every page shows, in one language, as a JSON object of keys and text. It holds the Jellyfin strings the plugin declares and the plugin's own, with a missing string falling back to US English. The strings are not secret, so this route allows anonymous callers. The text other dashboard routes return reads in the language of the request's `Accept-Language` header.
+The strings every page shows, in one language, with the words kept as written. It holds the Jellyfin strings the plugin declares, Base's own, and the plugin's own, with a missing string falling back to US English. The strings are not secret, so this route allows anonymous callers.
+
+```json
+{ "language": "de", "strings": { "HeaderChangeQueue": "…" }, "casing": ["Jellyfin", "Server Sync"] }
+```
+
+The text other dashboard routes return reads in the page's language. It comes from the `language` query value, then the `X-Jellyfin-Plugin-Language` header the pages send, then `Accept-Language`.

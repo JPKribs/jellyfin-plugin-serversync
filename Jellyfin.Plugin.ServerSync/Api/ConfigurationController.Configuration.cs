@@ -73,10 +73,10 @@ public partial class ConfigurationController
 
         using (client)
         {
-            var tested = await client.TestConnectionAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
+            var tested = await client.TestConnectionAsync(BaseTranslations.RequestLanguage(Request), cancellationToken).ConfigureAwait(false);
             if (tested.Success)
             {
-                (tested.SyncAccess, tested.SyncAccessMessage) = await client.CheckSyncAccessAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
+                (tested.SyncAccess, tested.SyncAccessMessage) = await client.CheckSyncAccessAsync(BaseTranslations.RequestLanguage(Request), cancellationToken).ConfigureAwait(false);
             }
 
             return Ok(tested);
@@ -129,7 +129,7 @@ public partial class ConfigurationController
             _configManager.LocalServerName,
             _configManager.PluginVersion,
             request.AllowPrivateNetwork,
-            RequestLanguage.Of(Request),
+            BaseTranslations.RequestLanguage(Request),
             cancellationToken).ConfigureAwait(false);
 
         if (!result.Success)
@@ -157,14 +157,14 @@ public partial class ConfigurationController
 
         using (client)
         {
-            var connectionTest = await client.TestConnectionAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
+            var connectionTest = await client.TestConnectionAsync(BaseTranslations.RequestLanguage(Request), cancellationToken).ConfigureAwait(false);
 
             result.ServerName = connectionTest.ServerName;
             result.ServerId = connectionTest.ServerId;
             result.Message = Text(TranslationKeys.MessageSignedIn);
             if (connectionTest.Success)
             {
-                (result.SyncAccess, result.SyncAccessMessage) = await client.CheckSyncAccessAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
+                (result.SyncAccess, result.SyncAccessMessage) = await client.CheckSyncAccessAsync(BaseTranslations.RequestLanguage(Request), cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -398,6 +398,7 @@ public partial class ConfigurationController
     /// </summary>
     private async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
+        using var scope = BaseTranslations.UseLanguage(BaseTranslations.RequestLanguage(Request));
         var ssrfError = await ConfigurationUtilities.ValidateServerUrlForSsrfAsync(url, allowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (ssrfError != null)
         {

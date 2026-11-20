@@ -32,7 +32,7 @@ How this plugin shows its text in the viewer's language. Base builds the strings
     * Markup: `data-str="Key"`, `data-str-title`, `data-str-label`, or `data-str-placeholder`, with the English as the element's own text.
     * Script: `shared.t.tr('Key')`, `shared.t.format('Key', value)`, or `shared.plural(count, 'KeyOne', 'KeyMany')`. `serversync_shared.js` loads the strings once with `loadTranslations('Sync/Translations')`, and a page's `bind` and `load` and the Sync tab's modules run only after they arrive.
     * Tab names: `tabName('Key', 'English')` in `serversync_shared.js`, since the tabs show before the strings load.
-    * C#: `BaseTranslations.Get(TranslationKeys.Key, language)` or `BaseTranslations.Format(...)`. Text a route returns to a page uses `RequestLanguage.Of(Request)`. Text for everyone, such as an activity log entry, uses `BaseTranslations.ServerLanguage(config)`.
+    * C#: `BaseTranslations.Get(TranslationKeys.Key, language)` or `BaseTranslations.Format(...)`. Text a route returns to a page uses `BaseTranslations.RequestLanguage(Request)`, and `BaseTranslations.UseLanguage` puts Base's own text, such as an SSRF refusal, in that language. Text for everyone, such as an activity log entry, uses `BaseTranslations.ServerLanguage(config)`.
 5. Build. Fix every `JPKT` error and warning.
 6. Run `dotnet test` for the key test, and `node --test`, whose support serves the US English strings to the pages.
 

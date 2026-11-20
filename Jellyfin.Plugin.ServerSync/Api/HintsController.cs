@@ -113,7 +113,7 @@ public class HintsController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         var result = new PeerCheckResult();
-        var lang = RequestLanguage.Of(Request);
+        var lang = BaseTranslations.RequestLanguage(Request);
         var mode = string.Equals(request.Mode, "Sync", StringComparison.OrdinalIgnoreCase) ? ServerMode.Sync
             : string.Equals(request.Mode, "Push", StringComparison.OrdinalIgnoreCase) ? ServerMode.Push
             : ServerMode.Pull;
@@ -525,7 +525,7 @@ public class HintsController : ControllerBase
         {
             Pending = _observer.PendingCount,
             Unmatched = _observer.UnmatchedCount,
-            LastUnmatched = _observer.DescribeLastUnmatched(RequestLanguage.Of(Request)),
+            LastUnmatched = _observer.DescribeLastUnmatched(BaseTranslations.RequestLanguage(Request)),
             Inbound = _inbound.GetRecent(OverviewRows).Select(InboundHintDto.From).ToList(),
             InboundCount = _inbound.Count(),
             InboundFailingCount = _inbound.CountFailing()
@@ -547,7 +547,7 @@ public class HintsController : ControllerBase
             overview.Gathering.Add(new GatheringDto
             {
                 Kind = change.Kind,
-                Change = HintActivityLog.Subject(change.Kind, item?.Path ?? change.RemovedPath, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N"), RequestLanguage.Of(Request)),
+                Change = HintActivityLog.Subject(change.Kind, item?.Path ?? change.RemovedPath, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N"), BaseTranslations.RequestLanguage(Request)),
                 Title = title,
                 Subtitle = subtitle,
                 ItemType = change.RemovedPath is not null ? HintProtocol.ContentRemoved : item?.GetType().Name,
@@ -633,7 +633,7 @@ public class HintsController : ControllerBase
         };
         if (key is null)
         {
-            return BadRequest(Tr(RequestLanguage.Of(Request), TranslationKeys.ErrorKindIdsMissing));
+            return BadRequest(Tr(BaseTranslations.RequestLanguage(Request), TranslationKeys.ErrorKindIdsMissing));
         }
 
         var version = _versions.Get(kind, key);

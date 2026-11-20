@@ -29,7 +29,7 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="JPKribs.Jellyfin.Base" Version="12.4.0" />
+    <PackageReference Include="JPKribs.Jellyfin.Base" Version="12.4.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -46,7 +46,6 @@
     <JellyfinString Include="Blacklist" />
     <JellyfinString Include="ButtonAddServer" />
     <JellyfinString Include="ButtonAddUser" />
-    <JellyfinString Include="ButtonCancel" />
     <JellyfinString Include="ButtonClose" />
     <JellyfinString Include="ButtonRemove" />
     <JellyfinString Include="ButtonSignIn" />

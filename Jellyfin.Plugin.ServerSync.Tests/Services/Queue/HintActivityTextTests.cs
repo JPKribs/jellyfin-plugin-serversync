@@ -64,7 +64,7 @@ public class HintActivityTextTests
     }
 
     /// <summary>
-    /// Summaries read the same way every time: a title case name with the count, and the servers
+    /// Summaries read the same way every time: a sentence case name with the count, and the servers
     /// listed with their counts, the largest first.
     /// True: a busy sync leaves one tidy entry an operator can read at a glance.
     /// False: names would differ in shape, or servers be listed in no useful order.
@@ -72,8 +72,8 @@ public class HintActivityTextTests
     [Fact]
     public void Summaries_HaveOneShape()
     {
-        Assert.Equal("1 Item Synced", ActivityText.SummaryName(1, "Synced"));
-        Assert.Equal("12 Items Not Synced", ActivityText.SummaryName(12, "Not Synced"));
+        Assert.Equal("1 item synced", BaseTranslations.Format("ActivitySyncedNameOne", null, 1));
+        Assert.Equal("12 items not synced", BaseTranslations.Format("ActivityNotSyncedNameMany", null, 12));
         Assert.Equal("1 change", ActivityText.Count(1, "change"));
         Assert.Equal("3 items", ActivityText.Count(3, "item"));
         Assert.Equal("source-a (9), source-b (3), source-c (3)",

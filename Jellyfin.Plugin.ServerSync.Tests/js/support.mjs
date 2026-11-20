@@ -50,10 +50,21 @@ function usEnglish() {
 
 export var strings = usEnglish();
 
-// The pages load their strings with fetch, which answers here with US English.
+// casingList
+// Reads the plugin's casing list, the words its text keeps as written.
+//
+// Output
+// [string[]]: The words, or an empty list when the plugin has none.
+function casingList() {
+    var file = join(projectDir, 'Localization', 'casing.json');
+    return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
+}
+
+// The pages load their strings with fetch, which answers here as BaseTranslations.Serve does, in US English.
 globalThis.fetch = function (url) {
     if (String(url).indexOf('Sync/Translations') < 0) return Promise.reject(new Error('No route for ' + url));
-    return Promise.resolve({ ok: true, json: function () { return Promise.resolve(strings); } });
+    var body = { language: 'en-us', strings: strings, casing: casingList() };
+    return Promise.resolve({ ok: true, json: function () { return Promise.resolve(body); } });
 };
 
 // The fake element has no dataset or remove, which the page scripts use.

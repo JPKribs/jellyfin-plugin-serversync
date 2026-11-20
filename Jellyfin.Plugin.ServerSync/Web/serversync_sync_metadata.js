@@ -87,7 +87,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
             statusUpdated: 'ToastItemStatusUpdated',
             statusFailed: 'ErrorItemStatusUpdate'
         },
-        searchPlaceholder: t.tr('PlaceholderSearchItems'),
+        search: true,
         emptyMessage: t.tr('EmptyMetadataItems'),
         columns: function(self) {
             return [

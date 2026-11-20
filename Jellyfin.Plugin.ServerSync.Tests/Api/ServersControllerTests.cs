@@ -14,6 +14,7 @@ using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using MediaBrowser.Model.Entities;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -294,5 +295,8 @@ public sealed class ServersControllerTests : IDisposable
     }
 
     private ServersController Controller()
-        => new(_harness.Content, _harness.History, _harness.Metadata, _harness.People, _harness.Users, _harness.Outbound, _harness.Inbound, _harness.Pairings, NullLogger<ServersController>.Instance);
+        => new(_harness.Content, _harness.History, _harness.Metadata, _harness.People, _harness.Users, _harness.Outbound, _harness.Inbound, _harness.Pairings, NullLogger<ServersController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
 }

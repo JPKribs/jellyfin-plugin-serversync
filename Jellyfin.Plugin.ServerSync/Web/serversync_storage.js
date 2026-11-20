@@ -334,7 +334,7 @@ export default function (view) {
                 containerId: containerId,
                 endpoint: 'SourceLibraryItems',
                 pagination: { pageSize: 50, loadMore: true },
-                search: { enabled: true, placeholder: tr('PlaceholderSearchItems') },
+                search: { enabled: true },
                 selection: { enabled: false, idKey: 'Id' },
                 emptyState: { message: tr('EmptyItemsFound') },
                 filters: { buildParams: function () { var mode = browse(); return { libraryId: libraryId, serverKey: serverKey, collections: mode === 'collections', playlists: mode === 'playlists' }; } },

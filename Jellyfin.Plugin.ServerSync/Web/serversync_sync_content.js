@@ -280,7 +280,6 @@ export function createContentSyncTableModule(ctx, kit) {
                 confirmDialog(ServerSyncShared.plural(ids.length, 'ConfirmDeleteItemsOne', 'ConfirmDeleteItemsMany'), {
                     title: t.tr('HeaderDeleteItems'),
                     confirmText: t.tr('Delete'),
-                    cancelText: t.tr('ButtonCancel'),
                     destructive: true
                 }).then(function(confirmed) {
                     if (!confirmed) return;
@@ -474,7 +473,6 @@ export function createContentSyncTableModule(ctx, kit) {
                 confirmDialog(t.format('ConfirmDeleteFile', fileName), {
                     title: t.tr('TitleDeleteFile'),
                     confirmText: t.tr('Delete'),
-                    cancelText: t.tr('ButtonCancel'),
                     destructive: true
                 }).then(function(confirmed) {
                     if (!confirmed) return;
