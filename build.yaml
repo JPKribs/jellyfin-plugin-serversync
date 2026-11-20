@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.20.0"
+version: "12.4.21.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step."
@@ -22,16 +22,7 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  added:
-  - Every page, message, and Activity page entry is shown in the viewer's language. Jellyfin's own words come in every language Jellyfin has, and the rest is in US English until it is translated
-  changed:
-  - Labels, buttons, headings, columns, badges, and Activity page names are in sentence case, as Jellyfin writes them, such as Send changes after (seconds) and 12 items synced
-  - A message a page shows, such as a refused Server URL, is in the page's language, and an Activity page entry is in the server's display language
-  - The tables, dialogs, charts, and lists drawn by Base show their own text in the viewer's language
   fixed:
-  - The pool card on the Servers tab read "This Server, this server" when the server had no name. It reads This server
-  - The Activity page entry for one failing item read "1 Item Keep Failing". It reads 1 item keeps failing
+  - The Link streams chart on the Statistics tab could draw its dates over each other across 30 days or on a narrow screen. It shows only the dates that fit side by side, and keeps the first and last whenever they fit
   developer:
-  - Uses JPKribs.Jellyfin.Base 12.4.0, then 12.4.1. BaseTranslations.RequestLanguage replaces the local RequestLanguage helper, and ActivityOutcome takes keys for its names
-  - Every string a person reads comes from Localization/en-us.json or a declared Jellyfin string, with Localization/casing.json for the words kept as written. GET /Sync/Translations answers with language, strings, and casing
-  - The source is organized into Api, Configuration, Web, Assets, Models, Services, Tasks, and Utilities, and the Docker pool and matrix live in tools/integration
+  - Uses JPKribs.Jellyfin.Base 12.4.2, after 12.4.1. Base's Line Chart picks its x axis labels by their measured width
