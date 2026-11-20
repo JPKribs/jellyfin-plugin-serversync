@@ -16,6 +16,7 @@ Each guide in [skills](skills/) covers one kind of work. Read the guide that mat
 | [skills/documentation.md](skills/documentation.md) | Write or change the README, the docs site, screenshots, or release notes. |
 | [skills/review.md](skills/review.md) | Call any change done. |
 | [skills/release.md](skills/release.md) | Cut a release. |
+| [skills/branches.md](skills/branches.md) | Pick a branch, sync the two, and promote unstable. |
 
 A task that touches several areas needs every matching guide. A new setting, for example, needs the glossary, style, code, testing, documentation, and review guides.
 
