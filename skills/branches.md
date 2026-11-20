@@ -13,8 +13,8 @@ No other branch lives on the remote. Work on a local branch, then merge it into 
 
 ## Which Branch
 
-* **Feature.** Anything new, changed behavior, a refactor, or a Base upgrade goes to `unstable`.
-* **Patch.** A fix for a released bug goes straight to `master`, with a patch release.
+* **Feature.** Anything new, changed behavior, a refactor, or a Base upgrade goes to `unstable`. It ships in a feature release, which raises `F` in the version.
+* **Patch.** A fix for a released bug goes straight to `master`. It ships in a bug release, which raises `B`.
 
 ## Sync
 
