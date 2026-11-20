@@ -60,9 +60,9 @@ Explain what you would change, why, and what it risks. Wait for an answer before
 | Path | What it holds |
 | :--- | :--- |
 | `Jellyfin.Plugin.ServerSync/` | The plugin source. |
-| `Jellyfin.Plugin.ServerSync/Configuration/` | The dashboard pages, as HTML, JS, and CSS. |
+| `Jellyfin.Plugin.ServerSync/Web/` | The dashboard pages, as HTML, JS, and CSS. |
 | `Jellyfin.Plugin.ServerSync.Tests/` | Unit tests and the API integration suite. |
-| `integration/` | The Docker pool and matrix that run real Jellyfin servers. |
+| `tools/integration/` | The Docker pool and matrix that run real Jellyfin servers. |
 | `docs/` | The documentation site, built with MkDocs. |
 | `build.yaml` | The version, the artifacts, and the release notes. |
 | `skills/` | The guides. |

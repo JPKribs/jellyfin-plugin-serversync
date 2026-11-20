@@ -2,6 +2,25 @@
 
 How to write, comment, and test code in this plugin. It covers C#, JavaScript, HTML, CSS, Python, shell, and YAML.
 
+## Layout
+
+Folders inside `Jellyfin.Plugin.ServerSync/` set the namespace, so a file in `Services/Queue/` is in `Jellyfin.Plugin.ServerSync.Services.Queue`.
+
+| Path | Holds |
+| :--- | :--- |
+| `Plugin.cs` | The plugin class and its pages. |
+| `PluginServiceRegistrator.cs` | DI registration. |
+| `Api/` | Controllers, their attributes, and their guards. |
+| `Configuration/` | `PluginConfiguration` and the C# classes it is made of. |
+| `Web/` | The dashboard pages, as HTML, JS, and CSS, embedded by a wildcard. |
+| `Assets/` | The logo. |
+| `Models/` | Data classes, records, and enums, in one subfolder per sync type. |
+| `Services/` | Stores, clients, merge services, links, the queue, and peers, in one subfolder per area. |
+| `Tasks/` | Scheduled tasks. |
+| `Utilities/` | Static helpers, extension methods, and streams. |
+
+At the repository root, `tools/integration/` holds the Docker pool and matrix, `docs/` the documentation site, and `skills/` the guides.
+
 ## Base First
 
 [JPKribs.Jellyfin.Base](https://github.com/JPKribs/jellyfin-plugin-base) holds everything two plugins could share. Its README lists every component and helper. Read it before you write anything new.

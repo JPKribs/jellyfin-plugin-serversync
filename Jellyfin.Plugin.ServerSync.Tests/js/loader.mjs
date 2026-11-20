@@ -13,7 +13,7 @@ var baseEntry = '';
 // Receives the folders the hook maps to, from register in support.mjs.
 //
 // Inputs
-// data [object]: configDir is the plugin's Configuration folder. baseEntry is the URL of Base's built bundle.
+// data [object]: configDir is the plugin's Web folder. baseEntry is the URL of Base's built bundle.
 export async function initialize(data) {
     configDir = data.configDir;
     baseEntry = data.baseEntry;

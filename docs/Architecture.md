@@ -126,7 +126,7 @@ Every later request carries the secret in `X-ServerSync-Pairing`. `PeerControlle
 
 `PeerCallerGuardAttribute` checks every peer route against the **Whitelist** with `PeerCallerPolicy`. Administrators and API keys from an enabled server entry always pass. A standard user is held to their own data.
 
-### Controllers
+### Api
 
 | Controller | Route | Serves |
 | :--- | :--- | :--- |
@@ -238,7 +238,7 @@ The five sync table managers extend `SyncTableManagerBase`, and every other stor
 
 ## Config Pages
 
-Each tab is a page in `Configuration/` with a script of the same name. Each page calls `createServerSyncPage` in `serversync_shared.js`, which runs the page through Base's `createConfigPage`, sets the tabs, and builds the helper bag with the `Sync` route prefix. Settings load and save through Jellyfin's plugin configuration route. Every page calls `Health` as it loads and shows the reason at its top while the plugin is held. Thumbnails of a source's items load through `ImageProxy`, so the page never holds a source's API key.
+Each tab is a page in `Web/` with a script of the same name. Each page calls `createServerSyncPage` in `serversync_shared.js`, which runs the page through Base's `createConfigPage`, sets the tabs, and builds the helper bag with the `Sync` route prefix. Settings load and save through Jellyfin's plugin configuration route. Every page calls `Health` as it loads and shows the reason at its top while the plugin is held. Thumbnails of a source's items load through `ImageProxy`, so the page never holds a source's API key.
 
 | Tab | Page | Calls |
 | :--- | :--- | :--- |

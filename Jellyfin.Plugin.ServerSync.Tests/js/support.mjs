@@ -1,6 +1,6 @@
 // support.mjs
 // Shared setup for the config page tests. It installs Base's fake DOM, stubs the Jellyfin globals the pages
-// read, and loads a page script from the plugin's Configuration folder through the loader hook.
+// read, and loads a page script from the plugin's Web folder through the loader hook.
 
 import { register } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
 
 var realSetTimeout = globalThis.setTimeout;
 var here = dirname(fileURLToPath(import.meta.url));
-var configDir = join(here, '..', '..', 'Jellyfin.Plugin.ServerSync', 'Configuration');
+var configDir = join(here, '..', '..', 'Jellyfin.Plugin.ServerSync', 'Web');
 var baseRoot = join(here, '..', '..', '..', 'Shared', 'jellyfin-plugin-base');
 var baseBundle = join(baseRoot, 'dist', 'jpkribs_shared.js');
 var baseEntry = pathToFileURL(baseBundle).href;
@@ -80,7 +80,7 @@ export function installPage(opts) {
 }
 
 // loadScript
-// Imports one of the plugin's Configuration scripts, so a test calls its exports.
+// Imports one of the plugin's Web scripts, so a test calls its exports.
 //
 // Inputs
 // name [string]: The file name, such as serversync_shared.js.

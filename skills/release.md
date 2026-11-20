@@ -38,11 +38,11 @@ Raising a part sets every part after it to `0`. `12.4.13.2` becomes `12.4.14.0` 
 6. **Pool.** Run the full pool from a clean state.
 
     ```bash
-    python3 integration/run.py reset
+    python3 tools/integration/run.py reset
     ```
 
     ```bash
-    python3 integration/run.py test
+    python3 tools/integration/run.py test
     ```
 
     Run the matrix too when the release changes how content or links follow file changes, or how files are downloaded or written. See [testing.md](testing.md#matrix).

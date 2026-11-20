@@ -227,7 +227,7 @@ The pool runs three Jellyfin servers with the plugin built from this checkout. U
 Docker and the dotnet SDK must be on the path. The scripts use only the Python standard library.
 
 ```bash
-python3 integration/run.py up
+python3 tools/integration/run.py up
 ```
 
 | Server | Address |
@@ -236,14 +236,14 @@ python3 integration/run.py up
 | `source-b` | http://localhost:8112 |
 | `local` | http://localhost:8113 |
 
-The admin user is `admin`, and the password is in `integration/.state/credentials.json`. A `viewer` user exists on every server. The servers reach each other at `http://<name>:8096`.
+The admin user is `admin`, and the password is in `tools/integration/.state/credentials.json`. A `viewer` user exists on every server. The servers reach each other at `http://<name>:8096`.
 
 ```bash
-python3 integration/run.py down
+python3 tools/integration/run.py down
 ```
 
 ```bash
-python3 integration/run.py reset
+python3 tools/integration/run.py reset
 ```
 
 `down` stops the pool and keeps its state. `reset` deletes the state, the media, and the credentials.

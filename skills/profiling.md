@@ -175,7 +175,7 @@ The Jellyfin image is Linux and runs Jellyfin as process 1 of each container, as
 1. Bring up the pool and run the scenario that is slow. The pool builds the plugin in `Release`.
 
     ```bash
-    python3 integration/run.py up
+    python3 tools/integration/run.py up
     ```
 
 2. Install the tools in the container that runs the slow work, which is usually `serversync-it-local`. Use the standalone Linux builds that match the container CPU, which `docker exec serversync-it-local uname -m` prints. Use `linux-arm64` for `aarch64` and `linux-x64` for `x86_64` in the address.
@@ -239,7 +239,7 @@ The Jellyfin image is Linux and runs Jellyfin as process 1 of each container, as
     dotnet-gcdump report ~/Desktop/mid.gcdump
     ```
 
-8. To time the Sync tab routes, use the API key in `integration/.state/credentials.json` under `servers`, not the admin login. Send it in an `Authorization: MediaBrowser Token="<key>"` header. The `X-Emby-Token` header and the `api_key` query are refused.
+8. To time the Sync tab routes, use the API key in `tools/integration/.state/credentials.json` under `servers`, not the admin login. Send it in an `Authorization: MediaBrowser Token="<key>"` header. The `X-Emby-Token` header and the `api_key` query are refused.
 
     ```bash
     curl -s -o /dev/null -w "%{time_total}" -H 'Authorization: MediaBrowser Token="<key>"' "http://localhost:8113/Sync/Items?take=50"

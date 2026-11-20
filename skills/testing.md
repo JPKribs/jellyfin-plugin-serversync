@@ -17,8 +17,8 @@ Test each behavior at the lowest layer that can prove it. Go up a layer only for
 | Controller | A route's status codes, guards, and response shape | `dotnet test` | Seconds |
 | JavaScript | Page logic, such as formatting, filters, and state | `node --test` | Seconds |
 | API integration | Every call to another server works against a real Jellyfin | `dotnet test --filter` | Minutes |
-| Pool scenario | Servers sync with each other end to end | `integration/run.py` | Minutes to an hour |
-| Matrix | Every pool shape ends up holding what the main server holds after file changes | `integration/matrix.py` | Hours |
+| Pool scenario | Servers sync with each other end to end | `tools/integration/run.py` | Minutes to an hour |
+| Matrix | Every pool shape ends up holding what the main server holds after file changes | `tools/integration/matrix.py` | Hours |
 
 | A change to | Needs |
 | :--- | :--- |
@@ -37,8 +37,8 @@ Mirror the source folders inside the test project so a missing test is easy to s
 | Source | Test |
 | :--- | :--- |
 | `Jellyfin.Plugin.ServerSync/Services/Queue/VersionDecider.cs` | `Jellyfin.Plugin.ServerSync.Tests/Services/Queue/VersionDeciderTests.cs` |
-| `Jellyfin.Plugin.ServerSync/Controllers/HintsController.cs` | `Jellyfin.Plugin.ServerSync.Tests/Controllers/HintsControllerTests.cs` |
-| `Jellyfin.Plugin.ServerSync/Configuration/serversync_shared.js` | `Jellyfin.Plugin.ServerSync.Tests/js/serversync_shared.test.mjs` |
+| `Jellyfin.Plugin.ServerSync/Api/HintsController.cs` | `Jellyfin.Plugin.ServerSync.Tests/Api/HintsControllerTests.cs` |
+| `Jellyfin.Plugin.ServerSync/Web/serversync_shared.js` | `Jellyfin.Plugin.ServerSync.Tests/js/serversync_shared.test.mjs` |
 
 * Shared fakes live in `Jellyfin.Plugin.ServerSync.Tests/Fakes/`.
 * The API integration suite lives in `Jellyfin.Plugin.ServerSync.Tests/ApiIntegration/`.
@@ -116,7 +116,7 @@ JS tests run on node's own test runner with Base's fake DOM and no dependencies.
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatLag } from '../../Jellyfin.Plugin.ServerSync/Configuration/serversync_shared.js';
+import { formatLag } from '../../Jellyfin.Plugin.ServerSync/Web/serversync_shared.js';
 
 test('formatLag shows minutes for a lag under an hour', () => {
     assert.equal(formatLag(90), '2 minutes');
@@ -149,22 +149,22 @@ SERVERSYNC_TEST_SERVER_URL=http://localhost:8111 SERVERSYNC_TEST_API_KEY=<key> d
 
 ## Pool Scenarios
 
-`integration/run.py` runs three Jellyfin servers, `source-a`, `source-b`, and `local`, with the plugin built from this checkout. See [documentation.md](documentation.md#the-docker-pool) for addresses, credentials, and its rules.
+`tools/integration/run.py` runs three Jellyfin servers, `source-a`, `source-b`, and `local`, with the plugin built from this checkout. See [documentation.md](documentation.md#the-docker-pool) for addresses, credentials, and its rules.
 
 ```bash
-python3 integration/run.py up
+python3 tools/integration/run.py up
 ```
 
 ```bash
-python3 integration/run.py scenarios links chaos
+python3 tools/integration/run.py scenarios links chaos
 ```
 
 ```bash
-python3 integration/run.py reset
+python3 tools/integration/run.py reset
 ```
 
 ```bash
-python3 integration/run.py test
+python3 tools/integration/run.py test
 ```
 
 `scenarios` runs every scenario whose title holds any of the words. `test` builds, seeds, runs every scenario, then runs the API suite against `source-a`. A full run takes about 45 minutes. Docker must be running first.
@@ -200,7 +200,7 @@ def scenario_reorder_rehomes(creds, apis):
 
 ## Matrix
 
-`integration/matrix.py` seeds films on `n1`, syncs them out, then changes them the ways a real library changes. A re-encode, a new container, a rename, a moved folder, and a removal. Each other server must end up holding exactly what `n1` holds.
+`tools/integration/matrix.py` seeds films on `n1`, syncs them out, then changes them the ways a real library changes. A re-encode, a new container, a rename, a moved folder, and a removal. Each other server must end up holding exactly what `n1` holds.
 
 | Shape | Pool |
 | :--- | :--- |
@@ -211,11 +211,11 @@ def scenario_reorder_rehomes(creds, apis):
 | `1+3` | `n2`, `n3`, and `n4` pull from `n1` and sync with each other |
 
 ```bash
-python3 integration/matrix.py run 1:1 1=1 link hints
+python3 tools/integration/matrix.py run 1:1 1=1 link hints
 ```
 
 ```bash
-python3 integration/matrix.py reset
+python3 tools/integration/matrix.py reset
 ```
 
 * With no arguments every shape runs as copies and as links with live changes on, and `1:1` also runs with live changes off.

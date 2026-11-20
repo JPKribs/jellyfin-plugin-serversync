@@ -264,7 +264,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         yield return new PluginPageInfo
         {
             Name = "serversync_sync",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync.html",
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync.html",
             MenuSection = "server",
             DisplayName = "Server Sync",
             EnableInMainMenu = true,
@@ -274,109 +274,109 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         yield return new PluginPageInfo
         {
             Name = "serversync_sync.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_table.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_table.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_table.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_content.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_content.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_content.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_history.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_history.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_history.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_metadata.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_metadata.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_metadata.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_users.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_users.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_users.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_people.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_people.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_people.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_sync_queue.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_queue.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_sync_queue.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_servers",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_servers.html"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_servers.html"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_servers.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_servers.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_servers.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_storage",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_storage.html"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_storage.html"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_storage.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_storage.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_storage.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_statistics",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_statistics.html"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_statistics.html"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_statistics.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_statistics.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_statistics.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_settings",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_settings.html"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_settings.html"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_settings.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_settings.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_settings.js"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_shared.css",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_shared.css"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_shared.css"
         };
 
         yield return new PluginPageInfo
         {
             Name = "serversync_shared.js",
-            EmbeddedResourcePath = $"{ns}.Configuration.serversync_shared.js"
+            EmbeddedResourcePath = $"{ns}.Web.serversync_shared.js"
         };
 
         foreach (var page in GetSharedPages("serversync"))

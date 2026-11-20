@@ -17,7 +17,7 @@ Each test file sits in the folder that mirrors the source file it tests, so `Jel
 | Folder | Tests |
 | :--- | :--- |
 | `Configuration/` | `PluginConfiguration` |
-| `Controllers/` | Routes and their attributes |
+| `Api/` | Routes and their attributes |
 | `Models/` | Models, DTOs, and comparators, in the source's subfolders |
 | `Services/` | Stores, merge services, clients, links, queue, peers, and playlists, in the source's subfolders |
 | `Tasks/` | Scheduled tasks and their base classes |
@@ -58,14 +58,14 @@ The integration tests only issue GET and HEAD requests and never modify the targ
 
 ## Docker Pool
 
-`integration/run.py` runs three Jellyfin servers in Docker, source-a, source-b, and local, with the plugin built from this checkout, and drives every module across them, links included.
+`tools/integration/run.py` runs three Jellyfin servers in Docker, source-a, source-b, and local, with the plugin built from this checkout, and drives every module across them, links included.
 
 ```
-python3 integration/run.py test        # build, start the pool, run every scenario, then the API tests against source-a
-python3 integration/run.py scenarios links chaos   # scenarios whose title has any of these words, on the running pool
-python3 integration/run.py up          # build and start the pool, signed in and seeded
-python3 integration/run.py reset       # throw the pool away and start fresh
-python3 integration/run.py down        # stop it
+python3 tools/integration/run.py test        # build, start the pool, run every scenario, then the API tests against source-a
+python3 tools/integration/run.py scenarios links chaos   # scenarios whose title has any of these words, on the running pool
+python3 tools/integration/run.py up          # build and start the pool, signed in and seeded
+python3 tools/integration/run.py reset       # throw the pool away and start fresh
+python3 tools/integration/run.py down        # stop it
 ```
 
-The servers answer on ports 8111, 8112, and 8113, and the admin password is in `integration/.state/credentials.json`. Local has a small 64 MB disk at `/media-tiny`, so a scenario can fill the free space floor for real. The `links` scenarios cover playback, seeking, transcoding, subtitles inside a file, media info and trickplay images from the source, direct play per user, the link check, the link cache and its rules, a user's own stream limit, speed limits, versions under a bitrate limit, hostile requests, a source going down, restarts, renames, removals, and more. The `chaos` scenarios kill the source mid-stream, tamper with links, lose the link key, fuzz every route, and link three hundred films at once.
+The servers answer on ports 8111, 8112, and 8113, and the admin password is in `tools/integration/.state/credentials.json`. Local has a small 64 MB disk at `/media-tiny`, so a scenario can fill the free space floor for real. The `links` scenarios cover playback, seeking, transcoding, subtitles inside a file, media info and trickplay images from the source, direct play per user, the link check, the link cache and its rules, a user's own stream limit, speed limits, versions under a bitrate limit, hostile requests, a source going down, restarts, renames, removals, and more. The `chaos` scenarios kill the source mid-stream, tamper with links, lose the link key, fuzz every route, and link three hundred films at once.

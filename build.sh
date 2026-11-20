@@ -72,21 +72,21 @@ validate_resources() {
     
     local missing_files=()
     local config_files=(
-        "$PROJECT_DIR/Configuration/serversync_sync.html"
-        "$PROJECT_DIR/Configuration/serversync_sync.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_table.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_content.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_history.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_metadata.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_users.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_people.js"
-        "$PROJECT_DIR/Configuration/serversync_sync_queue.js"
-        "$PROJECT_DIR/Configuration/serversync_servers.html"
-        "$PROJECT_DIR/Configuration/serversync_servers.js"
-        "$PROJECT_DIR/Configuration/serversync_settings.html"
-        "$PROJECT_DIR/Configuration/serversync_settings.js"
-        "$PROJECT_DIR/Configuration/serversync_shared.css"
-        "$PROJECT_DIR/Configuration/serversync_shared.js"
+        "$PROJECT_DIR/Web/serversync_sync.html"
+        "$PROJECT_DIR/Web/serversync_sync.js"
+        "$PROJECT_DIR/Web/serversync_sync_table.js"
+        "$PROJECT_DIR/Web/serversync_sync_content.js"
+        "$PROJECT_DIR/Web/serversync_sync_history.js"
+        "$PROJECT_DIR/Web/serversync_sync_metadata.js"
+        "$PROJECT_DIR/Web/serversync_sync_users.js"
+        "$PROJECT_DIR/Web/serversync_sync_people.js"
+        "$PROJECT_DIR/Web/serversync_sync_queue.js"
+        "$PROJECT_DIR/Web/serversync_servers.html"
+        "$PROJECT_DIR/Web/serversync_servers.js"
+        "$PROJECT_DIR/Web/serversync_settings.html"
+        "$PROJECT_DIR/Web/serversync_settings.js"
+        "$PROJECT_DIR/Web/serversync_shared.css"
+        "$PROJECT_DIR/Web/serversync_shared.js"
     )
     
     for file in "${config_files[@]}"; do
