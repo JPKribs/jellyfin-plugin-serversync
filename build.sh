@@ -66,6 +66,23 @@ get_plugin_info() {
     echo "$name|$guid"
 }
 
+# True when a project file entry names a file or, as a pattern, matches at least one. MSBuild's ** spans any number
+# of folders, which a bash glob only does with globstar (bash 4+, not macOS's /bin/bash 3.2), so those patterns go
+# to find, whose -path wildcard already crosses folders.
+resource_exists() {
+    local file="$1"
+    case "$file" in
+        *'**'*) ;;
+        *[*?]*) compgen -G "$file" > /dev/null; return ;;
+        *) [[ -f "$file" ]]; return ;;
+    esac
+    local base="${file%%\*\**}"
+    base="${base%/}"
+    local pattern="${file//\*\*\//*}"
+    pattern="${pattern//\*\*/*}"
+    [[ -d "$base" ]] && [[ -n "$(find "$base" -type f -path "$pattern" -print -quit)" ]]
+}
+
 # Validate embedded resources exist
 validate_resources() {
     log "INFO" "Validating embedded resources exist"
@@ -90,7 +107,7 @@ validate_resources() {
     )
     
     for file in "${config_files[@]}"; do
-        if [[ ! -f "$file" ]]; then
+        if ! resource_exists "$file"; then
             missing_files+=("$file")
         else
             log "SUCCESS" "Found: $file"
