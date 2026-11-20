@@ -8,13 +8,20 @@ name: '🔀 Sync Branches'
 # promote  Started by hand from the Actions tab for a feature release. Fast-forwards master to unstable,
 #          then starts the release draft, build, and test runs on master.
 #
-# A push made with the workflow's own token starts no other workflow, so both jobs start the runs a push
-# would have started themselves.
+# A push made with a workflow's own token starts no other workflow. The release draft and publish runs
+# commit to master that way, so sync also runs when either of them finishes. Both jobs here start the
+# runs a push would have started themselves.
 
 on:
   push:
     branches:
       - master
+  workflow_run:
+    workflows:
+      - '📝 Create/Update Release Draft'
+      - '🚀 Publish Plugin'
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       action:
@@ -36,7 +43,7 @@ concurrency:
 
 jobs:
   sync:
-    if: github.event_name == 'push' || inputs.action == 'sync'
+    if: github.event_name == 'push' || github.event_name == 'workflow_run' || inputs.action == 'sync'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
