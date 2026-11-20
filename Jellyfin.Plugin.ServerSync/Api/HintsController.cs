@@ -22,7 +22,7 @@ using JPKribs.Jellyfin.Base;
 namespace Jellyfin.Plugin.ServerSync.Api;
 
 /// <summary>
-/// The operator's view of the Change Queue, with what is owed to each peer, what peers sent that is not yet applied, and which peers are paused.
+/// The operator's view of the Change queue, with what is owed to each peer, what peers sent that is not yet applied, and which peers are paused.
 /// It also lets the operator discard a row and run a delivery or apply pass at once.
 /// </summary>
 [ApiController]

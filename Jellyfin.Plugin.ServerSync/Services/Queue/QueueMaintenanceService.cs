@@ -61,7 +61,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     /// <param name="outbound">Holds the sent and failed hints that expire.</param>
     /// <param name="versions">Holds the stamps that are pruned.</param>
     /// <param name="store">Runs bulk statements over the sync tables.</param>
-    /// <param name="configManager">Reads the Recycling Bin settings and the run failures.</param>
+    /// <param name="configManager">Reads the Recycling bin settings and the run failures.</param>
     /// <param name="libraryManager">Tells which items still exist.</param>
     /// <param name="userManager">Tells which users still exist.</param>
     /// <param name="services">Resolves the content table and the activity writer when a step needs them.</param>

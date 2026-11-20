@@ -17,9 +17,9 @@ public class PeerInterestLibrary
     /// <summary>Gets or sets the library's root folder on the peer.</summary>
     public string Root { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the Library Filter mode.</summary>
+    /// <summary>Gets or sets the Library filter mode.</summary>
     public LibraryFilterMode FilterMode { get; set; }
 
-    /// <summary>Gets or sets the paths the Library Filter lists, in the peer's folders.</summary>
+    /// <summary>Gets or sets the paths the Library filter lists, in the peer's folders.</summary>
     public List<string> Filtered { get; set; } = new();
 }

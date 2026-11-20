@@ -6,14 +6,14 @@ An entry that holds a standard user's key syncs only that user's own settings. M
 
 ## Settings
 
-* **Enable User Sync** turns user settings syncing on.
-* **User Policy** syncs each user's permissions and access policy, including whether the account is disabled. Administrator rights are never copied, since each server's administrator grants them there. Library, channel, and device access lists stay local too.
-* **User Configuration** syncs each user's display and playback preferences.
-* **Profile Image** syncs each user's profile picture. A scan downloads the source's picture only when its tag has changed, or on every scan when **Deep Image Verification** is on.
-* **Precedence** chooses which server speaks for a user that several servers map onto the same local user. See [Several Servers](SyncTypes.md#several-servers).
-* **User Conflicts** chooses what a user's permissions become when they were changed on this server and on a Sync server since the two last agreed.
+* **Enable user sync** turns user settings syncing on.
+* **User policy** syncs each user's permissions and access policy, including whether the account is disabled. Administrator rights are never copied, since each server's administrator grants them there. Library, channel, and device access lists stay local too.
+* **User configuration** syncs each user's display and playback preferences.
+* **Profile image** syncs each user's profile picture. A scan downloads the source's picture only when its tag has changed, or on every scan when **Deep image verification** is on.
+* **Precedence** chooses which server speaks for a user that several servers map onto the same local user. See [Several servers](SyncTypes.md#several-servers).
+* **User conflicts** chooses what a user's permissions become when they were changed on this server and on a Sync server since the two last agreed.
 
-![Several Servers](screenshots/settings/Several%20Servers.png)
+![Several servers](screenshots/settings/Several%20Servers.png)
 
 ## Between Sync Servers
 
@@ -23,11 +23,11 @@ From a Pull server, settings only ever arrive. With a Sync server they travel bo
 | :--- | :--- |
 | Only the other server | Its settings are applied here |
 | Only this server | This server's settings stay, and the other server takes them on its own scan |
-| Both | **User Conflicts** decides |
+| Both | **User conflicts** decides |
 
-| User Conflicts | The user's permissions become |
+| User conflicts | The user's permissions become |
 | :--- | :--- |
-| Other Server | The other server's |
+| Other server | The other server's |
 | Permissive | The more generous of the two for each permission, so the user ends with everything either server allowed |
 | Restrictive | The stricter of the two for each permission, so the user ends with only what both servers allowed |
 

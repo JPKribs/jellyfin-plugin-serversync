@@ -8,7 +8,7 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Services.Links;
 
 /// <summary>
-/// Always Keep must copy only what is picked on a Link library mapping and leave every other file as its mapping says.
+/// Always keep must copy only what is picked on a Link library mapping and leave every other file as its mapping says.
 /// </summary>
 public sealed class AlwaysKeepTests
 {
@@ -32,7 +32,7 @@ public sealed class AlwaysKeepTests
 
     /// <summary>
     /// Picks left over on a mapping that copies, or is being promoted, cover nothing.
-    /// True: Always Keep only ever applies to a Link mapping.
+    /// True: Always keep only ever applies to a Link mapping.
     /// False: stale picks would change how a Copy mapping's files are judged.
     /// </summary>
     /// <param name="mode">The mapping's storage.</param>
@@ -106,7 +106,7 @@ public sealed class AlwaysKeepTests
 
     /// <summary>
     /// A Copy mapping stores every file as a copy, picks or not.
-    /// True: the mapping's own storage is the answer when Always Keep does not apply.
+    /// True: the mapping's own storage is the answer when Always keep does not apply.
     /// False: a Copy mapping could come back as something other than Copy.
     /// </summary>
     [Fact]

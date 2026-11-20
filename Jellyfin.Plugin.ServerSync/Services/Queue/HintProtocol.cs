@@ -56,7 +56,7 @@ public static class HintProtocol
     public static bool OutOfRetries(int maxRetries, int attemptsSoFar) => maxRetries > 0 && attemptsSoFar >= maxRetries;
 
     /// <summary>
-    /// How far a peer's clock may differ from this server's before Check Link says so.
+    /// How far a peer's clock may differ from this server's before Check link says so.
     /// Two edits of one object made within the skew are decided by the wrong clock.
     /// </summary>
     public static readonly TimeSpan ClockSkewWarning = TimeSpan.FromSeconds(30);

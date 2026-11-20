@@ -102,7 +102,7 @@ public class UserSyncUserDto
     public string OverallStatus { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the total changes display (e.g., "1 policy, 2 config" or "No Changes").
+    /// Gets or sets the total changes display (e.g., "1 policy, 2 config" or "No changes").
     /// </summary>
     public string TotalChanges { get; set; } = string.Empty;
 

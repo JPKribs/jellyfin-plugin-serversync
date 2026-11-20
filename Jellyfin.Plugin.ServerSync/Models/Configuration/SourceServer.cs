@@ -185,7 +185,7 @@ public class SourceServer
     public bool Pushes => IsEnabled && IsConfigured && Mode is ServerMode.Push or ServerMode.Sync;
 
     /// <summary>
-    /// Gets a value indicating whether the peer may link to this server's files, which takes Allow Linking and a Push or Sync direction.
+    /// Gets a value indicating whether the peer may link to this server's files, which takes Allow linking and a Push or Sync direction.
     /// </summary>
     [XmlIgnore]
     [JsonIgnore]

@@ -112,7 +112,7 @@ public sealed class LinkPlaybackSessionsTests
 
     /// <summary>
     /// A report from a server that may not link here is refused before anything is looked up.
-    /// True: switching Allow Linking off stops that server's reports from moving played state.
+    /// True: switching Allow linking off stops that server's reports from moving played state.
     /// False: a server with no right to stream could still mark items played.
     /// </summary>
     [Fact]

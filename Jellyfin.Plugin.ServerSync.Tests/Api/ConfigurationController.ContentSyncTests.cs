@@ -360,7 +360,7 @@ public sealed class ConfigurationControllerContentSyncTests : IDisposable
 
     /// <summary>
     /// Promoting queues each link as a copy kept by hand, and skips copies, unknown rows, and rows that are ignored or being deleted.
-    /// True: only a live link becomes a copy, and it is marked so an Always Keep change never turns it back.
+    /// True: only a live link becomes a copy, and it is marked so an Always keep change never turns it back.
     /// False: a copy would be downloaded again, or an ignored or deleting row would be revived.
     /// </summary>
     [Fact]
@@ -451,7 +451,7 @@ public sealed class ConfigurationControllerContentSyncTests : IDisposable
     /// <summary>
     /// A synced copy in a Link library whose file is here is queued to turn back into a link, and a run is queued.
     /// True: the row is marked as going back, with its retries and error cleared.
-    /// False: Turn Back Into Links would do nothing until some later change.
+    /// False: Turn back into links would do nothing until some later change.
     /// </summary>
     [Fact]
     public void UnkeepCopies_SyncedCopyInALinkLibrary_IsQueuedToTurnBack()
@@ -479,7 +479,7 @@ public sealed class ConfigurationControllerContentSyncTests : IDisposable
     [InlineData("link", "it is not a copy")]
     [InlineData("errored", "it is not a synced copy yet")]
     [InlineData("copy-library", "its library is not mapped as Link")]
-    [InlineData("picked", "an Always Keep pick covers it. Remove the pick on the Storage tab instead")]
+    [InlineData("picked", "an Always keep pick covers it. Remove the pick on the Storage tab instead")]
     [InlineData("is-strm", "it cannot be a link")]
     [InlineData("no-file", "its file is not here")]
     public void UnkeepCopies_RowThatCannotTurnBack_IsSkippedWithTheReason(string scenario, string reason)
@@ -510,7 +510,7 @@ public sealed class ConfigurationControllerContentSyncTests : IDisposable
     }
 
     /// <summary>
-    /// Mark Synced settles only a row whose local file exists, and counts the rest as not found.
+    /// Mark synced settles only a row whose local file exists, and counts the rest as not found.
     /// True: a stuck row with its file in place is settled, and a row without one is left for the next run.
     /// False: a row could be marked synced with no file on disk, and never be downloaded.
     /// </summary>

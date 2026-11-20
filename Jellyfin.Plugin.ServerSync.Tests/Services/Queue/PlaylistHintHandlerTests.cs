@@ -275,7 +275,7 @@ public sealed class PlaylistHintHandlerTests : IDisposable
     }
 
     /// <summary>
-    /// With Removed Playlists set to Keep, a deletion keeps the local copy and still records the stamp.
+    /// With Removed playlists set to Keep, a deletion keeps the local copy and still records the stamp.
     /// True: the setting is honoured, and the kept playlist is not sent back to the server that deleted it.
     /// False: Keep is ignored, or the kept copy resurrects the playlist on its origin.
     /// </summary>

@@ -19,7 +19,7 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Server entry | One server's settings on the **Servers** tab | `SourceServer` | Connection, profile |
 | Server URL | The base address this server uses to reach another | `Url` | Address, host, endpoint |
 | External URL | The address a browser uses for that server, when it differs | `ExternalUrl` | Public URL |
-| Allow Private Network Address | Lets a server entry use a loopback or LAN address | `AllowPrivateNetwork` | Allow LAN, local address |
+| Allow private network address | Lets a server entry use a loopback or LAN address | `AllowPrivateNetwork` | Allow LAN, local address |
 | API Key | A Jellyfin key for another server | `ApiKey` | Token, Api Key, API key |
 | Rank | A server's place in the **Servers** list. Higher wins ties | Order in `SourceServers` | Priority, weight |
 
@@ -44,8 +44,8 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Root folder | The folder a mapped library starts at. Files match by path under it | | Base path, library path |
 | Storage | How a library mapping keeps its files, as **Copy** or **Link** | | Mode, sync type |
 | Copy | A full file downloaded to this server | | Download, local file |
-| Library Filter | **Allow All**, a **Whitelist**, or a **Blacklist** of files, collections, and playlists | `LibraryFilterMode` | Rule, include list |
-| Whitelist | The users and locations that may call this server's sync routes. Also a Library Filter mode | `PeerCallerGrant` | Allow list |
+| Library filter | **Allow all**, a **Whitelist**, or a **Blacklist** of files, collections, and playlists | `LibraryFilterMode` | Rule, include list |
+| Whitelist | The users and locations that may call this server's sync routes. Also a Library filter mode | `PeerCallerGrant` | Allow list |
 
 ## Syncing
 
@@ -73,7 +73,7 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Metadata provider | Server Sync as a Jellyfin metadata and image fetcher that reads from the servers this one pulls from | `PeerMetadataSource` | Fetcher, scraper |
 | Media segment provider | Server Sync as a Jellyfin media segment provider that copies segments from the same file on the servers this one pulls from | `PeerSegmentProvider` | Segment plugin, intro provider |
 | Media segment | A marked part of a file, such as an intro or credits, as Jellyfin names it | `MediaSegmentDto` | Chapter, marker, skip |
-| Recycling Bin | The folder removed and replaced files move to when it is on | | Trash, recycle bin |
+| Recycling bin | The folder removed and replaced files move to when it is on | | Trash, recycle bin |
 
 ### Item Statuses
 
@@ -85,7 +85,7 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Errored | Failed and will be retried | `SyncStatus.Errored` |
 | Ignored | Will not be synced until queued again | `SyncStatus.Ignored` |
 | Deleting | Will be removed on the next run | `SyncStatus.Deleting` |
-| Pending Deletion | Waiting for approval to be removed | |
+| Pending deletion | Waiting for approval to be removed | |
 
 ## Live Changes
 
@@ -93,9 +93,9 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | :--- | :--- | :--- | :--- |
 | Live changes | Changes servers announce to each other as they happen | Hints | Real time sync, push sync |
 | Hint | A message that says what changed, never the value | `OutboundHint`, `InboundHint` | Event, notification, update |
-| Change Queue | The **Queue** view of hints waiting, sent, and failed | | Hint queue, outbox |
-| Send Changes After | How long an item must go untouched before its hint goes out | | Debounce, delay |
-| Gathering | A change waiting out **Send Changes After** | | Collecting, buffering |
+| Change queue | The **Queue** view of hints waiting, sent, and failed | | Hint queue, outbox |
+| Send changes after | How long an item must go untouched before its hint goes out | | Debounce, delay |
+| Gathering | A change waiting out **Send changes after** | | Collecting, buffering |
 | Sent | A hint the peer accepted, waiting for it to finish | `OutboundState.Sent` | Delivered |
 | Failed | A hint the peer refused as malformed. It is not retried | `OutboundState.Failed` | Rejected, dead |
 | Held | A change kept back for the scheduled scan because it keeps coming back | Loop breaker | Throttled, blocked |
@@ -109,13 +109,13 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | :--- | :--- | :--- | :--- |
 | Link | A `.strm` Server Sync wrote for a source file. A `.strm` a user made is never a link | | Shortcut, stub, pointer |
 | Linking server | The server that holds the link | | Client, consumer |
-| Allow Linking | The source's switch that lets a server link its files | | Sharing |
+| Allow linking | The source's switch that lets a server link its files | | Sharing |
 | Link cache | Local copies of links that were played | `LinkCache` | Cache, buffer |
 | Cached link | A link whose file is in the link cache | `Cached` | Downloaded link, local link |
 | Link check | The check during **Sync Content** that each link still streams | | Validation, health check |
-| Always Keep | Shows and films a Link library holds as copies | | Pin, keep local |
+| Always keep | Shows and films a Link library holds as copies | | Pin, keep local |
 | Permanent copy | A full copy held in a Link library, with the reason | `KeptCopies` | Kept copy, local override |
-| Turn Back Into Links | Makes permanent copies links again | Unkeep | Revert, demote |
+| Turn back into links | Makes permanent copies links again | Unkeep | Revert, demote |
 
 ## Housekeeping
 

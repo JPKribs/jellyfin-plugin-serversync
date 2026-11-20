@@ -163,7 +163,7 @@ export default function (view) {
     }
 
     // addLinkStreams
-    // Adds the Link Streams chart to a section, with a line for each server that may link to this one.
+    // Adds the Link streams chart to a section, with a line for each server that may link to this one.
     //
     // Inputs
     // content [HTMLElement]: The section's content.
@@ -193,7 +193,7 @@ export default function (view) {
     // drawStatistics
     // Draws one section for each sync type the route answered with. The link streams go under Content, or in
     // a section of their own on a server that has content sync off and still serves links. The page's
-    // description shows only while a sync type is on, since the Link Streams section describes itself.
+    // description shows only while a sync type is on, since the Link streams section describes itself.
     //
     // Inputs
     // statistics [object]: The route's answer, with Types and LinkStreams.

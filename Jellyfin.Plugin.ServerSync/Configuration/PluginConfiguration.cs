@@ -518,7 +518,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public int FullScanIntervalHours { get; set; } = 24;
 
     /// <summary>
-    /// Gets or sets Send Changes After, the seconds an object must go untouched before its hint goes out, clamped 1 to 3600.
+    /// Gets or sets Send changes after, the seconds an object must go untouched before its hint goes out, clamped 1 to 3600.
     /// Every edit to the same object restarts the wait, so several edits send one hint.
     /// </summary>
     public int HintDebounceSeconds { get; set; } = 60;

@@ -128,7 +128,7 @@ public sealed class PlaylistHintHandler
             if (config.PlaylistRemovedAction == PlaylistRemovedAction.Keep)
             {
                 _resolver.Record(incoming);
-                return HintApplyResult.Kept(HintCode.Superseded, "the other server deleted the playlist, and Removed Playlists is set to Keep");
+                return HintApplyResult.Kept(HintCode.Superseded, "the other server deleted the playlist, and Removed playlists is set to Keep");
             }
 
             _mirror.Delete(existing);

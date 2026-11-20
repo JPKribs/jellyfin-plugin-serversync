@@ -99,7 +99,7 @@ public sealed class PeerSegmentProviderTests : IDisposable
     }
 
     /// <summary>
-    /// Jellyfin asks for a video only while Enable Metadata Sync and Enable Media Segment Provider are both on, and never for a folder.
+    /// Jellyfin asks for a video only while Enable metadata sync and Enable media segment provider are both on, and never for a folder.
     /// True: turning either off leaves the segments here as they are, since Jellyfin skips the provider.
     /// False: turning the switch off would make Jellyfin delete every segment the provider gave.
     /// </summary>
@@ -137,7 +137,7 @@ public sealed class PeerSegmentProviderTests : IDisposable
     }
 
     /// <summary>
-    /// When no server has segments for the file, its segments stay unless Remove Segments No Server Has is on.
+    /// When no server has segments for the file, its segments stay unless Remove segments no server has is on.
     /// True: a pool with no intro tool never clears this server's segments, and one that asks for removal gets it.
     /// False: turning the provider on would wipe every segment here, or a removed segment would never go.
     /// </summary>

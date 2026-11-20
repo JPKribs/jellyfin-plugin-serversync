@@ -20,7 +20,7 @@ public enum HintCode
     /// <summary>The path or user is not mapped on the receiver.</summary>
     NotMapped,
 
-    /// <summary>The library mapping's Library Filter leaves the path out.</summary>
+    /// <summary>The library mapping's Library filter leaves the path out.</summary>
     Filtered,
 
     /// <summary>The key or origin is malformed.</summary>

@@ -433,7 +433,7 @@ public class ImageUtilitiesManifestTests
 
     /// <summary>
     /// The deep check asks the source even for an image matched before, and compares by size whatever the tag says.
-    /// True: Deep Image Verification catches a picture swapped on disk under its old tag.
+    /// True: Deep image verification catches a picture swapped on disk under its old tag.
     /// False: the deep check would be no deeper than the regular one.
     /// </summary>
     [Fact]

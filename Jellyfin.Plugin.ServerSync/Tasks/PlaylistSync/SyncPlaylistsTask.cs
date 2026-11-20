@@ -248,7 +248,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
 
     /// <summary>
     /// Settles copies taken from a Sync server that the server no longer lists and holds a newer stamp for, which means it deleted them.
-    /// The copy is deleted or kept by Removed Playlists, and the deletion is recorded either way, so the playlist is not handed back.
+    /// The copy is deleted or kept by Removed playlists, and the deletion is recorded either way, so the playlist is not handed back.
     /// </summary>
     private async Task SettleDeletedAsync(ScanSource source, List<SourcePlaylist> listed, Dictionary<string, Guid> users, PlaylistRemovedAction action, CancellationToken cancellationToken)
     {
@@ -294,7 +294,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
             }
             else
             {
-                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed Playlists is set to Keep", Name, source.Name, FormatUtilities.SanitizeForLog(playlist.Name));
+                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed playlists is set to Keep", Name, source.Name, FormatUtilities.SanitizeForLog(playlist.Name));
             }
 
             _resolver.Record(theirs);

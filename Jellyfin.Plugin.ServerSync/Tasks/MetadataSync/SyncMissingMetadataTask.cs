@@ -614,7 +614,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
     }
 
-    /// <summary>Says whether applying a row writes media segments, which needs the store, Enable Media Segment Provider on, and a change.</summary>
+    /// <summary>Says whether applying a row writes media segments, which needs the store, Enable media segment provider on, and a change.</summary>
     private bool WritesSegments(MetadataSyncItem record)
         => _segments is not null && ConfigManager.Configuration.MetadataSyncSegmentProvider && record.HasSegmentsChanges;
 

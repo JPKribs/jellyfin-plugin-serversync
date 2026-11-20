@@ -1,6 +1,6 @@
 # Sync Types
 
-Two scheduled tasks do the work, and two daily housekeeping tasks, **Empty Recycling Bin** and **Clean Temporary Directory**, tidy up after them. **Sync Content** refreshes and downloads files, handles removed files, and mirrors collections. **Sync Information** compares and applies metadata, people, user settings, and history, then copies playlists.
+Two scheduled tasks do the work, and two daily housekeeping tasks, **Empty Recycling bin** and **Clean Temporary Directory**, tidy up after them. **Sync Content** refreshes and downloads files, handles removed files, and mirrors collections. **Sync Information** compares and applies metadata, people, user settings, and history, then copies playlists.
 
 | Type | Matched by | Live with Push or Sync | Details |
 | :--- | :--- | :--- | :--- |

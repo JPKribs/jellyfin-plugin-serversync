@@ -354,7 +354,7 @@ public partial class ConfigurationController
                 && !(row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)
                 && Services.Links.LinkStateService.MarkPromoting(row, requireApproval: false))
             {
-                // Kept by hand, so removing an Always Keep pick never makes it a link.
+                // Kept by hand, so removing an Always keep pick never makes it a link.
                 row.Kept = Models.ContentSync.KeptReason.Hand;
                 manager.Upsert(row);
                 promoted++;
@@ -444,8 +444,8 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Queues permanent copies in Link libraries to Turn Back Into Links, which the next run does after checking the source still has each file.
-    /// A copy an Always Keep pick still covers is skipped, since the next scan would only copy it again.
+    /// Queues permanent copies in Link libraries to Turn back into links, which the next run does after checking the source still has each file.
+    /// A copy an Always keep pick still covers is skipped, since the next scan would only copy it again.
     /// </summary>
     /// <param name="manager">Reads and writes the Content sync table.</param>
     /// <param name="request">The IDs of the selected rows.</param>

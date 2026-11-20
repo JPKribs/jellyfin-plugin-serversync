@@ -95,7 +95,7 @@ public sealed class PeerMetadataSourceTests
     }
 
     /// <summary>
-    /// The provider asks no server for an item unless Enable Metadata Sync and its provider switch are both on, and for a person unless Enable People Sync and its provider switch are both on.
+    /// The provider asks no server for an item unless Enable metadata sync and its provider switch are both on, and for a person unless Enable people sync and its provider switch are both on.
     /// True: a server that turned the provider off, or does not sync that type, makes no request and logs nothing.
     /// False: every library refresh asks the sources, and logs that no source answered.
     /// </summary>

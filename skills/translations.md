@@ -36,6 +36,16 @@ How this plugin shows its text in the viewer's language. Base builds the strings
 5. Build. Fix every `JPKT` error and warning.
 6. Run `dotnet test` for the key test, and `node --test`, whose support serves the US English strings to the pages.
 
+## Casing
+
+Every string is in sentence case, mirroring Jellyfin, such as "Allow media playback". See [style.md](style.md#casing).
+
+* Write a local string in sentence case in `en-us.json`. Keep proper nouns as written.
+* Add each product name, service, format, or acronym the plugin writes with special casing to `Localization/casing.json`, a JSON array, such as `"Server Sync"`. Leave out Base's defaults, such as Jellyfin, TV, ID, API, and URL. The build fails on an empty entry or a word listed twice.
+* Leave a Jellyfin string as Jellyfin writes it. When one reads wrong beside its neighbors, add `Case="sentence"` to its `JellyfinString`, which changes its English only.
+* Case text built at runtime with `ToSentenceCase` or `ToTitleCase` in C#, and `sentenceCase` or `titleCase` on a page. Both keep the words in `casing.json`, and only English changes.
+* A local string whose English becomes another's after recasing is one string. Merge the two keys. One that becomes a Jellyfin string's English gets `JPKT006`, so declare the Jellyfin string and use it.
+
 ## Add a Language
 
 Add `Localization/<code>.json`, such as `de.json` or `pt-br.json`, with only keys `en-us.json` has. A missing key falls back to the language's base and then to US English. Jellyfin's strings come in every language Jellyfin has, with no file.
@@ -44,5 +54,6 @@ Add `Localization/<code>.json`, such as `de.json` or `pt-br.json`, with only key
 
 * [ ] No English in a page, script, or server message outside `Localization/en-us.json`.
 * [ ] Jellyfin's string used wherever it has the words.
+* [ ] Every string is in sentence case, with special words in `casing.json`.
 * [ ] The build has no `JPKT` error or warning.
 * [ ] The pages show the strings, checked once in another language such as `de`.

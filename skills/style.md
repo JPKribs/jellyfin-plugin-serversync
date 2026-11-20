@@ -34,20 +34,24 @@ These rules apply to every string a user can see. That includes HTML, JS, C# mes
 
 ### Casing
 
-| Text | Case | Example |
-| :--- | :--- | :--- |
-| Tab | Title Case, one word | Servers |
-| Section and collapsible title | Title Case | Sync Parameters |
-| Field label | Title Case | Scheduled Speed |
-| Checkbox label | Title Case | Sync Watched State |
-| Button | Title Case, verb first | Add Server |
-| Dialog title | Title Case | Remove Server |
-| Badge and status chip | Title Case | Pending |
-| Column header | Title Case | Last Sync |
-| Activity log name | Title Case | 12 Items Synced |
-| Description, message, placeholder sentence | Sentence case | Copies played and unplayed marks. |
+Every string is in sentence case, mirroring Jellyfin, such as "Allow media playback". Only the first word and proper nouns take a capital.
 
-Title Case capitalizes every word except short articles, conjunctions, and prepositions in the middle, such as "a", "and", "of", "to", and "in". Keep acronyms as written, such as "API Key", "URL", "Mbps", and "GB".
+| Text | Example |
+| :--- | :--- |
+| Tab, one word | Servers |
+| Section and collapsible title | Sync parameters |
+| Field label | Scheduled speed |
+| Checkbox label | Sync watched state |
+| Button, verb first | Add server |
+| Dialog title | Remove server |
+| Badge and status chip | Pending deletion |
+| Column header | Last sync |
+| Activity log name | 12 items synced |
+| Description, message, placeholder sentence | Copies played and unplayed marks. |
+
+* Write product names, services, formats, and acronyms as they are written, such as "Server Sync", "API Key", and "Mbps". Each one the plugin uses goes in `Localization/casing.json`, per [translations.md](translations.md#casing).
+* Write a choice by its own label inside a sentence, such as "Select Test connection" or "With Allow linking on". A one word choice such as **Pull**, **Copy**, or **Link** keeps its capital.
+* Leave a Jellyfin string as Jellyfin writes it, unless it reads wrong beside its neighbors. Then give it `Case="sentence"`.
 
 ### Words to Use
 
@@ -64,23 +68,23 @@ Pick the word on the left every time.
 | Cancel | Close, No | Closes without keeping changes |
 | Add | New, Create | Puts a new entry into a list on the page |
 | New | Add, Create | Starts a new record in a record picker |
-| Test Connection | Test, Check | Calls the other side and reports the result |
-| Run Now | Start, Trigger | Starts a scheduled task right away |
+| Test connection | Test, Check | Calls the other side and reports the result |
+| Run now | Start, Trigger | Starts a scheduled task right away |
 | Select | Pick, Choose, Tick, Click | Any instruction to make a choice |
 | Turn on, Turn off | Enable, Disable, Tick, Untick | An instruction about a checkbox or toggle |
 | Leave blank | Leave empty | An empty field means the default |
-| API Key | Api Key, API key, Token | The Jellyfin key for another server |
+| API Key | Api Key, API key, Token | The Jellyfin key for another server, written as Jellyfin writes it |
 | Server URL | Address, Host | The base address of a Jellyfin server |
 | Could not | Failed to, Unable to | An error message |
 
-The control names its own result. "Remove Server" leaves the server's media alone, so it is Remove. "Delete Cached Files" frees disk space, so it is Delete.
+The control names its own result. "Remove server" leaves the server's media alone, so it is Remove. "Delete cached files" frees disk space, so it is Delete.
 
 ### Labels
 
 * Two to four words. Name the thing the field holds, not the action.
-* Put a unit at the end in lowercase parentheses, such as **Send Changes After (seconds)** or **Cache Size (GB)**. Use symbols for standard units, such as `GB` and `Mbps`.
+* Put a unit at the end in lowercase parentheses, such as **Send changes after (seconds)** or **Cache size (GB)**. Use symbols for standard units, such as `GB` and `Mbps`.
 * No colons, periods, or question marks.
-* A checkbox label names the feature it turns on, never "Enable X". Write **Sync Watched State**, not **Enable Watched State Sync**. The one exception is the master switch at the top of a section, which reads **Enable** followed by the section name, such as **Enable History Sync**.
+* A checkbox label names the feature it turns on, never "Enable X". Write **Sync watched state**, not **Enable watched state sync**. The one exception is the master switch at the top of a section, which reads **Enable** followed by the section name, such as **Enable history sync**.
 
 ### Descriptions
 
@@ -114,10 +118,10 @@ A placeholder shows an example of a valid value. It is never the only place an i
 
 ### Buttons
 
-* A verb, or a verb and a noun. **Save**, **Add Server**, **Run Now**.
-* Name the object when the page has more than one of that action. **Add Library Mapping** and **Add User Mapping** sit on the same page.
-* A primary Save is **Save**. Use **Save** and a noun only when one page has several saves, such as **Save Bandwidth**.
-* An icon only button carries a `title` of one to three words, such as `Remove`, `Move Up`, or `Retry`. Never a sentence.
+* A verb, or a verb and a noun. **Save**, **Add server**, **Run now**.
+* Name the object when the page has more than one of that action. **Add library mapping** and **Add user mapping** sit on the same page.
+* A primary Save is **Save**. Use **Save** and a noun only when one page has several saves, such as **Save bandwidth**.
+* An icon only button carries a `title` of one to three words, such as `Remove`, `Move up`, or `Retry`. Never a sentence.
 * A button that runs for a while shows progress in place. See [Progress](#progress).
 
 ### Messages
@@ -146,14 +150,14 @@ A confirm asks one question and states the consequence.
 
 ```js
 confirmDialog('Remove source-a? Its library mappings are removed too.', {
-    title: 'Remove Server',
+    title: 'Remove server',
     confirmText: 'Remove',
     destructive: true
 });
 ```
 
 * The message is a question, then one sentence on the consequence. "Delete 3 items? This cannot be undone."
-* The title is the action in Title Case, such as **Remove Server**. Never leave the default **Confirm**.
+* The title is the action in sentence case, such as **Remove server**. Never leave the default **Confirm**.
 * The confirm button repeats the action verb, such as **Remove** or **Delete**. Never **OK** or **Yes**.
 * Set `destructive: true` for anything that loses data.
 * Never "Are you sure you want to". Ask the question directly.
@@ -175,7 +179,7 @@ Use `shared.emptySection(text)` for a region and `shared.emptySection(text, { in
 
 Use `ActivitySummary` and `ActivityText` from Base.
 
-* The name is short and Title Case. "12 Items Synced".
+* The name is short and in sentence case, with keys for one and many. "12 items synced".
 * The overview is one sentence with no closing period, as Base writes it. "12 items were synced from source-a (9), source-b (3)".
 * Use the same verb the UI uses for the action.
 
@@ -213,10 +217,10 @@ A color means the same thing on every page and in every plugin.
 | Color | Means | States |
 | :--- | :--- | :--- |
 | Green | Done and healthy | Active, Synced, Downloaded, Succeeded |
-| Red | Failed, or about to lose data | Error, Errored, Failed, Deleting, Pending Deletion |
+| Red | Failed, or about to lose data | Error, Errored, Failed, Deleting, Pending deletion |
 | Orange | Waiting, or needs attention soon | Queued, Expired, Warning |
-| Purple | Working right now | Pending, Downloading, Locked, Pending Download |
-| Blue | Informational | Admin, Imported, Pending Replacement |
+| Purple | Working right now | Pending, Downloading, Locked, Pending download |
+| Blue | Informational | Admin, Imported, Pending replacement |
 | Gray | Off or not applicable | Disabled, Ignored, Skipped, Group |
 
 * Map a status to a color through `BADGE_STATES`. Never keep a second map in the plugin.
@@ -253,7 +257,7 @@ Every config page uses Jellyfin's page shell.
 ### Tabs
 
 * One registered page per tab, wired with `createConfigPage` and `setTabs`.
-* Tab names are one Title Case word.
+* Tab names are one word.
 * Keep the tab list in one place, the plugin's shared module, never copied into each page.
 * Order tabs from what is used most to what is set once. ServerSync is **Sync**, **Servers**, **Storage**, **Statistics**, **Settings**.
 
@@ -285,9 +289,9 @@ Pick one model per page and keep it.
 
 Every page and section Save is the same:
 
-1. It is Base's `createSaveBar` with `fill: true`. Its button reads **Save**, never **Save Settings** or a noun.
+1. It is Base's `createSaveBar` with `fill: true`. Its button reads **Save**, never **Save settings** or a noun.
 2. The Save Bar is the last element of what it saves. Nothing sits beside it or below it in that section.
-3. Any other actions that belong with that Save, such as **Reset to Defaults**, **Restart**, or **Test**, go in one `<div class="base-button-row">` directly above it. Each is `raised base-button secondary fill`, or `destructive fill` for one that deletes or resets data. A select that belongs there stays a normal `emby-select` in the row. No `small` buttons in that row. Base spaces that row. Its buttons have no margin of their own, so their edges line up with the Save Bar's, the row sits one `--base-gap-narrow` above the Save Bar, and its buttons use the same font weight as Save. A plugin adds no margin, gap, or weight of its own. The Save Bar's element goes directly after the row, never inside a wrapper, since Base spaces them as siblings.
+3. Any other actions that belong with that Save, such as **Reset to defaults**, **Restart**, or **Test**, go in one `<div class="base-button-row">` directly above it. Each is `raised base-button secondary fill`, or `destructive fill` for one that deletes or resets data. A select that belongs there stays a normal `emby-select` in the row. No `small` buttons in that row. Base spaces that row. Its buttons have no margin of their own, so their edges line up with the Save Bar's, the row sits one `--base-gap-narrow` above the Save Bar, and its buttons use the same font weight as Save. A plugin adds no margin, gap, or weight of its own. The Save Bar's element goes directly after the row, never inside a wrapper, since Base spaces them as siblings.
 4. Never hand place a Save button, a small Save, a Save Bar without `fill`, or a status line or unsaved indicator of its own beside it. No plugin CSS positions a Save or its neighbours.
 
 * Call `setDirty` on the Save Bar on every input and change, from `createChangeTracker` or the page's own check.
@@ -411,7 +415,7 @@ grep -o "export function create[A-Za-z]*" ~/.nuget/packages/jpkribs.jellyfin.bas
 | One number with a label | `createStatCard` |
 
 * Pick the chart by the question it answers. A single used of total bar is a Usage Meter, never a Bar Chart.
-* Name each slice with a glossary term in Title Case, such as **Cached Links**.
+* Name each slice with a glossary term in sentence case, such as **Cached links**.
 * Take colors from Base's series colors. Set a color only when it carries a [meaning](#meaning).
 * Give every chart a `label`, and an `emptyText` sentence for when it has nothing to draw.
 * Scope a chart to what the page shows. A chart beside a server picker counts that server only.
@@ -433,7 +437,7 @@ grep -o "export function create[A-Za-z]*" ~/.nuget/packages/jpkribs.jellyfin.bas
 | A dialog already in the page markup | `bindDialog` |
 
 * Build dialogs in JS with `openDialog` and its wrappers. Use `bindDialog` only when the markup is large and static.
-* A dialog title is Title Case and names what the dialog does.
+* A dialog title is in sentence case and names what the dialog does.
 * Buttons read, from left to right, the destructive action, then **Cancel**, then the primary action.
 
 ## Layout
@@ -468,7 +472,7 @@ These pieces are still built by hand in this plugin while Base has a component f
 | :--- | :--- |
 | `.serversync-queue-chip` and `.serversync-storage-mode-badge` | `shared.badge` |
 | `.serversync-health-card` | `base-cards` or `createStatCard` |
-| `.serversync-filter-item*` rows in the Library Filter picker | A table column `image` loader, or `createMediaCard` |
+| `.serversync-filter-item*` rows in the Library filter picker | A table column `image` loader, or `createMediaCard` |
 | `.serversync-queue-row*` | `createFilteredList` with `createMediaCard` |
 | `.serversync-panel` and `.serversync-mapping` | `base-panel` |
 | `.serversync-compare-table` | `createCompareTable` |
@@ -484,7 +488,7 @@ Run every new or changed string through this list.
 * [ ] No colon at the end of a label, and none in a sentence unless it introduces a list.
 * [ ] One sentence, or two when the second is the fix or the consequence.
 * [ ] Sentences end with a period. Labels, buttons, and titles do not.
-* [ ] Title Case for labels, buttons, titles, tabs, and badges. Sentence case for sentences.
+* [ ] Sentence case everywhere, with casing.json words kept as written.
 * [ ] No "please", "successfully", exclamation marks, ALL CAPS, "(s)", or contractions.
 * [ ] The word matches [Words to Use](#words-to-use).
 * [ ] Base's typings were searched before any markup was built by hand.

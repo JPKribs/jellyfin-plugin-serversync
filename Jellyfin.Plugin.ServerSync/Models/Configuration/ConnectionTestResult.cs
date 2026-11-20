@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 /// <summary>
-/// The outcome of Test Connection, with what the server reported about itself and the key.
+/// The outcome of Test connection, with what the server reported about itself and the key.
 /// </summary>
 public class ConnectionTestResult
 {

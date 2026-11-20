@@ -9,15 +9,15 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 
 /// <summary>
-/// Moves files to the Recycling Bin and deletes the ones past their retention period.
+/// Moves files to the Recycling bin and deletes the ones past their retention period.
 /// </summary>
 public static class RecyclingBinService
 {
     /// <summary>
-    /// Moves a file to the Recycling Bin under a name that carries the time it was moved.
+    /// Moves a file to the Recycling bin under a name that carries the time it was moved.
     /// </summary>
     /// <param name="filePath">The file to move.</param>
-    /// <param name="recyclingBinPath">The Recycling Bin folder the file moves into.</param>
+    /// <param name="recyclingBinPath">The Recycling bin folder the file moves into.</param>
     /// <param name="logger">Records the move and any failure.</param>
     /// <returns><c>true</c> when the file was moved.</returns>
     public static bool MoveToRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
@@ -68,10 +68,10 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Moves an item's trickplay folder to the Recycling Bin under a name that carries the time, which the retention cleanup reads.
+    /// Moves an item's trickplay folder to the Recycling bin under a name that carries the time, which the retention cleanup reads.
     /// </summary>
     /// <param name="folderPath">The folder to move.</param>
-    /// <param name="recyclingBinPath">The Recycling Bin folder the folder moves into.</param>
+    /// <param name="recyclingBinPath">The Recycling bin folder the folder moves into.</param>
     /// <param name="logger">Records the move and any failure.</param>
     /// <returns><c>true</c> when the folder was moved.</returns>
     public static bool MoveFolderToRecyclingBin(string folderPath, string recyclingBinPath, ILogger logger)
@@ -104,11 +104,11 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Moves the backup a download set aside for the file it replaced to the Recycling Bin, named as if it were the original file.
+    /// Moves the backup a download set aside for the file it replaced to the Recycling bin, named as if it were the original file.
     /// </summary>
     /// <param name="backupPath">Where the backup of the replaced file sits.</param>
     /// <param name="originalDisplayPath">The replaced file's original path, which the recycled name is built from.</param>
-    /// <param name="recyclingBinPath">The Recycling Bin folder the backup moves into.</param>
+    /// <param name="recyclingBinPath">The Recycling bin folder the backup moves into.</param>
     /// <param name="logger">Records the move and any failure.</param>
     /// <returns><c>true</c> when the backup was moved.</returns>
     public static bool ArchiveBackupToRecyclingBin(string backupPath, string originalDisplayPath, string recyclingBinPath, ILogger logger)
@@ -161,11 +161,11 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Moves a file to the Recycling Bin, then its companion files, local images, and trickplay folder.
+    /// Moves a file to the Recycling bin, then its companion files, local images, and trickplay folder.
     /// Companions come from the strict matcher, so files that only share a name prefix stay.
     /// </summary>
     /// <param name="filePath">The main file to move.</param>
-    /// <param name="recyclingBinPath">The Recycling Bin folder everything moves into.</param>
+    /// <param name="recyclingBinPath">The Recycling bin folder everything moves into.</param>
     /// <param name="logger">Records each move and any failure.</param>
     /// <returns><c>true</c> when the main file was moved.</returns>
     public static bool MoveWithCompanionsToRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
@@ -212,7 +212,7 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Checks whether a folder the plugin cleans up on its own, the Recycling Bin or the temp folder, lies inside a root folder or holds one.
+    /// Checks whether a folder the plugin cleans up on its own, the Recycling bin or the temp folder, lies inside a root folder or holds one.
     /// Cleaning up such a folder could delete library files for good.
     /// </summary>
     /// <param name="recyclingBinPath">The folder to check.</param>
@@ -244,10 +244,10 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Deletes the files and trickplay folders the plugin put in the Recycling Bin once the time in their name is past the retention period.
+    /// Deletes the files and trickplay folders the plugin put in the Recycling bin once the time in their name is past the retention period.
     /// Anything named another way belongs to someone else and is never touched.
     /// </summary>
-    /// <param name="recyclingBinPath">The Recycling Bin folder to clean.</param>
+    /// <param name="recyclingBinPath">The Recycling bin folder to clean.</param>
     /// <param name="retentionDays">How many days a recycled file is kept before it is deleted.</param>
     /// <param name="logger">Records each deletion and each failure.</param>
     /// <returns>How many files and trickplay folders were deleted.</returns>
@@ -350,10 +350,10 @@ public static class RecyclingBinService
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Reads the time a trickplay folder moved to the Recycling Bin from its name, for names the plugin built only.
+    /// Reads the time a trickplay folder moved to the Recycling bin from its name, for names the plugin built only.
     /// </summary>
     /// <param name="folderName">The folder's name, without its path.</param>
-    /// <param name="recycledAt">The UTC time the folder moved to the Recycling Bin.</param>
+    /// <param name="recycledAt">The UTC time the folder moved to the Recycling bin.</param>
     /// <returns><c>true</c> when the plugin built the name for a recycled trickplay folder.</returns>
     public static bool TryReadRecycledTrickplayTime(string folderName, out DateTime recycledAt)
     {

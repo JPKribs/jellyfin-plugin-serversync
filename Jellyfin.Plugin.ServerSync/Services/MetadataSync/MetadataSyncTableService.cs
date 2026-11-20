@@ -180,7 +180,7 @@ public class MetadataSyncTableService
 
     /// <summary>
     /// Builds the metadata row for a source item, with the blobs of each category that is turned on.
-    /// Returns null when the item has no path, the Library Filter leaves it out, or no local item matches its path.
+    /// Returns null when the item has no path, the Library filter leaves it out, or no local item matches its path.
     /// </summary>
     /// <param name="libraryMapping">The library mapping the item came through.</param>
     /// <param name="sourceItem">The item as the source returned it.</param>

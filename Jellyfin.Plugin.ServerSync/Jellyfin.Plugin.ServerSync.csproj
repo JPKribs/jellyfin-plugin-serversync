@@ -41,14 +41,14 @@
   <!-- Jellyfin strings the pages use. Base builds them in with Localization/*.json, in every language Jellyfin has. -->
   <ItemGroup>
     <JellyfinString Include="All" />
-    <JellyfinString Include="AllowEmbeddedSubtitlesAllowAllOption" />
-    <JellyfinString Include="AspectRatio" />
+    <JellyfinString Include="AllowEmbeddedSubtitlesAllowAllOption" Case="sentence" />
+    <JellyfinString Include="AspectRatio" Case="sentence" />
     <JellyfinString Include="Blacklist" />
-    <JellyfinString Include="ButtonAddServer" />
-    <JellyfinString Include="ButtonAddUser" />
+    <JellyfinString Include="ButtonAddServer" Case="sentence" />
+    <JellyfinString Include="ButtonAddUser" Case="sentence" />
     <JellyfinString Include="ButtonClose" />
     <JellyfinString Include="ButtonRemove" />
-    <JellyfinString Include="ButtonSignIn" />
+    <JellyfinString Include="ButtonSignIn" Case="sentence" />
     <JellyfinString Include="Collections" />
     <JellyfinString Include="Copy" />
     <JellyfinString Include="Default" />
@@ -62,7 +62,7 @@
     <JellyfinString Include="Genres" />
     <JellyfinString Include="HeaderApiKey" />
     <JellyfinString Include="HeaderApiKeys" />
-    <JellyfinString Include="HeaderDeleteItems" />
+    <JellyfinString Include="HeaderDeleteItems" Case="sentence" />
     <JellyfinString Include="HeaderError" />
     <JellyfinString Include="HeaderLibraries" />
     <JellyfinString Include="HeaderStatus" />
@@ -70,15 +70,22 @@
     <JellyfinString Include="HeaderUsers" />
     <JellyfinString Include="Image" />
     <JellyfinString Include="Images" />
-    <JellyfinString Include="IndexNumber" />
+    <JellyfinString Include="IndexNumber" Case="sentence" />
     <JellyfinString Include="ItemCount" />
     <JellyfinString Include="Items" />
+    <JellyfinString Include="Label3DFormat" />
     <JellyfinString Include="LabelAvailable" />
+    <JellyfinString Include="LabelBirthDate" />
     <JellyfinString Include="LabelCountry" />
+    <JellyfinString Include="LabelCustomRating" />
     <JellyfinString Include="LabelDatabase" />
+    <JellyfinString Include="LabelDeathDate" />
+    <JellyfinString Include="LabelEndDate" />
     <JellyfinString Include="LabelFailed" />
     <JellyfinString Include="LabelMetadata" />
     <JellyfinString Include="LabelName" />
+    <JellyfinString Include="LabelNotInstalled" />
+    <JellyfinString Include="LabelOriginalTitle" />
     <JellyfinString Include="LabelPassword" />
     <JellyfinString Include="LabelPlaylist" />
     <JellyfinString Include="LabelSize" />
@@ -96,10 +103,10 @@
     <JellyfinString Include="None" />
     <JellyfinString Include="Normal" />
     <JellyfinString Include="Off" />
-    <JellyfinString Include="OptionCommunityRating" />
-    <JellyfinString Include="OptionParentalRating" />
-    <JellyfinString Include="OptionPlayCount" />
-    <JellyfinString Include="OptionReleaseDate" />
+    <JellyfinString Include="OptionCommunityRating" Case="sentence" />
+    <JellyfinString Include="OptionParentalRating" Case="sentence" />
+    <JellyfinString Include="OptionPlayCount" Case="sentence" />
+    <JellyfinString Include="OptionReleaseDate" Case="sentence" />
     <JellyfinString Include="Overview" />
     <JellyfinString Include="People" />
     <JellyfinString Include="Person" />

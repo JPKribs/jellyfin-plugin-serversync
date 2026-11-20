@@ -44,21 +44,21 @@ beforeEach(build);
 test('getDisplayStatus says Synced for a synced copy and Linked for a synced link', function () {
     assert.equal(module.getDisplayStatus({ Status: 'Synced', StorageMode: 'Copy' }), 'Synced');
     assert.equal(module.getDisplayStatus({ Status: 'Synced', StorageMode: 'Link' }), 'Linked');
-    assert.equal(module.getDisplayStatus({ Status: 'Synced', StorageMode: 'Link', Cached: true }), 'Linked (Cached)');
-    assert.equal(module.getDisplayStatus({ Status: 'Synced', StorageMode: 'Promoting' }), 'Linked (Copy Next)');
+    assert.equal(module.getDisplayStatus({ Status: 'Synced', StorageMode: 'Link', Cached: true }), 'Linked (cached)');
+    assert.equal(module.getDisplayStatus({ Status: 'Synced', StorageMode: 'Promoting' }), 'Linked (copy next)');
 });
 
 test('getDisplayStatus adds the storage change to a row that is not synced yet', function () {
     assert.equal(module.getDisplayStatus({ Status: 'Queued', StorageMode: 'Link' }), 'Queued (Link)');
-    assert.equal(module.getDisplayStatus({ Status: 'Queued', StorageMode: 'Link', Cached: true }), 'Queued (Link, Cached)');
+    assert.equal(module.getDisplayStatus({ Status: 'Queued', StorageMode: 'Link', Cached: true }), 'Queued (Link, cached)');
     assert.equal(module.getDisplayStatus({ Status: 'Queued', StorageMode: 'Promoting' }), 'Queued (Link to Copy)');
     assert.equal(module.getDisplayStatus({ Status: 'Errored', StorageMode: 'Unkeeping' }), 'Errored (Copy to Link)');
     assert.equal(module.getDisplayStatus({ Status: 'Ignored', StorageMode: 'Copy' }), 'Ignored');
 });
 
 test('getDisplayStatus names the kind of pending row', function () {
-    assert.equal(module.getDisplayStatus({ Status: 'Pending', PendingType: 'Deletion', StorageMode: 'Copy' }), 'Pending Deletion');
-    assert.equal(module.getDisplayStatus({ Status: 'Pending', PendingType: 'Download', StorageMode: 'Link' }), 'Pending Download (Link)');
+    assert.equal(module.getDisplayStatus({ Status: 'Pending', PendingType: 'Deletion', StorageMode: 'Copy' }), 'Pending deletion');
+    assert.equal(module.getDisplayStatus({ Status: 'Pending', PendingType: 'Download', StorageMode: 'Link' }), 'Pending download (Link)');
 });
 
 test('getStatusClass gives the badge state a status maps to', function () {
@@ -89,7 +89,7 @@ test('updatePendingFilterVisibility hides the whole pending row when nothing nee
     assert.equal(env.view.querySelector('#pendingStatusRow').classList.contains('hidden'), true);
 });
 
-test('the pending filters read Pending Replacement and Pending Deletion', async function () {
+test('the pending filters read Pending replacement and Pending deletion', async function () {
     var options = [];
     var fresh = await createSyncContext([], {
         createPaginatedTable: function (view, shared, opts) { options = opts.filters.options; return { getBulkActionsContainer: function () { return null; } }; }
@@ -98,8 +98,8 @@ test('the pending filters read Pending Replacement and Pending Deletion', async 
     var content = mod.createContentSyncTableModule(fresh.ctx, fresh.kit);
     content.init({});
     var labels = options.map(function (o) { return o.label; });
-    assert.ok(labels.includes('Pending Replacement'));
-    assert.ok(labels.includes('Pending Deletion'));
+    assert.ok(labels.includes('Pending replacement'));
+    assert.ok(labels.includes('Pending deletion'));
     assert.equal(labels.includes('Pending Replace'), false);
 });
 
@@ -169,7 +169,7 @@ test('modalDelete names the file in the question and deletes only when it is con
     module.modalDelete();
     await flush();
     assert.equal(questions[0].message, 'Delete "Film.mkv" from this server? This cannot be undone.');
-    assert.equal(questions[0].opts.title, 'Delete File');
+    assert.equal(questions[0].opts.title, 'Delete file');
     assert.equal(env.page.requests.filter(function (r) { return r.type === 'POST'; }).length, 0);
     answer = true;
     module.modalDelete();

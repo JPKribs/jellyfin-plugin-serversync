@@ -122,7 +122,7 @@ public sealed class RefreshMetadataSyncTableTaskTests : IDisposable
     }
 
     /// <summary>
-    /// Finishing a scan forgets the segments kept for files the Metadata table no longer holds, only while Enable Media Segment Provider is on.
+    /// Finishing a scan forgets the segments kept for files the Metadata table no longer holds, only while Enable media segment provider is on.
     /// True: the local segment table never outgrows the files being synced, and a server that left it off keeps what it has.
     /// False: removed files would keep segments forever, or turning the switch off would clear them.
     /// </summary>

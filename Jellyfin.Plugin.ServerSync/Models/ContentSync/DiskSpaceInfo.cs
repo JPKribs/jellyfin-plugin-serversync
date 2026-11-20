@@ -11,7 +11,7 @@ public class DiskSpaceInfo
     /// <summary>Gets or sets the size of the disk, in bytes.</summary>
     public long TotalBytes { get; set; }
 
-    /// <summary>Gets or sets the free space that must be kept, in bytes, from Minimum Free Space.</summary>
+    /// <summary>Gets or sets the free space that must be kept, in bytes, from Minimum free space.</summary>
     public long RequiredBytes { get; set; }
 
     /// <summary>Gets or sets a value indicating whether the free space reaches <see cref="RequiredBytes"/>.</summary>

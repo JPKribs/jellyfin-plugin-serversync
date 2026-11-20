@@ -527,7 +527,7 @@ public sealed class SourceServerClientPeerTests : IDisposable
 
     /// <summary>
     /// The queue status is read for this server, and a peer that gives none answers null.
-    /// True: the Change Queue shows what the peer still holds.
+    /// True: the Change queue shows what the peer still holds.
     /// False: a peer without an answer would fail the queue view.
     /// </summary>
     [Fact]
@@ -621,7 +621,7 @@ public sealed class SourceServerClientPeerTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData(200, "{\"Allowed\":true,\"Size\":42}", true, null)]
-    [InlineData(403, "Allow Linking is off", false, "the source answered 403: Allow Linking is off")]
+    [InlineData(403, "Allow linking is off", false, "the source answered 403: Allow linking is off")]
     [InlineData(200, null, false, "the source answered 200: ")]
     public async Task CheckLinkStreamAsync_Answer_IsAllowedOnlyOnAParsedSuccess(int status, string? body, bool expectedAllowed, string? expectedReason)
     {
@@ -662,14 +662,14 @@ public sealed class SourceServerClientPeerTests : IDisposable
 
     /// <summary>
     /// Describing links answers null when the peer has no such route, the peer's own reason when it refuses, and an empty list for an empty success.
-    /// True: the link check shows "Allow Linking is off" as the peer wrote it.
+    /// True: the link check shows "Allow linking is off" as the peer wrote it.
     /// False: a refusal would read as links with no details, or a missing route as a refusal.
     /// </summary>
     [Theory]
     [InlineData(404, null, true, null)]
     [InlineData(405, null, true, null)]
     [InlineData(200, null, false, null)]
-    [InlineData(403, "Allow Linking is off for this server", false, "Allow Linking is off for this server")]
+    [InlineData(403, "Allow linking is off for this server", false, "Allow linking is off for this server")]
     [InlineData(500, null, false, "the source answered 500")]
     public async Task DescribeLinksAsync_Answer_IsNullEmptyOrThePeersReason(int status, string? body, bool expectNull, string? expectedFailure)
     {

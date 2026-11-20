@@ -28,7 +28,7 @@
                             <div class="base-card-list-actions">
                                 <button is="emby-button" type="button" id="btnAddServer" class="raised base-button primary">
                                     <span class="material-icons" aria-hidden="true">add</span>
-                                    <span data-str="ButtonAddServer">Add Server</span>
+                                    <span data-str="ButtonAddServer">Add server</span>
                                 </button>
                                 <span id="serverListStatus" class="base-status-text" role="status"></span>
                             </div>
@@ -74,7 +74,7 @@
                                         <div class="checkboxContainer checkboxContainer-withDescription">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkAllowPrivateNetwork" checked />
-                                                <span class="checkboxLabel" data-str="LabelAllowPrivateNetwork">Allow Private Network Address</span>
+                                                <span class="checkboxLabel" data-str="LabelAllowPrivateNetwork">Allow private network address</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" data-str="HelpAllowPrivateNetwork">Lets the Server URL be a loopback or LAN address.</div>
                                         </div>
@@ -113,7 +113,7 @@
                                             </label>
                                             <label class="base-choice" data-auth="user">
                                                 <input type="radio" name="serverAuth" value="user" />
-                                                <span class="base-choice-name" data-str="ButtonSignIn">Sign In</span>
+                                                <span class="base-choice-name" data-str="ButtonSignIn">Sign in</span>
                                                 <span class="base-choice-text" data-str="HelpAuthSignIn">Sign in once. Only the token is kept.</span>
                                             </label>
                                         </div>
@@ -141,7 +141,7 @@
                                             </div>
                                             <div class="flex align-items-center serversync-gap-sm">
                                                 <button is="emby-button" type="button" id="btnGenerateToken" class="raised base-button primary small">
-                                                    <span data-str="ButtonGenerateToken">Generate Token</span>
+                                                    <span data-str="ButtonGenerateToken">Generate token</span>
                                                 </button>
                                                 <span id="tokenGeneratorStatus" class="base-status-text"></span>
                                             </div>
@@ -151,7 +151,7 @@
 
                                         <div class="base-collapsible-actions flush">
                                             <button is="emby-button" type="button" id="btnTestConnection" class="raised base-button small">
-                                                <span data-str="ButtonTestConnection">Test Connection</span>
+                                                <span data-str="ButtonTestConnection">Test connection</span>
                                             </button>
                                             <span id="connectionStatus" class="base-status-text"></span>
                                         </div>
@@ -160,7 +160,7 @@
                                         <div id="accessSummary" class="serversync-mt-md hidden">
                                             <div id="accessHeadline" class="serversync-mb-md"></div>
                                             <div id="accessRows" class="serversync-access-grid serversync-mb-md"></div>
-                                            <div class="fieldDescription" data-str="HelpCheckLink">Select Check Link to see what that server's own key reads here.</div>
+                                            <div class="fieldDescription" data-str="HelpCheckLink">Select Check link to see what that server's own key reads here.</div>
                                         </div>
 
                                         <h3 class="base-subsection-title" data-str="HeaderDirection">Direction</h3>
@@ -186,7 +186,7 @@
                                         <div id="peerCheckArea" class="hidden">
                                             <div class="base-collapsible-actions flush serversync-mt-sm">
                                                 <button is="emby-button" type="button" id="btnCheckPeer" class="raised base-button small">
-                                                    <span data-str="ButtonCheckLink">Check Link</span>
+                                                    <span data-str="ButtonCheckLink">Check link</span>
                                                 </button>
                                                 <span id="peerCheckStatus" class="base-status-text"></span>
                                             </div>
@@ -208,7 +208,7 @@
                                         <div class="checkboxContainer checkboxContainer-withDescription" id="allowLinkingContainer">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkAllowLinking" />
-                                                <span class="checkboxLabel" data-str="LabelAllowLinking">Allow Linking</span>
+                                                <span class="checkboxLabel" data-str="LabelAllowLinking">Allow linking</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" id="allowLinkingDescription" data-str="HelpAllowLinking">Let that server stream files from here for libraries it maps as Link.</div>
                                         </div>
@@ -216,26 +216,26 @@
 
                                         <div id="linkLimits" class="hidden">
                                             <div class="inputContainer">
-                                                <label for="txtLinkMaxStreams" data-str="LabelLinkStreamsAtOnce">Link Streams At Once</label>
+                                                <label for="txtLinkMaxStreams" data-str="LabelLinkStreamsAtOnce">Link streams at once</label>
                                                 <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
                                                 <div class="fieldDescription" data-str="HelpLinkMaxStreams">Sets the most streams that server may run at once. 0 is no limit.</div>
                                             </div>
                                             <div class="checkboxContainer checkboxContainer-withDescription" id="countOwnSessionsContainer">
                                                 <label class="emby-checkbox-label">
                                                     <input type="checkbox" is="emby-checkbox" id="chkLinkCountOwnSessions" />
-                                                    <span class="checkboxLabel" data-str="LabelCountOwnPlayback">Count Their Own Playback</span>
+                                                    <span class="checkboxLabel" data-str="LabelCountOwnPlayback">Count their own playback</span>
                                                 </label>
                                                 <div class="fieldDescription checkboxFieldDescription" data-str="HelpCountOwnPlayback">Counts a user's own playback here toward the limit on their user mapping.</div>
                                             </div>
                                             <div class="checkboxContainer checkboxContainer-withDescription">
                                                 <label class="emby-checkbox-label">
                                                     <input type="checkbox" is="emby-checkbox" id="chkLinkHonorBitrateLimit" />
-                                                    <span class="checkboxLabel" data-str="LabelHonorBitrateLimit">Honor Remote Bitrate Limits</span>
+                                                    <span class="checkboxLabel" data-str="LabelHonorBitrateLimit">Honor remote bitrate limits</span>
                                                 </label>
                                                 <div class="fieldDescription checkboxFieldDescription" data-str="HelpHonorBitrateLimit">Links are never transcoded here. A version above the user's Maximum remote streaming bitrate is refused, so they get a smaller version when the film has one.</div>
                                             </div>
                                             <div class="selectContainer">
-                                                <label for="selLinkFallbackUser" data-str="LabelUnmappedUsers">Unmapped Users</label>
+                                                <label for="selLinkFallbackUser" data-str="LabelUnmappedUsers">Unmapped users</label>
                                                 <select is="emby-select" id="selLinkFallbackUser"></select>
                                                 <div class="fieldDescription" data-str="HelpUnmappedUsers">Sets who streams for a user on that server with no user mapping here.</div>
                                             </div>
@@ -252,11 +252,11 @@
                                     <div id="serverStepLibraries" class="base-collapsible-content collapsed">
                                         <div id="librariesLocked" class="base-neutral serversync-mb-md" data-str="HelpLibrariesLocked">Test the connection in step 2 to load libraries.</div>
                                         <div id="librariesSection" class="hidden">
-                                            <div class="fieldDescription serversync-mb-md" data-str="HelpLibraryMappings">Map that server's libraries to local ones. Storage, Always Keep, and filters are on the Storage tab.</div>
+                                            <div class="fieldDescription serversync-mb-md" data-str="HelpLibraryMappings">Map that server's libraries to local ones. Storage, Always keep, and filters are on the Storage tab.</div>
                                             <div id="libraryMappingsContainer"></div>
                                             <div class="base-collapsible-actions flush">
                                                 <button is="emby-button" type="button" id="btnAddMapping" class="raised base-button secondary small">
-                                                    <span data-str="ButtonAddLibraryMapping">Add Library Mapping</span>
+                                                    <span data-str="ButtonAddLibraryMapping">Add library mapping</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -272,12 +272,12 @@
                                     <div id="serverStepUsers" class="base-collapsible-content collapsed">
                                         <div id="usersLocked" class="base-neutral serversync-mb-md" data-str="HelpUsersLocked">Test the connection in step 2 to load users.</div>
                                         <div id="usersSection" class="hidden">
-                                            <div class="fieldDescription serversync-mb-md" data-str="HelpUserMappings">Map that server's users to local ones. With Allow Linking on, each mapping can also cap the local user's link streams and speed.</div>
+                                            <div class="fieldDescription serversync-mb-md" data-str="HelpUserMappings">Map that server's users to local ones. With Allow linking on, each mapping can also cap the local user's link streams and speed.</div>
                                             <div id="usersLimited" class="base-warn hidden serversync-mb-md"></div>
                                             <div id="userMappingsContainer"></div>
                                             <div class="base-collapsible-actions flush">
                                                 <button is="emby-button" type="button" id="btnAddUserMapping" class="raised base-button secondary small">
-                                                    <span data-str="ButtonAddUserMapping">Add User Mapping</span>
+                                                    <span data-str="ButtonAddUserMapping">Add user mapping</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -287,11 +287,11 @@
                                 <!-- Editor footer -->
                                 <div class="serversync-editor-footer">
                                     <button is="emby-button" type="button" id="btnSaveServer" class="raised base-button primary small">
-                                        <span data-str="ButtonSaveServer">Save Server</span>
+                                        <span data-str="ButtonSaveServer">Save server</span>
                                     </button>
                                     <span id="saveServerStatus" class="serversync-save-status base-status-text" role="status"></span>
                                     <button is="emby-button" type="button" id="btnDeleteServer" class="raised base-button destructive small">
-                                        <span data-str="ButtonRemoveServer">Remove Server</span>
+                                        <span data-str="ButtonRemoveServer">Remove server</span>
                                     </button>
                                 </div>
                             </div>

@@ -1,9 +1,9 @@
 // serversync_sync_history.js
-// The History Sync table and its detail modal. Built by serversync_sync.js from the page context
+// The History sync table and its detail modal. Built by serversync_sync.js from the page context
 // and the table kit in serversync_sync_table.js.
 
 // createHistorySyncTableModule
-// Builds the History Sync view: its table, status counts, health figures, and detail modal.
+// Builds the History sync view: its table, status counts, health figures, and detail modal.
 //
 // Inputs
 // ctx [object]: The page context from serversync_sync.js.

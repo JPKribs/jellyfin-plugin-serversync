@@ -43,12 +43,12 @@ public sealed class LinkFeatureTests
 
     /// <summary>
     /// The feature is offered when one entry is enabled, allows linking, and pushes, and by no other entry.
-    /// True: the feature follows the Allow Linking setting of the servers this one sends to.
+    /// True: the feature follows the Allow linking setting of the servers this one sends to.
     /// False: a Pull, disabled, or unticked entry would advertise streams it then refuses.
     /// </summary>
     /// <param name="mode">The entry's direction.</param>
     /// <param name="enabled">Whether the entry is enabled.</param>
-    /// <param name="allowLinking">Whether Allow Linking is on.</param>
+    /// <param name="allowLinking">Whether Allow linking is on.</param>
     /// <param name="expected">Whether the feature is offered.</param>
     [Theory]
     [InlineData(ServerMode.Push, true, true, true)]

@@ -22,7 +22,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Services.Links;
 
 /// <summary>
 /// The link cache: what it holds, what it drops and in which order, what it serves and hands to the
-/// library, and which links Always Keep copies instead.
+/// library, and which links Always keep copies instead.
 /// </summary>
 public sealed class LinkCacheTests : IDisposable
 {

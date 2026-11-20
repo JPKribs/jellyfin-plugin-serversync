@@ -206,7 +206,7 @@ public sealed class LinkCache
     /// The folder a cache uses for a location setting. A chosen location gets a folder of the cache's own
     /// inside it, so the cache never shares a folder and never removes a file that is not its own.
     /// </summary>
-    /// <param name="location">The Cache Location setting, or empty.</param>
+    /// <param name="location">The Cache location setting, or empty.</param>
     /// <param name="defaultRoot">The folder under Jellyfin's cache.</param>
     /// <returns>The folder.</returns>
     public static string RootFor(string? location, string defaultRoot)

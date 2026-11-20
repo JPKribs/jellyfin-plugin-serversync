@@ -1,6 +1,6 @@
 // serversync_storage.js
-// How each library mapping keeps its files: Copy or Link, the link cache, Always Keep, and the
-// Library Filter, plus the permanent copies of the Link libraries. The mappings themselves are made on
+// How each library mapping keeps its files: Copy or Link, the link cache, Always keep, and the
+// library filter, plus the permanent copies of the Link libraries. The mappings themselves are made on
 // the Servers tab. A save here changes only these fields of the matching stored mapping.
 
 import * as serverSyncModule from './configurationpage?name=serversync_shared.js';
@@ -192,8 +192,8 @@ export default function (view) {
         div.className = 'serversync-library-card';
         var filterTableId = 'storageFilterTable_' + (++_tableSeq);
         var permanentTableId = 'storagePermanentTable_' + _tableSeq;
-        var sourceName = mapping.SourceLibraryName || mapping.SourceLibraryId || tr('LabelSourceLibraryFallback');
-        var localName = mapping.LocalLibraryName || mapping.LocalLibraryId || tr('LabelLocalLibraryFallback');
+        var sourceName = mapping.SourceLibraryName || mapping.SourceLibraryId || tr('LabelSourceLibrary');
+        var localName = mapping.LocalLibraryName || mapping.LocalLibraryId || tr('LabelLocalLibrary');
         div.innerHTML =
             '<div class="serversync-library-card-header">' +
                 '<span class="serversync-library-card-icon material-icons" aria-hidden="true">video_library</span>' +
@@ -356,7 +356,7 @@ export default function (view) {
             }
         }
 
-        // The cache and Always Keep only apply to links, so they show for a Link library.
+        // The cache and Always keep only apply to links, so they show for a Link library.
         function updateLinkVisibility() {
             var linked = storageModeSelect.value === 'Link';
             var badge = div.querySelector('.serversync-storage-mode-badge');
@@ -679,7 +679,7 @@ export default function (view) {
         ServerSyncShared.getConfig().then(function (config) {
             currentConfig = config;
             // The library filter applies to content, history, and metadata sync. How files are kept,
-            // the cache, Always Keep, and permanent copies are content sync's alone.
+            // the cache, Always keep, and permanent copies are content sync's alone.
             var on = !!(config.EnableContentSync || config.EnableHistorySync || config.EnableMetadataSync);
             contentOn = !!config.EnableContentSync;
             setVisible('storageDisabled', !on);

@@ -71,7 +71,7 @@ test('formatImageDisplay shows the size, with the count when there are several i
 });
 
 test('renderChangeBadges gives one gray badge when nothing changed', function () {
-    assert.equal(kit.renderChangeBadges([]), '<span class="base-badge gray">No Changes</span>');
+    assert.equal(kit.renderChangeBadges([]), '<span class="base-badge gray">No changes</span>');
 });
 
 test('renderChangeBadges gives an orange badge for each changed category', function () {

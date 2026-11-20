@@ -52,10 +52,10 @@ Remove compatibility notes for peers the plugin no longer supports. The plugin r
 
 ### UI Names
 
-* Write a label exactly as the page shows it, in bold. **Send Changes After (seconds)**.
+* Write a label exactly as the page shows it, in bold. **Send changes after (seconds)**.
 * Write a path through the UI with `>` between the steps, in bold. **Dashboard > Plugins > Server Sync > Settings**.
 * Write a tab as its label, in bold. **Sync**, **Servers**, **Storage**, **Statistics**, **Settings**.
-* Quote activity log names and on-screen messages in double quotes. "Server Sync Needs Attention".
+* Quote activity log names and on-screen messages in double quotes. "Server Sync needs attention".
 * Write routes, files, settings keys, and values in code. `POST /Sync/Tasks/{taskKey}/Run`.
 
 A docs page and the UI must use the same word for the same thing. When a label changes, search `docs/` for the old one and change it everywhere in the same commit.
@@ -132,14 +132,14 @@ One sentence on what the route does and who calls it.
 List settings as bullets in the order the page shows them. Start each with the label in bold and follow it with a verb.
 
 ```markdown
-* **Play Count** syncs how many times each item was played.
+* **Play count** syncs how many times each item was played.
 ```
 
 When a page has many settings with defaults, use a table instead.
 
 | Setting | What it does | Default |
 | :--- | :--- | :--- |
-| **Play Count** | Syncs how many times each item was played | On |
+| **Play count** | Syncs how many times each item was played | On |
 
 Table cells have no closing period. Keep them to one sentence.
 
@@ -149,7 +149,7 @@ Write trouble as a table of what the reader sees and what to do.
 
 | Reason | What to do |
 | :--- | :--- |
-| linking is not allowed for *server* here | Turn on **Allow Linking** on the source's entry for the linking server |
+| linking is not allowed for *server* here | Turn on **Allow linking** on the source's entry for the linking server |
 
 Put the exact on-screen text in the first column. Use italics for a placeholder inside it, such as *server*.
 
@@ -211,9 +211,9 @@ Save every capture as PNG. Crop out the browser frame and the Jellyfin header un
 * Place two related shots side by side in a table whose header row holds the captions.
 
 ```markdown
-| Change Queue | Change Queue on a phone |
+| Change queue | Change queue on a phone |
 | :---: | :---: |
-| ![Change Queue](screenshots/Queue.png) | ![Change Queue on a phone](screenshots/Queue%20Phone.png) |
+| ![Change queue](screenshots/Queue.png) | ![Change queue on a phone](screenshots/Queue%20Phone.png) |
 ```
 
 ### When to Retake

@@ -14,7 +14,7 @@ Releases use a four part version, `JJ.JJ.F.B`. It matches the supported Jellyfin
 
 Servers in a pool do not need the same plugin version. Each build speaks a numbered protocol. Two servers exchange live changes, history negotiation, and conflict checks as long as their protocols overlap. A release that does not change the protocol works alongside the release before it, so servers can be updated one at a time.
 
-The protocol number changes only when a hint, a peer route, or a conflict rule changes in a way an older server would misread. The changelog says so when it does. Until both servers are compatible, changes for the other server wait in the queue and **Check Link** reports the reason.
+The protocol number changes only when a hint, a peer route, or a conflict rule changes in a way an older server would misread. The changelog says so when it does. Until both servers are compatible, changes for the other server wait in the queue and **Check link** reports the reason.
 
 A server that reports no protocol is compatible only when it runs exactly the same plugin version.
 
@@ -35,7 +35,7 @@ When a server skips 12.4.13.0, Server Sync holds itself and Jellyfin runs as usu
 * **The database is left exactly as it was.** Nothing is read from it, written to it, or moved aside.
 * **The settings are left exactly as they were.** They are copied to `Jellyfin.Plugin.ServerSync.xml.before-12.4.13.0` beside the settings file before anything reads them. Every save is refused, so the settings an older release wrote are still there for 12.4.13.0 to convert.
 * **Nothing of Server Sync runs.** No background work starts, playback is not touched, and its metadata lookups answer nothing. Its tasks fail with the reason.
-* **Every Server Sync page says why** in a line at its top. The Jellyfin log and the **Activity** page say the same, as "Server Sync Needs an Earlier Update First".
+* **Every Server Sync page says why** in a line at its top. The Jellyfin log and the **Activity** page say the same, as "Server Sync needs an earlier update first".
 
 Installing 12.4.13.0, starting Jellyfin, leaving it a day, and then updating again picks up where the server left off.
 

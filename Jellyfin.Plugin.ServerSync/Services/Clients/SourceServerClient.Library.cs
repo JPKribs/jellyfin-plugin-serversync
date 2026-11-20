@@ -234,7 +234,7 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Lists the source server's collections for the Library Filter picker. Collections live outside libraries,
+    /// Lists the source server's collections for the Library filter picker. Collections live outside libraries,
     /// so the whole server is searched.
     /// </summary>
     /// <param name="searchTerm">Text the collection names must match, or null for all.</param>
@@ -329,7 +329,7 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Lists the source server's playlists for the Library Filter picker. Playlists live outside libraries,
+    /// Lists the source server's playlists for the Library filter picker. Playlists live outside libraries,
     /// so the whole server is searched.
     /// </summary>
     /// <param name="searchTerm">Text the playlist names must match, or null for all.</param>
@@ -371,7 +371,7 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Lists a library's top level items, such as series, films, and albums, for the Library Filter picker.
+    /// Lists a library's top level items, such as series, films, and albums, for the Library filter picker.
     /// </summary>
     /// <param name="libraryId">The source library to browse.</param>
     /// <param name="searchTerm">Text the item names must match, or null to browse.</param>

@@ -77,9 +77,9 @@ public sealed class PeerInterestTests
     }
 
     /// <summary>
-    /// A filtered library lists its paths in ordinal order without blank entries, and an Allow All library lists none even when paths are stored.
+    /// A filtered library lists its paths in ordinal order without blank entries, and an Allow all library lists none even when paths are stored.
     /// True: the peer applies the same filter this server would.
-    /// False: leftover paths on an Allow All library would make the peer hold hints back.
+    /// False: leftover paths on an Allow all library would make the peer hold hints back.
     /// </summary>
     [Fact]
     public void For_FilteredLibraries_ListsPathsOnlyWhenTheFilterIsOn()

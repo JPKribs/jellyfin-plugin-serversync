@@ -478,7 +478,7 @@ public partial class SourceServerClient
 
     /// <summary>
     /// Asks the peer about files this server holds links to.
-    /// Throws with the peer's reason when it refuses, such as when Allow Linking is off for this server there.
+    /// Throws with the peer's reason when it refuses, such as when Allow linking is off for this server there.
     /// </summary>
     /// <param name="request">The items to describe.</param>
     /// <param name="cancellationToken">Cancels the request.</param>

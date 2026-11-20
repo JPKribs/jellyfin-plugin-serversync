@@ -136,7 +136,7 @@ public sealed record MediaSegmentsValue(
     /// </summary>
     /// <param name="chosen">What the pool holds for the file, or null.</param>
     /// <param name="local">What the local segment table holds for the file, or null.</param>
-    /// <param name="remove">Whether Remove Segments No Server Has is on.</param>
+    /// <param name="remove">Whether Remove segments no server has is on.</param>
     /// <returns>The value the row holds as its source.</returns>
     public static MediaSegmentsValue? Worth(MediaSegmentsValue? chosen, MediaSegmentsValue? local, bool remove)
         => chosen is { Segments.Count: 0 } && local is null && !remove ? null : chosen;

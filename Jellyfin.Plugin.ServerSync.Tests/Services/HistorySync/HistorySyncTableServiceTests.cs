@@ -17,7 +17,7 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Services.HistorySync;
 
 /// <summary>
-/// A history row is built only for an item this server holds, for a user this server has, and inside the Library Filter.
+/// A history row is built only for an item this server holds, for a user this server has, and inside the Library filter.
 /// </summary>
 public sealed class HistorySyncTableServiceTests
 {
@@ -139,7 +139,7 @@ public sealed class HistorySyncTableServiceTests
     }
 
     /// <summary>
-    /// An item the Library Filter leaves out builds no row, and one it lets through does.
+    /// An item the Library filter leaves out builds no row, and one it lets through does.
     /// True: filtered titles have no history rows, so the scan prunes any they had.
     /// False: history would sync for titles the operator filtered out.
     /// </summary>

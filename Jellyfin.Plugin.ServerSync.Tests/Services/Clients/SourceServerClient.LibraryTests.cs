@@ -191,7 +191,7 @@ public sealed class SourceServerClientLibraryTests
 
     /// <summary>
     /// The collection and playlist pickers search the whole server, and send a search term only when one is typed.
-    /// True: the Library Filter picker lists every collection or playlist, narrowed as the operator types.
+    /// True: the Library filter picker lists every collection or playlist, narrowed as the operator types.
     /// False: a blank search box would filter on an empty term and list nothing.
     /// </summary>
     [Theory]

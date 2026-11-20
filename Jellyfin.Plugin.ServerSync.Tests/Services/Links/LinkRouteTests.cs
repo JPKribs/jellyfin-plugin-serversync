@@ -805,12 +805,12 @@ public sealed class LinkRouteTests : IDisposable
     }
 
     /// <summary>
-    /// Push and Sync servers link only with Allow Linking on, and a Pull server never does.
+    /// Push and Sync servers link only with Allow linking on, and a Pull server never does.
     /// True: a Push server kept for downloads cannot link, and a Pull server cannot link at all.
     /// False: a server could stream files here that it was only meant to download, or read from.
     /// </summary>
     /// <param name="mode">The entry's mode.</param>
-    /// <param name="allowLinking">Whether Allow Linking is on.</param>
+    /// <param name="allowLinking">Whether Allow linking is on.</param>
     /// <param name="allowed">Whether a stream is allowed.</param>
     [Theory]
     [InlineData(ServerMode.Push, true, true)]

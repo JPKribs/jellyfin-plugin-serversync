@@ -38,7 +38,7 @@ public class PeerCapabilities
 
     /// <summary>
     /// Gets or sets the peer's clock at the time of the answer, in UTC. Conflicts between two edits made
-    /// within the skew window are decided by these clocks, so Check Link reports a peer whose clock is off.
+    /// within the skew window are decided by these clocks, so Check link reports a peer whose clock is off.
     /// </summary>
     public DateTime? ServerTime { get; set; }
 }

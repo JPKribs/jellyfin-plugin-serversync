@@ -1,9 +1,9 @@
 // serversync_sync_people.js
-// The People Sync table and its detail modal. Built by serversync_sync.js from the page context
+// The People sync table and its detail modal. Built by serversync_sync.js from the page context
 // and the table kit in serversync_sync_table.js.
 
 // createPeopleSyncTableModule
-// Builds the People Sync view: its table, status counts, health figures, and detail modal.
+// Builds the People sync view: its table, status counts, health figures, and detail modal.
 //
 // Inputs
 // ctx [object]: The page context from serversync_sync.js.
@@ -174,11 +174,11 @@ export function createPeopleSyncTableModule(ctx, kit) {
 
                     var metadataFields = [
                         { key: 'Name', label: t.tr('Name') },
-                        { key: 'OriginalTitle', label: t.tr('FieldOriginalTitle') },
+                        { key: 'OriginalTitle', label: t.tr('LabelOriginalTitle') },
                         { key: 'ForcedSortName', label: t.tr('FieldForcedSortName') },
                         { key: 'Overview', label: t.tr('Overview'), truncate: true },
-                        { key: 'PremiereDate', label: t.tr('FieldBirthDate'), isDate: true },
-                        { key: 'EndDate', label: t.tr('FieldDeathDate'), isDate: true },
+                        { key: 'PremiereDate', label: t.tr('LabelBirthDate'), isDate: true },
+                        { key: 'EndDate', label: t.tr('LabelDeathDate'), isDate: true },
                         { key: 'ProductionYear', label: t.tr('LabelYear') },
                         { key: 'LockData', label: t.tr('FieldLockItem') },
                         { key: 'LockedFields', label: t.tr('FieldLockedFields') }

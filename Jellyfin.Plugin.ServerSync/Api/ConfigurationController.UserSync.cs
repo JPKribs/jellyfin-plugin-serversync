@@ -315,7 +315,7 @@ public partial class ConfigurationController
             parts.Add("1 image");
         }
 
-        return parts.Count == 0 ? "No Changes" : string.Join(", ", parts);
+        return parts.Count == 0 ? "No changes" : string.Join(", ", parts);
     }
 
     /// <summary>Reads the number of differences from a changes summary, or 1 when it names none.</summary>

@@ -30,7 +30,7 @@
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label class="emby-checkbox-label">
                                     <input type="checkbox" is="emby-checkbox" id="chkEnableBandwidthScheduling" />
-                                    <span class="checkboxLabel" data-str="LabelScheduledSpeed">Scheduled Speed</span>
+                                    <span class="checkboxLabel" data-str="LabelScheduledSpeed">Scheduled speed</span>
                                 </label>
                                 <div class="fieldDescription checkboxFieldDescription" data-str="HelpUseOtherSpeedsDuring">Use other speeds during set hours.</div>
                             </div>
@@ -64,34 +64,34 @@
 
                             <div id="hintSettings">
                             <div class="inputContainer">
-                                <label for="txtHintDebounceSeconds" data-str="LabelSendChangesAfter">Send Changes After (seconds)</label>
+                                <label for="txtHintDebounceSeconds" data-str="LabelSendChangesAfter">Send changes after (seconds)</label>
                                 <input is="emby-input" type="number" id="txtHintDebounceSeconds" min="1" max="3600" />
                                 <div class="fieldDescription" data-str="HelpWaitsItemGoUntouched">Waits for an item to go untouched this long before its hint goes out.</div>
                             </div>
 
-                            <h3 class="base-subsection-title" data-str="HeaderChangeRetries">Change Retries</h3>
+                            <h3 class="base-subsection-title" data-str="HeaderChangeRetries">Change retries</h3>
                             <div class="serversync-form-table serversync-form-table3 serversync-mb-md">
-                                <div class="serversync-form-row serversync-form-head"><span data-str="ColumnSetting">Setting</span><span data-str="ColumnNoAnswer">No Answer</span><span data-str="ColumnRefused">Refused</span></div>
-                                <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelFirstWait">First Wait</span><span class="serversync-form-hint" data-str="HintNoAnswerDoubles">No Answer doubles each try</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitSec">sec</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitMin">min</span></span></div>
-                                <div class="serversync-form-row"><span class="serversync-form-label" data-str="LabelLongestWait">Longest Wait</span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRetryMaxMinutes" min="1" max="1440" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitMin">min</span></span><span class="serversync-form-cell serversync-form-none" data-str="StorageType.Fixed">Fixed</span></div>
-                                <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelMaxTries">Max Tries</span><span class="serversync-form-hint" data-str="Hint0RetriesForever">0 retries forever</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintMaxRetries" min="0" max="1000" class="serversync-form-input" /><span class="serversync-unit"></span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRefusedMaxRetries" min="0" max="1000" class="serversync-form-input" /><span class="serversync-unit"></span></span></div>
+                                <div class="serversync-form-row serversync-form-head"><span data-str="ColumnSetting">Setting</span><span data-str="ColumnNoAnswer">No answer</span><span data-str="ColumnRefused">Refused</span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelFirstWait">First wait</span><span class="serversync-form-hint" data-str="HintNoAnswerDoubles">No answer doubles each try</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitSec">sec</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitMin">min</span></span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label" data-str="LabelLongestWait">Longest wait</span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRetryMaxMinutes" min="1" max="1440" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitMin">min</span></span><span class="serversync-form-cell serversync-form-none" data-str="StorageType.Fixed">Fixed</span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelMaxTries">Max tries</span><span class="serversync-form-hint" data-str="Hint0RetriesForever">0 retries forever</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintMaxRetries" min="0" max="1000" class="serversync-form-input" /><span class="serversync-unit"></span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRefusedMaxRetries" min="0" max="1000" class="serversync-form-input" /><span class="serversync-unit"></span></span></div>
                             </div>
                             </div>
 
                             <div class="inputContainer">
-                                <label for="txtMaxRetryCount" data-str="LabelFailedItemRetries">Failed Item Retries</label>
+                                <label for="txtMaxRetryCount" data-str="LabelFailedItemRetries">Failed item retries</label>
                                 <input is="emby-input" type="number" id="txtMaxRetryCount" min="1" max="10" />
                                 <div class="fieldDescription" data-str="HelpSetsTriesFailedDownload">Sets the tries for a failed download or item within one run. One that still fails is tried again on the next run. 1 to 10.</div>
                             </div>
 
                             <div class="inputContainer">
-                                <label for="txtRefreshParallelism" data-str="LabelRefreshParallelism">Refresh Parallelism</label>
+                                <label for="txtRefreshParallelism" data-str="LabelRefreshParallelism">Refresh parallelism</label>
                                 <input is="emby-input" type="number" id="txtRefreshParallelism" min="1" max="16" />
                                 <div class="fieldDescription" data-str="HelpSetsHowManyMetadata">Sets how many Metadata and People items refresh at once, and how many requests a Metadata scan sends to a server at once. Lower it when a server is slow.</div>
                             </div>
 
                             <div class="inputContainer">
-                                <label for="txtFullScanIntervalHours" data-str="LabelFullScanHours">Full Scan Every (hours)</label>
+                                <label for="txtFullScanIntervalHours" data-str="LabelFullScanHours">Full scan every (hours)</label>
                                 <input is="emby-input" type="number" id="txtFullScanIntervalHours" min="0" max="720" />
                                 <div class="fieldDescription" data-str="HelpChecksEverythingOften0">Checks everything this often. 0 makes every scan a full scan.</div>
                             </div>
@@ -99,7 +99,7 @@
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label class="emby-checkbox-label">
                                     <input type="checkbox" is="emby-checkbox" id="chkDeepImageVerification" />
-                                    <span class="checkboxLabel" data-str="LabelDeepImageVerification">Deep Image Verification</span>
+                                    <span class="checkboxLabel" data-str="LabelDeepImageVerification">Deep image verification</span>
                                 </label>
                                 <div class="fieldDescription checkboxFieldDescription" data-str="HelpCheckImageSizeRefresh">Check every image size each refresh. Slow.</div>
                             </div>
@@ -151,12 +151,12 @@
                         </button>
                         <div id="contentSyncSettingsContent" class="base-collapsible-content collapsed">
 
-                            <!-- Enable Content Sync -->
+                            <!-- Enable content sync -->
                             <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableContentSync" />
-                                        <span class="checkboxLabel" data-str="LabelEnableContentSync">Enable Content Sync</span>
+                                        <span class="checkboxLabel" data-str="LabelEnableContentSync">Enable content sync</span>
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesLinksMediaFiles">Copies or links the media files of mapped libraries to this server.</div>
                                 </div>
@@ -165,7 +165,7 @@
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionLibrariesKeysUser">Libraries the key's user can see</span><span><span class="base-badge green" data-str="Yes">Yes</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionEveryLibrary">Every library</span><span><span class="base-badge red" data-str="No">No</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionFolderPathsLibrary">Folder paths in the library picker</span><span><span class="base-badge red" data-str="No">No</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
-                                    <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionFileDownloads">File downloads</span><span><span class="base-badge orange" data-str="BadgeLimited">Limited</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label" data-str="AccessFileDownloads">File downloads</span><span><span class="base-badge orange" data-str="BadgeLimited">Limited</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionNewFilesThey">New files as they happen</span><span><span class="base-badge orange" data-str="BadgeLimited">Limited</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-note" data-str="HelpSignedUsersNeedAllow">Signed in users need Allow media downloading. Limited live changes need the user on that server's whitelist.</div>
                                 </div>
@@ -173,13 +173,13 @@
 
                             <div id="contentSyncOptions">
 
-                                <!-- Sync Parameters -->
-                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync Parameters</h3>
+                                <!-- Sync parameters -->
+                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync parameters</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkDetectUpdatedFiles" />
-                                            <span class="checkboxLabel" data-str="LabelDetectUpdatedFiles">Detect Updated Files</span>
+                                            <span class="checkboxLabel" data-str="LabelDetectUpdatedFiles">Detect updated files</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpDownloadSyncedFileAgain">Download a synced file again when it is missing here or its size differs from the source's.</div>
                                     </div>
@@ -187,7 +187,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMirrorSyncedCollections" />
-                                            <span class="checkboxLabel" data-str="LabelMirrorSyncedCollections">Mirror Synced Collections</span>
+                                            <span class="checkboxLabel" data-str="LabelMirrorSyncedCollections">Mirror synced collections</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpRecreateCollectionsWhitelistedLibrary">Recreate collections whitelisted in a library filter on the Storage tab, with their synced items.</div>
                                     </div>
@@ -195,14 +195,14 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkIncludeCompanionFiles" />
-                                            <span class="checkboxLabel" data-str="LabelIncludeCompanionFiles">Include Companion Files</span>
+                                            <span class="checkboxLabel" data-str="LabelIncludeCompanionFiles">Include companion files</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpAlsoDownloadExternalSubtitles">Also download external subtitles.</div>
                                     </div>
 
 
                                     <div id="watchedFilterUsersSettings">
-                                        <label data-str="LabelSkipItemsWatched">Skip Items Watched By</label>
+                                        <label data-str="LabelSkipItemsWatched">Skip items watched by</label>
                                         <div class="fieldDescription" data-str="HelpSkipItemsPickedUser">Skip items every picked user has watched. None picked syncs everything.</div>
                                         <div id="watchedFilterUsersList"></div>
                                     </div>
@@ -212,29 +212,29 @@
                                 <div class="serversync-settings-group">
                                     <div class="serversync-form-table serversync-mb-md">
                                         <div class="serversync-form-row serversync-form-head"><span data-str="ColumnChange">Change</span><span data-str="ColumnAction">Action</span></div>
-                                        <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelNewFiles">New Files</span><span class="serversync-form-hint" data-str="HintMissingHere">Missing here</span></span><span class="serversync-form-cell"><select is="emby-select" id="selDownloadNewContentMode" class="emby-select-withcolor emby-select serversync-form-select"><option value="Enabled" data-str="OptionEnabled">Enabled</option><option value="RequireApproval" data-str="OptionRequireApproval">Require Approval</option><option value="Disabled" data-str="Disabled">Disabled</option></select></span></div>
-                                        <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelChangedFiles">Changed Files</span><span class="serversync-form-hint" data-str="HintDifferSource">Differ from the source</span></span><span class="serversync-form-cell"><select is="emby-select" id="selReplaceExistingContentMode" class="emby-select-withcolor emby-select serversync-form-select"><option value="Enabled" data-str="OptionEnabled">Enabled</option><option value="RequireApproval" data-str="OptionRequireApproval">Require Approval</option><option value="Disabled" data-str="Disabled">Disabled</option></select></span></div>
-                                        <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelRemovedFiles">Removed Files</span><span class="serversync-form-hint" data-str="HintGoneSource">Gone from the source</span></span><span class="serversync-form-cell"><select is="emby-select" id="selMissingContent" class="emby-select-withcolor emby-select serversync-form-select"><option value="Keep" data-str="OptionKeep">Keep</option><option value="Delete" data-str="Delete">Delete</option><option value="DeleteAfterApproval" data-str="OptionDeleteAfterApproval">Delete After Approval</option><option value="Ignore" data-str="ButtonIgnore">Ignore</option></select></span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelNewFiles">New files</span><span class="serversync-form-hint" data-str="HintMissingHere">Missing here</span></span><span class="serversync-form-cell"><select is="emby-select" id="selDownloadNewContentMode" class="emby-select-withcolor emby-select serversync-form-select"><option value="Enabled" data-str="OptionEnabled">Enabled</option><option value="RequireApproval" data-str="OptionRequireApproval">Require approval</option><option value="Disabled" data-str="Disabled">Disabled</option></select></span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelChangedFiles">Changed files</span><span class="serversync-form-hint" data-str="HintDifferSource">Differ from the source</span></span><span class="serversync-form-cell"><select is="emby-select" id="selReplaceExistingContentMode" class="emby-select-withcolor emby-select serversync-form-select"><option value="Enabled" data-str="OptionEnabled">Enabled</option><option value="RequireApproval" data-str="OptionRequireApproval">Require approval</option><option value="Disabled" data-str="Disabled">Disabled</option></select></span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelRemovedFiles">Removed files</span><span class="serversync-form-hint" data-str="HintGoneSource">Gone from the source</span></span><span class="serversync-form-cell"><select is="emby-select" id="selMissingContent" class="emby-select-withcolor emby-select serversync-form-select"><option value="Keep" data-str="OptionKeep">Keep</option><option value="Delete" data-str="Delete">Delete</option><option value="DeleteAfterApproval" data-str="OptionDeleteAfterApproval">Delete after approval</option><option value="Ignore" data-str="ButtonIgnore">Ignore</option></select></span></div>
                                         <div class="serversync-role-note" data-str="HelpIgnoreKeepsFilesHides">Ignore keeps the files and hides an emptied movie or show folder with a .ignore file. Uncertain deletions always wait for approval.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkEnableRecyclingBin" />
-                                            <span class="checkboxLabel" data-str="LabelEnableRecyclingBin">Enable Recycling Bin</span>
+                                            <span class="checkboxLabel" data-str="LabelEnableRecyclingBin">Enable recycling bin</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpMoveDeletedReplacedFiles">Move deleted and replaced files to a bin instead of deleting them.</div>
                                     </div>
 
                                     <div id="recyclingBinSettings" class="base-indent hidden">
                                         <div class="inputContainer">
-                                            <label for="txtRecyclingBinPath" data-str="LabelRecyclingBinPath">Recycling Bin Path</label>
+                                            <label for="txtRecyclingBinPath" data-str="LabelRecyclingBinPath">Recycling bin path</label>
                                             <input is="emby-input" type="text" id="txtRecyclingBinPath" />
                                             <div class="fieldDescription" data-str="HelpSetsFolderBin">Sets the folder for the bin.</div>
                                         </div>
 
                                         <div class="inputContainer">
-                                            <label for="txtRecyclingBinRetentionDays" data-str="LabelKeepDays">Keep For (days)</label>
+                                            <label for="txtRecyclingBinRetentionDays" data-str="LabelKeepDays">Keep for (days)</label>
                                             <input is="emby-input" type="number" id="txtRecyclingBinRetentionDays" min="1" max="365" />
                                             <div class="fieldDescription" data-str="HelpKeepsFileBinMany">Keeps a file in the bin this many days before it is deleted. 1 to 365.</div>
                                         </div>
@@ -243,7 +243,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkRemoveEmptyFolders" />
-                                            <span class="checkboxLabel" data-str="LabelRemoveEmptyFolders">Remove Empty Folders</span>
+                                            <span class="checkboxLabel" data-str="LabelRemoveEmptyFolders">Remove empty folders</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpRemoveFoldersLeftEmpty">Remove folders left empty after a delete.</div>
                                     </div>
@@ -253,19 +253,19 @@
                                 <h3 class="base-subsection-title" data-str="DownloadManager">Downloads</h3>
                                 <div class="serversync-settings-group">
                                     <div class="inputContainer">
-                                        <label for="txtMaxConcurrentDownloads" data-str="LabelDownloadsAtOnce">Downloads At Once</label>
+                                        <label for="txtMaxConcurrentDownloads" data-str="LabelDownloadsAtOnce">Downloads at once</label>
                                         <input is="emby-input" type="number" id="txtMaxConcurrentDownloads" min="1" max="10" />
                                         <div class="fieldDescription" data-str="HelpSetsHowManyFiles">Sets how many files download at the same time. 1 to 10.</div>
                                     </div>
 
                                     <div class="inputContainer">
-                                        <label for="txtTempDownloadPath" data-str="LabelTemporaryFolder">Temporary Folder</label>
+                                        <label for="txtTempDownloadPath" data-str="LabelTemporaryFolder">Temporary folder</label>
                                         <input is="emby-input" type="text" id="txtTempDownloadPath" placeholder="Default" data-str-placeholder="Default" />
                                         <div class="fieldDescription" data-str="HelpSetsWhereDownloadsWait">Sets where downloads wait before they move into place. Empty uses a serversync folder in Jellyfin's cache folder.</div>
                                     </div>
 
                                     <div class="inputContainer">
-                                        <label for="txtMinFreeDiskSpace" data-str="LabelMinimumFreeSpace">Minimum Free Space (GB)</label>
+                                        <label for="txtMinFreeDiskSpace" data-str="LabelMinimumFreeSpace">Minimum free space (GB)</label>
                                         <input is="emby-input" type="number" id="txtMinFreeDiskSpace" min="0" max="1000" />
                                         <div class="fieldDescription" data-str="HelpKeepsMuchSpaceFree">Keeps this much space free on the library's disk. A file that would leave less is not downloaded.</div>
                                     </div>
@@ -274,7 +274,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkTakeLinkImagesFromSource" />
-                                            <span class="checkboxLabel" data-str="LabelTakeLinkImages">Take Link Images From the Source</span>
+                                            <span class="checkboxLabel" data-str="LabelTakeLinkImages">Take link images from the source</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpGiveLinksTrickplayChapter">Give links the trickplay and chapter images their source made. Jellyfin makes neither for a link.</div>
                                     </div>
@@ -282,58 +282,58 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkStreamLinksDirectly" />
-                                            <span class="checkboxLabel" data-str="LabelStreamDirectPlay">Stream Direct Play of Links Per User</span>
+                                            <span class="checkboxLabel" data-str="LabelStreamDirectPlay">Stream direct play of links per user</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpStreamLinksDirectPlay">Stream a link's direct play from its source per user, so two viewers are counted apart. Turn off if a player cannot direct play links.</div>
                                     </div>
 
                                     <div class="serversync-form-table serversync-mb-md" id="linkStreamsTable">
-                                        <div class="serversync-form-row serversync-form-head"><span data-str="HeaderLinkStreams">Link Streams</span><span data-str="ColumnAtOnce">At Once</span></div>
+                                        <div class="serversync-form-row serversync-form-head"><span data-str="HeaderLinkStreams">Link streams</span><span data-str="ColumnAtOnce">At once</span></div>
                                         <div class="serversync-form-row"><span class="serversync-form-label"><span data-str="LabelAllServers">All servers</span><span class="serversync-form-hint" data-str="HintLinksServerStreams">Links this server streams at once, in all</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtLinkMaxStreamsTotal" min="0" max="1000" class="serversync-form-input" /></span></div>
                                         <div id="linkTakeRows"></div>
                                     </div>
                                     <div class="fieldDescription serversync-mb-md" data-str="HelpStreamsFilmHighestRanked">Streams a film from the highest ranked server that is idle for this server, or else the one with the most streams free. 0 is no limit.</div>
 
-                                    <h3 class="base-subsection-title" data-str="HeaderLinkCache">Link Cache</h3>
+                                    <h3 class="base-subsection-title" data-str="HeaderLinkCache">Link cache</h3>
                                     <div class="fieldDescription serversync-mb-md" data-str="HelpKeepsLocalCopiesPlayed">Keeps local copies of played links and upcoming episodes, which play from here even while the source is down. Each library can opt out on the Storage tab.</div>
                                     <div class="selectContainer">
-                                        <label for="selLinkCacheSizing" data-str="LabelCacheSize">Cache Size</label>
+                                        <label for="selLinkCacheSizing" data-str="LabelCacheSize">Cache size</label>
                                         <select is="emby-select" id="selLinkCacheSizing">
                                             <option value="Off" data-str="Off">Off</option>
                                             <option value="All" data-str="OptionUseAllAvailable">Use all available space</option>
                                             <option value="Fixed" data-str="OptionUseUpFixed">Use up to a fixed amount</option>
                                             <option value="Percent" data-str="OptionUsePercentageAvailable">Use a percentage of available space</option>
                                         </select>
-                                        <div class="fieldDescription" data-str="HelpSetsMostDiskCache">Sets the most disk the cache may use, across all servers. Available space is what the cache holds plus what is free on its disk, less Minimum Free Space. Off empties the cache.</div>
+                                        <div class="fieldDescription" data-str="HelpSetsMostDiskCache">Sets the most disk the cache may use, across all servers. Available space is what the cache holds plus what is free on its disk, less Minimum free space. Off empties the cache.</div>
                                     </div>
                                     <div class="inputContainer" id="linkCacheFixedRow">
-                                        <label for="txtLinkCacheSizeGb" data-str="LabelFixedAmountGB">Fixed Amount (GB)</label>
+                                        <label for="txtLinkCacheSizeGb" data-str="LabelFixedAmountGB">Fixed amount (GB)</label>
                                         <input is="emby-input" type="number" id="txtLinkCacheSizeGb" min="0" />
                                         <div class="fieldDescription" data-str="Help0UsesAllAvailable">0 uses all available space.</div>
                                     </div>
                                     <div class="inputContainer" id="linkCachePercentRow">
-                                        <label for="txtLinkCachePercent" data-str="LabelShareAvailableSpace">Share of Available Space (%)</label>
+                                        <label for="txtLinkCachePercent" data-str="LabelShareAvailableSpace">Share of available space (%)</label>
                                         <input is="emby-input" type="number" id="txtLinkCachePercent" min="1" max="100" />
                                         <div class="fieldDescription" data-str="HelpSetsShareAvailableSpace">Sets the share of the available space the cache may use. 1 to 100.</div>
                                     </div>
                                     <div id="linkCacheOptions">
                                     <div class="inputContainer">
-                                        <label for="txtLinkCachePath" data-str="LabelCacheLocation">Cache Location</label>
+                                        <label for="txtLinkCachePath" data-str="LabelCacheLocation">Cache location</label>
                                         <input is="emby-input" type="text" id="txtLinkCachePath" placeholder="Default" data-str-placeholder="Default" />
                                         <div class="fieldDescription" data-str="HelpKeepsFilesServersyncLinks">Keeps files in a serversync-links folder here. Empty uses Jellyfin's cache folder. Changing it empties the old location.</div>
                                     </div>
                                     <div class="inputContainer">
-                                        <label for="txtLinkCacheRetentionDays" data-str="LabelCacheRetentionDays">Cache Retention (days)</label>
+                                        <label for="txtLinkCacheRetentionDays" data-str="LabelCacheRetentionDays">Cache retention (days)</label>
                                         <input is="emby-input" type="number" id="txtLinkCacheRetentionDays" min="0" max="3650" />
                                         <div class="fieldDescription" data-str="HelpKeepsFileManyDays">Keeps a file this many days after it was last played, or after it was cached if never played. 0 keeps files until the space is needed.</div>
                                     </div>
                                     <div class="inputContainer">
-                                        <label for="txtLinkCachePreCacheEpisodes" data-str="LabelPreCacheEpisodes">Pre-cache Episodes</label>
+                                        <label for="txtLinkCachePreCacheEpisodes" data-str="LabelPreCacheEpisodes">Pre-cache episodes</label>
                                         <input is="emby-input" type="number" id="txtLinkCachePreCacheEpisodes" min="0" max="50" />
                                         <div class="fieldDescription" data-str="HelpCachesManyEpisodesAhead">Caches this many episodes ahead of the one a user is watching. 0 caches none ahead.</div>
                                     </div>
                                     <div class="selectContainer">
-                                        <label for="selLinkCacheRemovalOrder" data-str="LabelRemovalOrder">Removal Order</label>
+                                        <label for="selLinkCacheRemovalOrder" data-str="LabelRemovalOrder">Removal order</label>
                                         <select is="emby-select" id="selLinkCacheRemovalOrder">
                                             <option value="LastPlayed" data-str="OptionLastPlayedLongest">Last played, longest ago first</option>
                                             <option value="Oldest" data-str="OptionOldestCacheFirst">Oldest in the cache first</option>
@@ -345,7 +345,7 @@
                                     </div>
                                     <div id="linkCacheStatus" class="base-neutral serversync-mb-md"></div>
                                     <button is="emby-button" type="button" id="btnClearLinkCache" class="raised base-button destructive small">
-                                        <span data-str="ButtonDeleteCachedFiles">Delete Cached Files</span>
+                                        <span data-str="ButtonDeleteCachedFiles">Delete cached files</span>
                                     </button>
                                 </div>
                             </div>
@@ -368,12 +368,12 @@
                         </button>
                         <div id="historySyncSettingsContent" class="base-collapsible-content collapsed">
 
-                            <!-- Enable History Sync -->
+                            <!-- Enable history sync -->
                             <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableHistorySync" />
-                                        <span class="checkboxLabel" data-str="LabelEnableHistorySync">Enable History Sync</span>
+                                        <span class="checkboxLabel" data-str="LabelEnableHistorySync">Enable history sync</span>
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesPlayedStateProgress">Copies played state, progress, play count, last played date, and favorites.</div>
                                 </div>
@@ -381,7 +381,7 @@
                                     <div class="serversync-role-row serversync-role-head"><span data-str="ColumnPermission">Permission</span><span data-str="HeaderUser">User</span><span data-str="ColumnAdmin">Admin</span></div>
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionKeysOwnUser">The key's own user</span><span><span class="base-badge green" data-str="Yes">Yes</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionOtherMappedUsers">Other mapped users</span><span><span class="base-badge red" data-str="No">No</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
-                                    <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionTwoWayHistory">Two way history</span><span><span class="base-badge orange" data-str="BadgeLimited">Limited</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label" data-str="AccessTwoWayHistory">Two way history</span><span><span class="base-badge orange" data-str="BadgeLimited">Limited</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-row"><span class="serversync-role-label" data-str="PermissionChangesTheyHappen">Changes as they happen</span><span><span class="base-badge orange" data-str="BadgeLimited">Limited</span></span><span><span class="base-badge green" data-str="Yes">Yes</span></span></div>
                                     <div class="serversync-role-note" data-str="HelpLimitedNeedsUserServers">Limited needs the user on that server's whitelist.</div>
                                 </div>
@@ -391,13 +391,13 @@
 
                             <div id="historySyncOptions">
 
-                                <!-- Sync Parameters -->
-                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync Parameters</h3>
+                                <!-- Sync parameters -->
+                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync parameters</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncPlayedStatus" checked />
-                                            <span class="checkboxLabel" data-str="LabelPlayedUnplayedStatus">Played / Unplayed Status</span>
+                                            <span class="checkboxLabel" data-str="LabelPlayedUnplayedStatus">Played / unplayed status</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesWhetherItemPlayed">Copies whether an item is played.</div>
                                     </div>
@@ -405,7 +405,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncPlaybackPosition" checked />
-                                            <span class="checkboxLabel" data-str="LabelPlaybackPosition">Playback Position</span>
+                                            <span class="checkboxLabel" data-str="LabelPlaybackPosition">Playback position</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesWhereResume">Copies where to resume.</div>
                                     </div>
@@ -413,7 +413,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncPlayCount" checked />
-                                            <span class="checkboxLabel" data-str="OptionPlayCount">Play Count</span>
+                                            <span class="checkboxLabel" data-str="OptionPlayCount">Play count</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesHowOftenWas">Copies how often it was played.</div>
                                     </div>
@@ -421,7 +421,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncLastPlayedDate" checked />
-                                            <span class="checkboxLabel" data-str="LabelLastPlayedDate">Last Played Date</span>
+                                            <span class="checkboxLabel" data-str="LabelLastPlayedDate">Last played date</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesWasLastPlayed">Copies when it was last played.</div>
                                     </div>
@@ -454,12 +454,12 @@
                             <span class="base-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="metadataSyncSettingsContent" class="base-collapsible-content collapsed">
-                            <!-- Enable Metadata Sync -->
+                            <!-- Enable metadata sync -->
                             <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableMetadataSync" />
-                                        <span class="checkboxLabel" data-str="LabelEnableMetadataSync">Enable Metadata Sync</span>
+                                        <span class="checkboxLabel" data-str="LabelEnableMetadataSync">Enable metadata sync</span>
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesTitlesDescriptionsRatings">Copies titles, descriptions, ratings, and images.</div>
                                 </div>
@@ -475,7 +475,7 @@
 
                             <div id="metadataSyncOptions">
 
-                                <h3 class="base-subsection-title" data-str="HeaderSeveralServers">Several Servers</h3>
+                                <h3 class="base-subsection-title" data-str="HeaderSeveralServers">Several servers</h3>
                                 <div class="serversync-settings-group">
                                     <div class="selectContainer">
                                         <label for="selMetadataSyncPrecedence" data-str="LabelPrecedence">Precedence</label>
@@ -487,8 +487,8 @@
                                     </div>
                                 </div>
 
-                                <!-- Sync Parameters -->
-                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync Parameters</h3>
+                                <!-- Sync parameters -->
+                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync parameters</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -541,7 +541,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncFolderItems" />
-                                            <span class="checkboxLabel" data-str="LabelFolderItems">Folder Items</span>
+                                            <span class="checkboxLabel" data-str="LabelFolderItems">Folder items</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpAlsoSyncShowsSeasons">Also sync shows, seasons, albums, artists, and collections.</div>
                                     </div>
@@ -553,14 +553,14 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncProvider" checked />
-                                            <span class="checkboxLabel" data-str="LabelEnableMetadataProvider">Enable Metadata Provider</span>
+                                            <span class="checkboxLabel" data-str="LabelEnableMetadataProvider">Enable metadata provider</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpLetsLibraryFillItems">Lets a library fill items from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers.</div>
                                     </div>
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncSegmentProvider" />
-                                            <span class="checkboxLabel" data-str="LabelEnableMediaSegment">Enable Media Segment Provider</span>
+                                            <span class="checkboxLabel" data-str="LabelEnableMediaSegment">Enable media segment provider</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpLetsJellyfinsMediaSegment">Lets Jellyfin's media segment scan copy intros, credits, and other segments from the same file on the servers this one pulls from.</div>
                                     </div>
@@ -569,35 +569,35 @@
                                         <div class="checkboxContainer checkboxContainer-withDescription">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncReplaceSegments" />
-                                                <span class="checkboxLabel" data-str="LabelReplaceExistingSegments">Replace Existing Segments</span>
+                                                <span class="checkboxLabel" data-str="LabelReplaceExistingSegments">Replace existing segments</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" data-str="HelpReplacesSegmentsAnotherProvider">Replaces the segments another provider gave a file with the ones copied from a server, type by type.</div>
                                         </div>
                                         <div class="checkboxContainer checkboxContainer-withDescription">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncRemoveSegments" />
-                                                <span class="checkboxLabel" data-str="LabelRemoveSegmentsNo">Remove Segments No Server Has</span>
+                                                <span class="checkboxLabel" data-str="LabelRemoveSegmentsNo">Remove segments no server has</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" data-str="HelpRemovesSegmentsServerSync">Removes the segments Server Sync copied to a file when no server this one pulls from has any for it. Segments another provider made here are never removed.</div>
                                         </div>
                                         <div class="checkboxContainer checkboxContainer-withDescription">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncConsolidateIntros" />
-                                                <span class="checkboxLabel" data-str="LabelConsolidateDuplicateIntros">Consolidate Duplicate Intros</span>
+                                                <span class="checkboxLabel" data-str="LabelConsolidateDuplicateIntros">Consolidate duplicate intros</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" data-str="HelpShrinksIntrosOverlapPart">Shrinks intros that overlap to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30.</div>
                                         </div>
                                         <div class="checkboxContainer checkboxContainer-withDescription">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncConsolidateOutros" />
-                                                <span class="checkboxLabel" data-str="LabelConsolidateDuplicateOutros">Consolidate Duplicate Outros</span>
+                                                <span class="checkboxLabel" data-str="LabelConsolidateDuplicateOutros">Consolidate duplicate outros</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" data-str="HelpShrinksOutrosOverlapPart">Shrinks outros that overlap to the part they share, the same way as intros.</div>
                                         </div>
                                         <div class="checkboxContainer checkboxContainer-withDescription">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncConsolidateOtherSegments" />
-                                                <span class="checkboxLabel" data-str="LabelConsolidateOtherSegments">Consolidate Other Segments</span>
+                                                <span class="checkboxLabel" data-str="LabelConsolidateOtherSegments">Consolidate other segments</span>
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" data-str="HelpJoinsOverlappingSegmentsSame">Joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45.</div>
                                         </div>
@@ -622,12 +622,12 @@
                         </button>
                         <div id="peopleSyncSettingsContent" class="base-collapsible-content collapsed">
 
-                            <!-- Enable People Sync -->
+                            <!-- Enable people sync -->
                             <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnablePeopleSync" />
-                                        <span class="checkboxLabel" data-str="LabelEnablePeopleSync">Enable People Sync</span>
+                                        <span class="checkboxLabel" data-str="LabelEnablePeopleSync">Enable people sync</span>
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesPersonsBiographyImages">Copies each person's biography and images, matched by name.</div>
                                 </div>
@@ -641,7 +641,7 @@
                             </div>
 
                             <div id="peopleSyncOptions">
-                                <h3 class="base-subsection-title" data-str="HeaderSeveralServers">Several Servers</h3>
+                                <h3 class="base-subsection-title" data-str="HeaderSeveralServers">Several servers</h3>
                                 <div class="serversync-settings-group">
                                     <div class="selectContainer">
                                         <label for="selPeopleSyncPrecedence" data-str="LabelPrecedence">Precedence</label>
@@ -653,7 +653,7 @@
                                     </div>
                                 </div>
 
-                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync Parameters</h3>
+                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync parameters</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -664,13 +664,13 @@
                                     </div>
                                 </div>
 
-                                <!-- Metadata Provider -->
-                                <h3 class="base-subsection-title" data-str="HeaderMetadataProvider">Metadata Provider</h3>
+                                <!-- Metadata provider -->
+                                <h3 class="base-subsection-title" data-str="HeaderMetadataProvider">Metadata provider</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkPeopleSyncProvider" checked />
-                                            <span class="checkboxLabel" data-str="LabelEnableMetadataProvider">Enable Metadata Provider</span>
+                                            <span class="checkboxLabel" data-str="LabelEnableMetadataProvider">Enable metadata provider</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpLetsLibraryFillPeople">Lets a library fill people from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers.</div>
                                     </div>
@@ -698,7 +698,7 @@
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnablePlaylistSync" />
-                                        <span class="checkboxLabel" data-str="LabelEnablePlaylistSync">Enable Playlist Sync</span>
+                                        <span class="checkboxLabel" data-str="LabelEnablePlaylistSync">Enable playlist sync</span>
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesMappedUsersPlaylists">Copies mapped users' playlists. Needs a user mapping.</div>
                                 </div>
@@ -722,7 +722,7 @@
                                         <div class="fieldDescription" data-str="HelpDecidesWhichServerSpeaks">Decides which server speaks for an item that several servers hold. Ranked follows the Servers tab order.</div>
                                     </div>
                                     <div class="selectContainer">
-                                        <label for="selPlaylistRemovedAction" data-str="LabelRemovedPlaylists">Removed Playlists</label>
+                                        <label for="selPlaylistRemovedAction" data-str="LabelRemovedPlaylists">Removed playlists</label>
                                         <select is="emby-select" id="selPlaylistRemovedAction">
                                             <option value="Delete" data-str="Delete">Delete</option>
                                             <option value="Keep" data-str="OptionKeep">Keep</option>
@@ -756,12 +756,12 @@
                         </button>
                         <div id="userSyncSettingsContent" class="base-collapsible-content collapsed">
 
-                            <!-- Enable User Sync -->
+                            <!-- Enable user sync -->
                             <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableUserSync" />
-                                        <span class="checkboxLabel" data-str="LabelEnableUserSync">Enable User Sync</span>
+                                        <span class="checkboxLabel" data-str="LabelEnableUserSync">Enable user sync</span>
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesMappedUsersPolicy">Copies each mapped user's policy, configuration, and profile image.</div>
                                 </div>
@@ -777,7 +777,7 @@
 
                             <div id="userSyncOptions">
 
-                                <h3 class="base-subsection-title" data-str="HeaderSeveralServers">Several Servers</h3>
+                                <h3 class="base-subsection-title" data-str="HeaderSeveralServers">Several servers</h3>
                                 <div class="serversync-settings-group">
                                     <div class="selectContainer">
                                         <label for="selUserSyncPrecedence" data-str="LabelPrecedence">Precedence</label>
@@ -788,23 +788,23 @@
                                         <div class="fieldDescription" data-str="HelpDecidesWhichServerSpeaks">Decides which server speaks for an item that several servers hold. Ranked follows the Servers tab order.</div>
                                     </div>
                                     <div class="selectContainer">
-                                        <label for="selUserSyncConflict" data-str="LabelUserConflicts">User Conflicts</label>
+                                        <label for="selUserSyncConflict" data-str="LabelUserConflicts">User conflicts</label>
                                         <select is="emby-select" id="selUserSyncConflict">
-                                            <option value="Newest" data-str="OptionOtherServer">Other Server</option>
+                                            <option value="Newest" data-str="OptionOtherServer">Other server</option>
                                             <option value="Permissive" data-str="OptionPermissive">Permissive</option>
                                             <option value="Restrictive" data-str="OptionRestrictive">Restrictive</option>
                                         </select>
-                                        <div class="fieldDescription" data-str="HelpDecidesUsersPermissionsBoth">Decides a user's permissions when both servers changed them. Other Server takes theirs, Permissive allows the most, and Restrictive allows the least.</div>
+                                        <div class="fieldDescription" data-str="HelpDecidesUsersPermissionsBoth">Decides a user's permissions when both servers changed them. Other server takes theirs, Permissive allows the most, and Restrictive allows the least.</div>
                                     </div>
                                 </div>
 
-                                <!-- Sync Parameters -->
-                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync Parameters</h3>
+                                <!-- Sync parameters -->
+                                <h3 class="base-subsection-title" data-str="HeaderSyncParameters">Sync parameters</h3>
                                 <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkUserSyncConfiguration" checked />
-                                            <span class="checkboxLabel" data-str="LabelUserConfiguration">User Configuration</span>
+                                            <span class="checkboxLabel" data-str="LabelUserConfiguration">User configuration</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesSubtitleAudioDisplay">Copies subtitle, audio, and display preferences.</div>
                                     </div>
@@ -812,7 +812,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkUserSyncPolicy" checked />
-                                            <span class="checkboxLabel" data-str="LabelUserPolicy">User Policy</span>
+                                            <span class="checkboxLabel" data-str="LabelUserPolicy">User policy</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesPermissionsParentalRatings">Copies permissions and parental ratings.</div>
                                     </div>
@@ -820,7 +820,7 @@
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkUserSyncProfileImage" checked />
-                                            <span class="checkboxLabel" data-str="HeaderProfileImage">Profile Image</span>
+                                            <span class="checkboxLabel" data-str="HeaderProfileImage">Profile image</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesProfilePictures">Copies profile pictures.</div>
                                     </div>
@@ -855,11 +855,11 @@
                             <div id="resetStatus" class="base-status-text serversync-mb-md" role="status"></div>
 
                             <!-- Individual table resets -->
-                            <h3 class="base-subsection-title" data-str="HeaderResetIndividualTables">Reset Individual Tables</h3>
+                            <h3 class="base-subsection-title" data-str="HeaderResetIndividualTables">Reset individual tables</h3>
                             <div class="base-reset-group">
                                 <div class="base-reset-row">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelContentSync">Content Sync</div>
+                                        <div data-str="LabelContentSync">Content sync</div>
                                         <div class="fieldDescription" data-str="HelpForgetsContentTracking">Forgets content tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetContentTable" class="raised base-button destructive small">
@@ -868,7 +868,7 @@
                                 </div>
                                 <div class="base-reset-row">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelHistorySync">History Sync</div>
+                                        <div data-str="LabelHistorySync">History sync</div>
                                         <div class="fieldDescription" data-str="HelpForgetsHistoryTracking">Forgets history tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetHistoryTable" class="raised base-button destructive small">
@@ -877,7 +877,7 @@
                                 </div>
                                 <div class="base-reset-row">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelMetadataSync">Metadata Sync</div>
+                                        <div data-str="LabelMetadataSync">Metadata sync</div>
                                         <div class="fieldDescription" data-str="HelpForgetsMetadataTracking">Forgets metadata tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetMetadataTable" class="raised base-button destructive small">
@@ -886,7 +886,7 @@
                                 </div>
                                 <div class="base-reset-row">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelPeopleSync">People Sync</div>
+                                        <div data-str="LabelPeopleSync">People sync</div>
                                         <div class="fieldDescription" data-str="HelpForgetsPeopleTracking">Forgets people tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised base-button destructive small">
@@ -895,7 +895,7 @@
                                 </div>
                                 <div class="base-reset-row">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelPlaylistSync">Playlist Sync</div>
+                                        <div data-str="LabelPlaylistSync">Playlist sync</div>
                                         <div class="fieldDescription" data-str="HelpForgetsPlaylistTracking">Forgets playlist tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetPlaylistTable" class="raised base-button destructive small">
@@ -904,7 +904,7 @@
                                 </div>
                                 <div class="base-reset-row">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelUserSync">User Sync</div>
+                                        <div data-str="LabelUserSync">User sync</div>
                                         <div class="fieldDescription" data-str="HelpForgetsUserTracking">Forgets user tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetUserTable" class="raised base-button destructive small">
@@ -914,15 +914,15 @@
                             </div>
 
                             <!-- Full database reset -->
-                            <h3 class="base-subsection-title" data-str="HeaderResetEntireDatabase">Reset Entire Database</h3>
+                            <h3 class="base-subsection-title" data-str="HeaderResetEntireDatabase">Reset entire database</h3>
                             <div class="base-reset-group">
                                 <div class="base-reset-row base-reset-row-nuclear">
                                     <div class="base-reset-info">
-                                        <div data-str="LabelFullDatabaseReset">Full Database Reset</div>
+                                        <div data-str="LabelFullDatabaseReset">Full database reset</div>
                                         <div class="fieldDescription" data-str="HelpForgetsAllTracking">Forgets all tracking.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetEntireDatabase" class="raised base-button destructive small">
-                                        <span data-str="ButtonResetAll">Reset All</span>
+                                        <span data-str="ButtonResetAll">Reset all</span>
                                     </button>
                                 </div>
                             </div>

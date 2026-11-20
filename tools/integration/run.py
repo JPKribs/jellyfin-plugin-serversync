@@ -466,7 +466,7 @@ def save_plugin_config(api, config):
     """Saves a server's plugin configuration and asks every pool server to re-read what its peers accept."""
     api.post(f"/Plugins/{PLUGIN_GUID}/Configuration", config, expect=204)
     # A sender re-reads what a peer accepts once a minute. The scenarios change modules far faster than
-    # that, so every server is asked to re-read now, the way Run Now on the dashboard does.
+    # that, so every server is asked to re-read now, the way Run now on the dashboard does.
     for other in POOL_APIS.values():
         try:
             other.post("/Sync/Hints/Run", None, expect=204)
@@ -504,7 +504,7 @@ def server_entry(creds, name, key=None, local="local", mode="Pull"):
 
 
 def apply_negotiation(servers, negotiate):
-    """History negotiation is chosen per library and only a Sync server negotiates, so turning it on makes each Pull entry Sync and ticks Negotiate History on every library mapping."""
+    """History negotiation is chosen per library and only a Sync server negotiates, so turning it on makes each Pull entry Sync and ticks Negotiate history on every library mapping."""
     for entry in servers:
         if negotiate and entry.get("Mode") in ("Pull", 0):
             entry["Mode"] = "Sync"
@@ -671,7 +671,7 @@ def scenario_reorder_rehomes(creds, apis):
 
 
 def scenario_history_negotiation(creds, apis):
-    """Checks that History Sync with negotiation merges played state and favorites between local and source-a."""
+    """Checks that History sync with negotiation merges played state and favorites between local and source-a."""
     local, a = apis["local"], apis["source-a"]
     configure_local(creds, local, ["source-a", "source-b"], EnableHistorySync=True, HistorySyncNegotiate=True)
     lu, au = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"]
@@ -711,7 +711,7 @@ def scenario_history_field_off(creds, apis):
         api.call("POST" if on else "DELETE", f"/UserFavoriteItems/{item}?userId={user}", expect=200)
 
     def sync():
-        """Runs the History Sync table and download tasks on local."""
+        """Runs the History sync table and download tasks on local."""
         run_task(local, "ServerSyncRefreshHistoryTable")
         run_task(local, "ServerSyncMissingHistory")
 
@@ -762,7 +762,7 @@ def restamp_seeds(apis):
 
 
 def scenario_metadata_by_type(creds, apis):
-    """Checks that Metadata Sync brings each metadata type, its people, and its images from the source that holds them."""
+    """Checks that Metadata sync brings each metadata type, its people, and its images from the source that holds them."""
     local = apis["local"]
     restamp_seeds(apis)
     configure_local(creds, local, ["source-a", "source-b"], EnableMetadataSync=True, MetadataSyncMetadata=True, MetadataSyncGenres=True,
@@ -782,7 +782,7 @@ def scenario_metadata_by_type(creds, apis):
 
 
 def scenario_people_sync(creds, apis):
-    """Checks that People Sync brings a person's bio and image from the source."""
+    """Checks that People sync brings a person's bio and image from the source."""
     local = apis["local"]
     restamp_seeds(apis)
     configure_local(creds, local, ["source-a", "source-b"], EnablePeopleSync=True, PeopleSyncImages=True)
@@ -795,7 +795,7 @@ def scenario_people_sync(creds, apis):
 
 
 def scenario_user_sync(creds, apis):
-    """Checks that User Sync brings a user's settings, permissions, and avatar from the source."""
+    """Checks that User sync brings a user's settings, permissions, and avatar from the source."""
     local = apis["local"]
     configure_local(creds, local, ["source-a", "source-b"], EnableUserSync=True, UserSyncPolicy=True, UserSyncConfiguration=True, UserSyncProfileImage=True)
     run_task(local, "ServerSyncRefreshUserTable")
@@ -1146,10 +1146,10 @@ def scenario_whitelist(creds, apis):
     entry = next(s for s in plugin_config(local)["Servers"] if s["Name"] == "source-a")
     grants([])
     _, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
-    expect(t.get("SyncAccess") == "IpNotWhitelisted", "Test Connection reports that this server is not whitelisted there")
+    expect(t.get("SyncAccess") == "IpNotWhitelisted", "Test connection reports that this server is not whitelisted there")
     grants(open_grants(creds, "source-a"))
     _, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
-    expect(t.get("SyncAccess") == "Allowed", "Test Connection reports access once whitelisted")
+    expect(t.get("SyncAccess") == "Allowed", "Test connection reports access once whitelisted")
 
 
 def scenario_history_stale_base(creds, apis):
@@ -1700,7 +1700,7 @@ def scenario_pool_user_conflict(creds, apis):
 
 
 def scenario_pool_playlist_keep(creds, apis):
-    """With Removed Playlists set to keep, a copy stays when the server it came from deletes its playlist."""
+    """With Removed playlists set to keep, a copy stays when the server it came from deletes its playlist."""
     probe = PoolProbe(creds, apis, "IT Keep " + uuid.uuid4().hex[:6])
     pair = {"local": ["source-a"], "source-a": ["local"]}
     pool_shape(creds, apis, pair)
@@ -1830,7 +1830,7 @@ def scenario_peer_endpoint_auth(creds, apis):
     status, body = admin.call("POST", "/Sync/Peer/Lookup", {})
     expect(status == 400, f"a lookup with neither a path nor a name is malformed ({status})")
     status, caps = other.call("GET", "/Sync/Peer/Capabilities")
-    expect(status == 200 and caps.get("PluginVersion") == PLUGIN_VERSION, "capabilities still answer another version, so Check Link can name both versions")
+    expect(status == 200 and caps.get("PluginVersion") == PLUGIN_VERSION, "capabilities still answer another version, so Check link can name both versions")
     secret = "A" * 43
     status, body = admin.call("POST", "/Sync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": secret})
     expect(status == 409, f"a pairing from a server this one does not list is refused ({status})")
@@ -1899,7 +1899,7 @@ def scenario_push_responses(creds, apis):
 
 
 def scenario_queue_failed_rows(creds, apis):
-    """Retry Failed and Dismiss Failed on the Queue act on every failed change at once, received and sent: a received change whose apply keeps failing, and a sent change that was given up on."""
+    """Retry failed and Dismiss failed on the Queue act on every failed change at once, received and sent: a received change whose apply keeps failing, and a sent change that was given up on."""
     local, a = apis["local"], apis["source-a"]
 
     def failing():
@@ -1931,10 +1931,10 @@ def scenario_queue_failed_rows(creds, apis):
     a.post("/Sync/Hints/Run", None, expect=204)
     wait_until(lambda: failing() >= 1, 90, "a received change that cannot be applied is counted as failing")
     status, body = local.call("POST", "/Sync/Hints/Failed/Retry")
-    expect(status == 200 and body and body.get("Inbound", 0) >= 1, f"Retry Failed tries the received change again ({status}, {body})")
+    expect(status == 200 and body and body.get("Inbound", 0) >= 1, f"Retry failed tries the received change again ({status}, {body})")
     wait_until(lambda: failing() >= 1, 60, "the change fails again while the server is still out of reach, and is counted again")
     status, body = local.call("DELETE", "/Sync/Hints/Failed")
-    expect(status == 200 and body and body.get("Inbound", 0) >= 1, f"Dismiss Failed discards the received change ({status}, {body})")
+    expect(status == 200 and body and body.get("Inbound", 0) >= 1, f"Dismiss failed discards the received change ({status}, {body})")
     expect(failing() == 0 and not hints(local)["Inbound"], "no received change is left failing")
 
     # Sent: with one try allowed, a change local cannot deliver is given up on.
@@ -1945,10 +1945,10 @@ def scenario_queue_failed_rows(creds, apis):
     local.post("/Sync/Hints/Run", None, expect=204)
     wait_until(lambda: failed() >= 1, 90, "a sent change out of tries is marked failed")
     status, body = local.call("POST", "/Sync/Hints/Failed/Retry")
-    expect(status == 200 and body and body.get("Outbound", 0) >= 1, f"Retry Failed sends the failed change again ({status}, {body})")
+    expect(status == 200 and body and body.get("Outbound", 0) >= 1, f"Retry failed sends the failed change again ({status}, {body})")
     wait_until(lambda: failed() >= 1, 30, "the retry is tried at once, pause or not, and fails again while the server is still out of reach")
     status, body = local.call("DELETE", "/Sync/Hints/Failed")
-    expect(status == 200 and body and body.get("Outbound", 0) >= 1, f"Dismiss Failed discards the failed change ({status}, {body})")
+    expect(status == 200 and body and body.get("Outbound", 0) >= 1, f"Dismiss failed discards the failed change ({status}, {body})")
     expect(failed() == 0, "no sent change is left failed")
 
     for r in hints(a)["Outbound"]:
@@ -1958,7 +1958,7 @@ def scenario_queue_failed_rows(creds, apis):
 
 
 def scenario_check_link_by_direction(creds, apis):
-    """Check Link judges the pairing by the chosen direction: Pull is ready when the source pushes to us and warns when it does not or lacks the plugin, Push needs the destination to list us as Pull or Sync, and Sync needs the peer to list us as Sync."""
+    """Check link judges the pairing by the chosen direction: Pull is ready when the source pushes to us and warns when it does not or lacks the plugin, Push needs the destination to list us as Pull or Sync, and Sync needs the peer to list us as Sync."""
     local = apis["local"]
     configure_server(creds, local, "local", ["source-a", "source-b"], {"source-a": "Pull", "source-b": "Pull"})
     entry_a = next(s for s in plugin_config(local)["Servers"] if s["Name"] == "source-a")
@@ -1988,8 +1988,8 @@ def scenario_check_link_by_direction(creds, apis):
     expect(sev == "ok" and "also arrive as they happen" in msg, "Pull against a server that pushes to us is ready with live changes")
     _, full = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": entry_a["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
                                                       "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
-    expect(abs(full.get("ClockSkewSeconds", 999)) < 30 and "clock" not in full["Message"], "Check Link reads the peer's clock and finds it in step")
-    expect(full.get("Paired") is True and "could not pair" not in full["Message"], "Check Link pairs the two servers, since the peer lists this one and holds an administrator's key for it")
+    expect(abs(full.get("ClockSkewSeconds", 999)) < 30 and "clock" not in full["Message"], "Check link reads the peer's clock and finds it in step")
+    expect(full.get("Paired") is True and "could not pair" not in full["Message"], "Check link pairs the two servers, since the peer lists this one and holds an administrator's key for it")
     _, moved = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__",
                                                        "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
     expect(not moved.get("Reachable") and "only sent to the address saved" in moved["Message"], "the stored key is never sent to an address other than the one saved on the entry")
@@ -2028,7 +2028,7 @@ def scenario_non_admin_peer_key(creds, apis):
     status, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
     expect(t.get("SyncAccess") == "Allowed", "once source-a whitelists the viewer, the connection test reports access")
     status, r = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True, "Mode": "Sync"}, expect=200)
-    expect(r["Severity"] in ("ok", "warn"), "Check Link accepts Sync with a whitelisted standard user's key")
+    expect(r["Severity"] in ("ok", "warn"), "Check link accepts Sync with a whitelisted standard user's key")
 
     def queues_empty():
         """Returns whether local has no inbound hint and source-a has no outbound hint."""
@@ -2233,7 +2233,7 @@ def scenario_older_database_refused(creds, apis):
         expect(status >= 500, f"the Sync tab's routes fail instead of reading an older database ({status})")
         logs = run(["docker", "logs", "--since", since + "Z", container], capture=True, check=False)
         expect("written by a release before 12.4.13.0" in logs.stdout + logs.stderr, "the log names the release to install first")
-        wait_until(lambda: bool(activity(local, "Earlier Update")), 30, "the Activity page says an earlier update is needed first")
+        wait_until(lambda: bool(activity(local, "earlier update")), 30, "the Activity page says an earlier update is needed first")
         status, health = local.call("GET", "/Sync/Health")
         expect(status == 200 and health.get("Ready") is False and "12.4.13.0" in (health.get("Message") or ""), "every page is told why Server Sync is held")
         expect(healthy(local) and local.call("GET", f"/Items?userId={creds['servers']['local']['userId']}&limit=1")[0] == 200, "Jellyfin itself starts and answers as usual")
@@ -2843,7 +2843,7 @@ def scenario_link_cache_rules(creds, apis):
         expect(sorted(r["Id"] for r in listed if needle in r["SourcePath"]) == sorted(r["Id"] for r in rows) and all(r["Kept"] == "Pick" for r in listed if needle in r["SourcePath"]),
                "the Storage tab lists the three copies as kept by the pick")
         status, body = local.post("/Sync/KeptCopies/Unkeep", {"Ids": [rows[0]["Id"]]}, expect=200)
-        expect(body["Queued"] == 0 and "Always Keep pick" in (body["Skipped"][0]["Reason"] if body["Skipped"] else ""),
+        expect(body["Queued"] == 0 and "Always keep pick" in (body["Skipped"][0]["Reason"] if body["Skipped"] else ""),
                "a copy the pick still covers is not turned back by hand, and says to remove the pick")
 
         # Removing the pick turns the copies back into links, and each copy moves into the cache.
@@ -3222,7 +3222,7 @@ def scenario_file_changes(creds, apis, storage):
         else:
             expect(f"DOWNLOADED: {r_new}" not in local_log(since), "the renamed copy is moved, not downloaded")
 
-        # A new container: the old file is replaced under Changed Files, and nothing is left beside it.
+        # A new container: the old file is replaced under Changed files, and nothing is left beside it.
         x_target = os.path.join(src["X"], x_new)
         if link:
             wait_until(lambda: source_id("X") and source_id("X") in open(held("X", x_new), encoding="utf-8").read(), 300,

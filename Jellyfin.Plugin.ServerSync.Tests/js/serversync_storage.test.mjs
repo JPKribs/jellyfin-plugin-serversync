@@ -93,7 +93,7 @@ test('the files chart counts synced copies, links, and cached links, and totals 
     assert.equal(opened.view.querySelector('#storageFilesSection').classList.contains('hidden'), false);
     var text = opened.view.querySelector('#storageFilesChart').textContent;
     assert.match(text, /Copies/);
-    assert.match(text, /Cached Links/);
+    assert.match(text, /Cached links/);
     assert.match(text, /12/);
 });
 
@@ -108,7 +108,7 @@ test('the Usage section shows the link cache as used of its limit only while the
     var on = await openPage({ config: { EnableContentSync: true, Servers: [MAPPED] }, answer: countsAnswer(1, 1, 0, { Enabled: true, UsedBytes: 1073741824, LimitBytes: 4294967296 }) });
     assert.equal(on.view.querySelector('#storageUsageSection').classList.contains('hidden'), false);
     var text = on.view.querySelector('#storageUsageMeter').textContent;
-    assert.match(text, /Link Cache/);
+    assert.match(text, /Link cache/);
     assert.match(text, /1 GB of 4 GB used/);
     var off = await openPage({ config: { EnableContentSync: true, Servers: [MAPPED] }, answer: countsAnswer(1, 1, 0, { Enabled: false, UsedBytes: 0, LimitBytes: 0 }) });
     assert.equal(off.view.querySelector('#storageUsageSection').classList.contains('hidden'), true);

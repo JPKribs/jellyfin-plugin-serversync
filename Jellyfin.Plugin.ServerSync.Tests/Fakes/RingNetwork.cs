@@ -161,7 +161,7 @@ public sealed class RingNetwork : IDisposable
 
     // ---------------------------------------------------------------- metadata
 
-    /// <summary>Makes a hand edit on a server and raises its hint at once, as the observer does once Send Changes After ends.</summary>
+    /// <summary>Makes a hand edit on a server and raises its hint at once, as the observer does once Send changes after ends.</summary>
     /// <param name="server">The server edited on.</param>
     /// <param name="path">The file.</param>
     /// <param name="value">The new value.</param>
@@ -768,7 +768,7 @@ public sealed class RingNetwork : IDisposable
     private static string ServerIdFor(int index) => index.ToString("x2", CultureInfo.InvariantCulture) + new string('e', 30);
 }
 
-/// <summary>A hand edit that is stamped and gathering, waiting for Send Changes After to end.</summary>
+/// <summary>A hand edit that is stamped and gathering, waiting for Send changes after to end.</summary>
 /// <param name="Server">The server edited on.</param>
 /// <param name="Path">The file.</param>
 /// <param name="Version">The stamp.</param>

@@ -682,7 +682,7 @@ export default function (view) {
             ServerSyncShared.apiRequest('Reset/All', 'POST').then(function() {
                 ServerSyncShared.setStatus('resetStatus', ServerSyncShared.t.tr('ToastDatabaseReset'), false);
             }).catch(function(err) {
-                console.error('Reset All error:', err);
+                console.error('Reset all error:', err);
                 ServerSyncShared.setStatus('resetStatus', ServerSyncShared.t.tr('ErrorResetDatabase'), true, { timeout: 10000 });
             });
         });

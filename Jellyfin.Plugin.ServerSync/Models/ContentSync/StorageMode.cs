@@ -18,7 +18,7 @@ public enum StorageMode
     Promoting = 2,
 
     /// <summary>
-    /// A kept copy going back to a link, because its Always Keep pick was removed or it was turned back
+    /// A kept copy going back to a link, because its Always keep pick was removed or it was turned back
     /// by hand. It stays a copy, and plays as one, until the link is written, and then the copy moves
     /// into the link cache.
     /// </summary>

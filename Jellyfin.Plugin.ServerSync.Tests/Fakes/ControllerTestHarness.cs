@@ -72,7 +72,7 @@ public sealed class ControllerTestHarness : IDisposable
         TaskManagerStub.Answer("get_ScheduledTasks", _ => ScheduledTasks.ToArray());
         (Host, HostStub) = InterfaceStub.Create<IServerApplicationHost>();
         HostStub.Answer("get_SystemId", _ => ThisServerId);
-        HostStub.Answer("get_FriendlyName", _ => "This Server");
+        HostStub.Answer("get_FriendlyName", _ => "This server");
 
         (LocalItems, LocalItemsStub) = InterfaceStub.Create<ILocalItems>();
         Triage = new HintTriage(Config, LocalItems, Versions);
@@ -263,7 +263,7 @@ public sealed class ControllerTestHarness : IDisposable
         => WithContext(new ConfigurationController(Library, TaskManager, HttpClients, Config, Provider, Clients, NullLogger<ConfigurationController>.Instance), services ?? Services());
 
     /// <summary>
-    /// Builds the Change Queue controller over the harness. It reads <see cref="PlaylistCopies"/>, so only a
+    /// Builds the Change queue controller over the harness. It reads <see cref="PlaylistCopies"/>, so only a
     /// test class in <see cref="PlaylistCopyStoreCollection"/> may call this.
     /// </summary>
     /// <returns>The controller and the observer it reads.</returns>

@@ -12,11 +12,11 @@ curl -H 'Authorization: MediaBrowser Token="YOUR_API_KEY"' http://server:8096/Sy
 
 These are what one Server Sync installation calls on another. You will not normally call them yourself, but they are plain HTTP and can be exercised from the command line.
 
-Servers in a pool must speak overlapping wire protocols, not the same plugin version. Every peer route except `Capabilities` needs the headers `X-ServerSync-Version` (the caller's plugin version), `X-ServerSync-Protocol` (the protocol it speaks) and `X-ServerSync-Min-Protocol` (the oldest protocol it still speaks). A route answers `426` with the reason when neither side's protocol reaches the other's minimum. A caller that sends no protocol header is only accepted on exactly the same plugin version. `Capabilities` reports `ProtocolVersion` and `MinProtocolVersion` beside `PluginVersion`. **Check Link** reports a mismatch as an error.
+Servers in a pool must speak overlapping wire protocols, not the same plugin version. Every peer route except `Capabilities` needs the headers `X-ServerSync-Version` (the caller's plugin version), `X-ServerSync-Protocol` (the protocol it speaks) and `X-ServerSync-Min-Protocol` (the oldest protocol it still speaks). A route answers `426` with the reason when neither side's protocol reaches the other's minimum. A caller that sends no protocol header is only accepted on exactly the same plugin version. `Capabilities` reports `ProtocolVersion` and `MinProtocolVersion` beside `PluginVersion`. **Check link** reports a mismatch as an error.
 
 ### GET /Sync/Peer/Capabilities
 
-Which server this is and what it applies. A `404` means the plugin is not installed there, and a `403` with `{ "Code", "Message" }` means the whitelist refuses the caller. It answers whatever version the caller runs, so **Check Link** can name both versions when they differ.
+Which server this is and what it applies. A `404` means the plugin is not installed there, and a `403` with `{ "Code", "Message" }` means the whitelist refuses the caller. It answers whatever version the caller runs, so **Check link** can name both versions when they differ.
 
 ```json
 {
@@ -30,7 +30,7 @@ Which server this is and what it applies. A `404` means the plugin is not instal
 }
 ```
 
-`Accepts` lists the kinds this server applies, which are the sync types that are on. A sender announces only those kinds. `Features` lists optional features this server offers, which is `Link` when it allows linking for at least one server. See [Links](Links.md). `ServerTime` is the peer's clock, which **Check Link** compares against the caller's.
+`Accepts` lists the kinds this server applies, which are the sync types that are on. A sender announces only those kinds. `Features` lists optional features this server offers, which is `Link` when it allows linking for at least one server. See [Links](Links.md). `ServerTime` is the peer's clock, which **Check link** compares against the caller's.
 
 ### GET /Sync/Peer/Link?serverId={id}
 
@@ -381,7 +381,7 @@ The copies this server downloaded from other servers, each with the id of the se
 
 #### GET /Sync/Link/{linkId}?k={secret}
 
-The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user who was allowed at play, or this server's media probe, may read it. It sends the file from the link cache when it is there, and otherwise streams it from the source, with range support, and `HEAD` answers the headers alone. The probe's read ends after 256 MB. Direct play does not come through here unless **Stream Direct Play of Links Per User** is off. Anything else is `403`, an unknown link is `404`, and a source that cannot be reached or is no longer set up is `502` or `503`.
+The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user who was allowed at play, or this server's media probe, may read it. It sends the file from the link cache when it is there, and otherwise streams it from the source, with range support, and `HEAD` answers the headers alone. The probe's read ends after 256 MB. Direct play does not come through here unless **Stream direct play of links per user** is off. Anything else is `403`, an unknown link is `404`, and a source that cannot be reached or is no longer set up is `502` or `503`.
 
 ## Operator Routes
 
@@ -412,7 +412,7 @@ Raises every gathering edit, delivers, and applies now instead of waiting for th
 
 ### POST /Sync/Hints/CheckPeer
 
-What the **Servers** tab's **Check Link** button calls. Judges a server entry against the direction it is about to be saved with.
+What the **Servers** tab's **Check link** button calls. Judges a server entry against the direction it is about to be saved with.
 
 ```json
 { "ServerUrl": "http://source-a:8096", "ApiKey": "…", "ServerKey": "entry key", "AllowPrivateNetwork": true, "Mode": "Sync" }
@@ -451,7 +451,7 @@ The version an object carries on this server, which is the server that last edit
 
 ### POST /Sync/Hints/Failed/Retry and DELETE /Sync/Hints/Failed
 
-Every failed row at once, the **Retry Failed** and **Dismiss Failed** buttons on the **Queue** view. A failed row is an outbound row in the `Failed` state, or an inbound row whose apply has failed at least once and waits to be tried again. Retry clears each row's attempts, then delivers the outbound rows and applies the inbound rows now, and answers `{ "Retried": 1200, "Outbound": 1150, "Inbound": 50 }`. Delete discards them, and answers `{ "Removed": 1200, "Outbound": 1150, "Inbound": 50 }`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the changes either way.
+Every failed row at once, the **Retry failed** and **Dismiss failed** buttons on the **Queue** view. A failed row is an outbound row in the `Failed` state, or an inbound row whose apply has failed at least once and waits to be tried again. Retry clears each row's attempts, then delivers the outbound rows and applies the inbound rows now, and answers `{ "Retried": 1200, "Outbound": 1150, "Inbound": 50 }`. Delete discards them, and answers `{ "Removed": 1200, "Outbound": 1150, "Inbound": 50 }`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the changes either way.
 
 ### DELETE /Sync/Hints/Unmatched
 
@@ -477,18 +477,18 @@ Content rows from `GET /Sync/Items` carry `StorageMode`, which is `Copy`, `Link`
 
 ### GET /Sync/KeptCopies?serverKey={key}&search={text}&skip={n}&take={n}
 
-The full copies held in one server entry's Link mappings, the **Storage** tab's **Permanent Copies**, as content rows, including copies already on their way back to links. `Kept` says why each is a copy. It is `Pick` for an Always Keep pick, `Hand` for one kept from the **Sync** tab, `Own` for a file that was already here, or `Unknown` for one whose reason was not recorded. `take` is at most 200.
+The full copies held in one server entry's Link mappings, the **Storage** tab's **Permanent copies**, as content rows, including copies already on their way back to links. `Kept` says why each is a copy. It is `Pick` for an Always keep pick, `Hand` for one kept from the **Sync** tab, `Own` for a file that was already here, or `Unknown` for one whose reason was not recorded. `take` is at most 200.
 
 ### POST /Sync/KeptCopies/Unkeep
 
-Turns copies back into links, as **Turn Back Into Links** does, and starts a **Sync Content** run. That run checks the source still has the file, writes the link, and moves the copy into the link cache, or removes it when the cache is off or cannot take it. A copy an Always Keep pick covers is skipped, since the next refresh would copy it again, as is a row that is not a synced copy in a Link mapping or whose file is not here.
+Turns copies back into links, as **Turn back into links** does, and starts a **Sync Content** run. That run checks the source still has the file, writes the link, and moves the copy into the link cache, or removes it when the cache is off or cannot take it. A copy an Always keep pick covers is skipped, since the next refresh would copy it again, as is a row that is not a synced copy in a Link mapping or whose file is not here.
 
 ```json
 { "Ids": [ 812, 813 ] }
 ```
 
 ```json
-{ "Queued": 1, "Skipped": [ { "Id": 813, "Reason": "an Always Keep pick covers it. Remove the pick on the Storage tab instead" } ] }
+{ "Queued": 1, "Skipped": [ { "Id": 813, "Reason": "an Always keep pick covers it. Remove the pick on the Storage tab instead" } ] }
 ```
 
 ### GET /Sync/LinkCache

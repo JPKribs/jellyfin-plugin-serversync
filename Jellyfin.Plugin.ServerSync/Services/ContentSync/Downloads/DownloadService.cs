@@ -39,11 +39,11 @@ public class DownloadService
     private const int CopyBufferBytes = 81920;
 
     /// <summary>
-    /// The most downloads that can share the speed at once, which is the top of Downloads At Once.
+    /// The most downloads that can share the speed at once, which is the top of Downloads at once.
     /// </summary>
     private const int MaxSharers = 10;
 
-    /// <summary>The one speed every Content download draws from, so the limit is the total across Downloads At Once.</summary>
+    /// <summary>The one speed every Content download draws from, so the limit is the total across Downloads at once.</summary>
     private static readonly SpeedBucket SharedSpeed = new(1, StreamCaps.BurstSeconds);
 
     /// <summary>
@@ -95,7 +95,7 @@ public class DownloadService
     /// <param name="tempPath">The folder the download is written to before it moves into place.</param>
     /// <param name="speedLimitBytesPerSecond">The speed limit used when the settings give none, where 0 is no limit.</param>
     /// <param name="includeCompanionFiles">Whether to download the item's external subtitles too.</param>
-    /// <param name="config">Supplies the retry count, speed, free space, and Recycling Bin settings.</param>
+    /// <param name="config">Supplies the retry count, speed, free space, and Recycling bin settings.</param>
     /// <param name="progress">Receives the fraction of the main file downloaded, from 0 to 1, or null.</param>
     /// <param name="cancellationToken">Cancels the download and removes its temp file.</param>
     /// <returns>Whether the download succeeded, with the reason when it did not and the companions written when it did.</returns>
@@ -719,7 +719,7 @@ public class DownloadService
     }
 
     /// <summary>
-    /// Moves a file set aside during a replacement to the Recycling Bin under the original file's name, or deletes it when the Recycling Bin is off.
+    /// Moves a file set aside during a replacement to the Recycling bin under the original file's name, or deletes it when the Recycling bin is off.
     /// A missing file is skipped, since the rollback may have put it back.
     /// </summary>
     private void ArchiveOrDeleteSidecar(string? sidecarPath, string originalDisplayPath, PluginConfiguration config)

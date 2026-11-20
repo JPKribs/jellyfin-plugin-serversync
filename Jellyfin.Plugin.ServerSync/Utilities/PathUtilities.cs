@@ -6,7 +6,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Translates source paths to local ones and matches paths against a Library Filter.
+/// Translates source paths to local ones and matches paths against a Library filter.
 /// </summary>
 public static class PathUtilities
 {
@@ -104,12 +104,12 @@ public static class PathUtilities
     }
 
     /// <summary>
-    /// Whether the Library Filter leaves an item out. A Whitelist skips what it does not list, and a Blacklist skips what it lists.
+    /// Whether the Library filter leaves an item out. A Whitelist skips what it does not list, and a Blacklist skips what it lists.
     /// </summary>
     /// <param name="sourcePath">The item's path on the source.</param>
     /// <param name="sourceRootPath">The library's root folder on the source.</param>
-    /// <param name="filterMode">The Library Filter mode.</param>
-    /// <param name="filteredItems">The paths the Library Filter lists, or null.</param>
+    /// <param name="filterMode">The Library filter mode.</param>
+    /// <param name="filteredItems">The paths the Library filter lists, or null.</param>
     /// <returns><c>true</c> when the item is skipped.</returns>
     public static bool IsItemFiltered(
         string sourcePath,

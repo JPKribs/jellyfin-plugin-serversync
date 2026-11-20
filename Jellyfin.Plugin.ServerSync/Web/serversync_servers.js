@@ -387,7 +387,7 @@ export default function (view) {
         });
 
         parts = parts.concat(pills);
-        parts.push('<rect x="' + fixed(-cardW / 2) + '" y="' + fixed(-cardH / 2) + '" width="' + fixed(cardW) + '" height="' + cardH + '" rx="8" class="serversync-pool-card"><title>' + escapeHtml(ServerSyncShared.t.format('PoolSelfTitle', localServerName || ServerSyncShared.t.tr('PoolThisServer'))) + '</title></rect>');
+        parts.push('<rect x="' + fixed(-cardW / 2) + '" y="' + fixed(-cardH / 2) + '" width="' + fixed(cardW) + '" height="' + cardH + '" rx="8" class="serversync-pool-card"><title>' + escapeHtml(localServerName ? ServerSyncShared.t.format('PoolSelfTitle', localServerName) : ServerSyncShared.t.tr('PoolThisServer')) + '</title></rect>');
         parts.push('<text class="serversync-pool-self" x="0" y="0" dominant-baseline="central">' + escapeHtml(hereName) + '</text>');
 
         var minX = Math.min.apply(null, bounds.map(function (b) { return b[0]; })) - 6;
@@ -522,7 +522,7 @@ export default function (view) {
     }
 
     // The key of each access state's badge.
-    var ACCESS_LABELS = { ok: 'LabelAvailable', limited: 'BadgeLimited', no: 'BadgeUnavailable', none: 'BadgeNotInstalled' };
+    var ACCESS_LABELS = { ok: 'LabelAvailable', limited: 'BadgeLimited', no: 'BadgeUnavailable', none: 'LabelNotInstalled' };
     var ACCESS_BADGES = { ok: 'green', limited: 'orange', no: 'red', none: 'gray' };
 
     function syncAccessRow(server) {

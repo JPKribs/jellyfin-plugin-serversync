@@ -22,7 +22,7 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Api;
 
 /// <summary>
-/// The Change Queue routes show both queues as stored, act only on the rows named, and judge a server entry by how the other server lists this one.
+/// The Change queue routes show both queues as stored, act only on the rows named, and judge a server entry by how the other server lists this one.
 /// </summary>
 [Collection(PlaylistCopyStoreCollection.Name)]
 public sealed class HintsControllerTests : IDisposable
@@ -361,7 +361,7 @@ public sealed class HintsControllerTests : IDisposable
 
     /// <summary>
     /// An empty queue reads as zeroes with a line for each server hints go to.
-    /// True: the Change Queue tab shows each Push or Sync server, idle.
+    /// True: the Change queue tab shows each Push or Sync server, idle.
     /// False: the tab would fail on an empty queue, or list servers that are only pulled from.
     /// </summary>
     [Fact]
@@ -492,8 +492,8 @@ public sealed class HintsControllerTests : IDisposable
     /// False: an edit made here would be credited to another server, or a known server shown as an ID.
     /// </summary>
     [Theory]
-    [InlineData(ControllerTestHarness.ThisServerId, "This Server", true)]
-    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "This Server", true)]
+    [InlineData(ControllerTestHarness.ThisServerId, "This server", true)]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "This server", true)]
     [InlineData(ControllerTestHarness.PeerId, "Peer", false)]
     [InlineData("ffffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", false)]
     public void GetVersion_Stamp_NamesTheServerThatEdited(string serverId, string serverName, bool isThisServer)
@@ -699,7 +699,7 @@ public sealed class HintsControllerTests : IDisposable
     }
 
     /// <summary>
-    /// Each Change Queue route requires elevation and answers one verb at its own path under Sync/Hints.
+    /// Each Change queue route requires elevation and answers one verb at its own path under Sync/Hints.
     /// True: only an administrator can read the queues, discard a row, or check a server.
     /// False: any signed in user could empty the queue or probe another server through this one.
     /// </summary>

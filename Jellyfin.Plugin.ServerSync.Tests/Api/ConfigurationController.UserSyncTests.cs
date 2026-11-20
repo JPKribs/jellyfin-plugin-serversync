@@ -102,7 +102,7 @@ public sealed class ConfigurationControllerUserSyncTests : IDisposable
         Assert.Equal(("https://peer.example", "peer"), (user.SourceServerUrl, user.ServerKey));
         Assert.Equal("policy refused. settings refused", user.ErrorMessage);
         Assert.Equal(newest, user.LastSyncTime);
-        Assert.Equal((false, "No Changes"), (user.HasChanges, user.TotalChanges));
+        Assert.Equal((false, "No changes"), (user.HasChanges, user.TotalChanges));
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public sealed class ConfigurationControllerUserSyncTests : IDisposable
     /// <summary>
     /// A changed profile image is reported as one image change.
     /// True: the list says a mapping has an image to sync.
-    /// False: an image waiting to sync would read as No Changes.
+    /// False: an image waiting to sync would read as No changes.
     /// </summary>
     [Fact]
     public void GetUserSyncUsers_ChangedProfileImage_IsReportedAsOneImage()

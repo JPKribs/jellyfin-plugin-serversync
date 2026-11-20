@@ -21,7 +21,8 @@ async function openPage(opts) {
     var view = page.dom.el('div', {}, IDS.map(function (id) { return page.dom.el('div', { id: id }); }));
     page.dom.document.documentElement.appendChild(view);
     if (opts.fail) globalThis.ApiClient.getPluginConfiguration = function () { return Promise.reject(new Error('refused')); };
-    globalThis.ApiClient.getSystemInfo = function () { return Promise.resolve({ ServerName: 'Home <Server>' }); };
+    var serverName = opts.serverName === undefined ? 'Home <Server>' : opts.serverName;
+    globalThis.ApiClient.getSystemInfo = function () { return Promise.resolve({ ServerName: serverName }); };
     var mod = await loadScript('serversync_servers.js');
     mod.default(view);
     view.dispatch('viewshow');
@@ -86,6 +87,13 @@ test('the pool map shows this server by its own name, and by Server when the nam
     var html = opened.view.querySelector('#poolMap').innerHTML;
     assert.match(html, /<text class="serversync-pool-self"[^>]*>Server<\/text>/);
     assert.match(html, /Home &lt;Server&gt;, this server/);
+});
+
+test('the pool map titles this server This server, once, when it has no name', async function () {
+    var opened = await openPage({ serverName: '', config: { Servers: [{ Key: 'a', Name: 'A', Url: 'http://a', ApiKey: 'k', IsEnabled: true }] } });
+    var html = opened.view.querySelector('#poolMap').innerHTML;
+    assert.match(html, /class="serversync-pool-card"><title>This server<\/title>/);
+    assert.doesNotMatch(html, /this server, this server/i);
 });
 
 test('the pool map is hidden while there are no servers', async function () {

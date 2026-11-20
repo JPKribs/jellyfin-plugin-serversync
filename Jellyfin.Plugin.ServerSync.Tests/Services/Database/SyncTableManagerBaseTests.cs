@@ -395,7 +395,7 @@ public sealed class SyncTableManagerBaseTests : IDisposable
 
     /// <summary>
     /// DeleteById removes one row, and ResetTable removes every row whatever its status, Ignored included.
-    /// True: the per-module Reset Database really starts clean.
+    /// True: the per-module Reset database really starts clean.
     /// False: Reset leaves Ignored rows behind, or a single delete takes others with it.
     /// </summary>
     [Fact]

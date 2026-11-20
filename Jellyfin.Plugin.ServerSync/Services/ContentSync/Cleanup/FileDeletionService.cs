@@ -99,7 +99,7 @@ public static class FileDeletionService
     /// <summary>
     /// Deletes a link with everything beside it under the same name, then each folder that leaves
     /// holding nothing Server Sync did not write, up to the root folder. A link never goes to the
-    /// Recycling Bin and its folders always go, whatever the settings for copies say.
+    /// Recycling bin and its folders always go, whatever the settings for copies say.
     /// </summary>
     /// <param name="linkPath">The link's .strm file.</param>
     /// <param name="logger">Records each file and folder deleted.</param>
@@ -373,10 +373,10 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Moves a file and its companions to the Recycling Bin instead of deleting them.
+    /// Moves a file and its companions to the Recycling bin instead of deleting them.
     /// </summary>
     /// <param name="filePath">The file to move.</param>
-    /// <param name="recyclingBinPath">The Recycling Bin folder the file moves into.</param>
+    /// <param name="recyclingBinPath">The Recycling bin folder the file moves into.</param>
     /// <param name="logger">Records the move and any failure.</param>
     /// <returns>Whether the move succeeded, with the reason when it did not.</returns>
     public static DeletionResult DeleteWithRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
@@ -435,13 +435,13 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Deletes a local file to the Recycling Bin or permanently, as the settings say, then removes its item from Jellyfin without touching the disk.
+    /// Deletes a local file to the Recycling bin or permanently, as the settings say, then removes its item from Jellyfin without touching the disk.
     /// Jellyfin's own file deletion is never used, since it removes a movie's whole folder with every other file in it.
     /// </summary>
     /// <param name="filePath">The file to delete, or null to use the item's own path.</param>
     /// <param name="localItem">The Jellyfin item for the file, or null when the file is not in the library.</param>
     /// <param name="libraryManager">Removes the item from Jellyfin's library.</param>
-    /// <param name="config">Supplies the Recycling Bin, empty folder, and root folder settings.</param>
+    /// <param name="config">Supplies the Recycling bin, empty folder, and root folder settings.</param>
     /// <param name="logger">Records each deletion and each failure.</param>
     /// <returns>Whether the deletion succeeded, with the reason when it did not.</returns>
     public static DeletionResult DeleteLocalFile(
@@ -570,7 +570,7 @@ public static class FileDeletionService
     /// Deletes the file and the row of every item the Content sync table marks as Deleting.
     /// </summary>
     /// <param name="manager">The Content sync table the Deleting rows are read from and removed from.</param>
-    /// <param name="config">Supplies the Removed files, Recycling Bin, and root folder settings.</param>
+    /// <param name="config">Supplies the Removed files, Recycling bin, and root folder settings.</param>
     /// <param name="logger">Records each deletion, refusal, and failure.</param>
     /// <param name="cancellationToken">Stops the pass before the next item.</param>
     /// <returns>How many items were deleted and how many failed.</returns>
@@ -586,7 +586,7 @@ public static class FileDeletionService
     /// A link is deleted whatever Removed files says, and a copy only while Removed files deletes.
     /// </summary>
     /// <param name="manager">The Content sync table the Deleting rows are read from and removed from.</param>
-    /// <param name="config">Supplies the Removed files, Recycling Bin, and root folder settings.</param>
+    /// <param name="config">Supplies the Removed files, Recycling bin, and root folder settings.</param>
     /// <param name="logger">Records each deletion, refusal, and failure.</param>
     /// <param name="removedPaths">Receives each deleted file's path so the caller can refresh only the folders that changed, or null.</param>
     /// <param name="cancellationToken">Stops the pass before the next item.</param>

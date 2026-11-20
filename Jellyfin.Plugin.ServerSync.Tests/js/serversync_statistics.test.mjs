@@ -66,7 +66,7 @@ test('the link streams chart shows under Content when content sync is on, and on
     var days = { Days: ['2026-04-01', '2026-04-02'], Servers: [{ Key: 'den', Name: 'Den', Streams: [2, 0] }, { Key: 'attic', Name: 'Attic', Streams: [0, 1] }] };
     var withLinks = await openPage({ statistics: { Types: [{ Key: 'Content', Runs: [run(1, 0, 0)] }, { Key: 'History', Runs: [] }], LinkStreams: days } });
     assert.equal(withLinks.view.querySelectorAll('.base-line-chart').length, 1);
-    assert.deepEqual(Array.from(withLinks.view.querySelectorAll('.base-subsection-title')).map(function (el) { return el.textContent; }), ['Link Streams']);
+    assert.deepEqual(Array.from(withLinks.view.querySelectorAll('.base-subsection-title')).map(function (el) { return el.textContent; }), ['Link streams']);
     assert.match(withLinks.view.querySelector('.base-line-chart').textContent, /Den/);
     assert.match(withLinks.view.querySelector('.base-line-chart').textContent, /Attic/);
     var without = await openPage({ statistics: { Types: [{ Key: 'Content', Runs: [run(1, 0, 0)] }], LinkStreams: null } });
@@ -76,11 +76,11 @@ test('the link streams chart shows under Content when content sync is on, and on
 test('a server with content sync off shows the link streams in a section of their own', async function () {
     var days = { Days: ['2026-04-01'], Servers: [{ Key: 'den', Name: 'Den', Streams: [3] }] };
     var other = await openPage({ statistics: { Types: [{ Key: 'History', Runs: [] }], LinkStreams: days } });
-    assert.deepEqual(titles(other.view), ['History', 'Link Streams']);
+    assert.deepEqual(titles(other.view), ['History', 'Link streams']);
     assert.equal(other.view.querySelectorAll('.base-line-chart').length, 1);
     assert.equal(other.view.querySelectorAll('.base-subsection-title').length, 0);
     var alone = await openPage({ statistics: { Types: [], LinkStreams: days } });
-    assert.deepEqual(titles(alone.view), ['Link Streams']);
+    assert.deepEqual(titles(alone.view), ['Link streams']);
     assert.equal(alone.view.querySelector('#statisticsDisabled').classList.contains('hidden'), true);
     assert.equal(alone.view.querySelector('#statisticsIntro').classList.contains('hidden'), true);
     assert.equal(other.view.querySelector('#statisticsIntro').classList.contains('hidden'), false);

@@ -499,7 +499,7 @@ public sealed class SyncMissingMetadataTaskTests : IDisposable
     }
 
     /// <summary>
-    /// Syncing a row writes its media segments into the local segment table, reads them back, and marks them synced, and needs Enable Media Segment Provider on.
+    /// Syncing a row writes its media segments into the local segment table, reads them back, and marks them synced, and needs Enable media segment provider on.
     /// True: Queue applies the pool's segments, and Jellyfin's Media Segment Scan picks them up from the local table.
     /// False: a queued row would never change the segments here, or would write them with the provider off.
     /// </summary>

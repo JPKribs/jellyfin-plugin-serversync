@@ -285,7 +285,7 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Lists the top level items of a source library, or its collections or playlists, for the Library Filter picker.
+    /// Lists the top level items of a source library, or its collections or playlists, for the Library filter picker.
     /// </summary>
     /// <param name="libraryId">The ID of the library on the source.</param>
     /// <param name="serverKey">The key of the server entry to browse, which defaults to the first source.</param>

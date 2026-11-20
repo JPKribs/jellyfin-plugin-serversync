@@ -24,7 +24,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
 /// <summary>
 /// Answers Jellyfin's media segment scan with the segments the metadata scan read from a source for the same file, without asking the source.
-/// It runs last, and replaces or removes the segments other providers gave a file only while Replace Existing Segments or Remove Segments No Server Has is on.
+/// It runs last, and replaces or removes the segments other providers gave a file only while Replace existing segments or Remove segments no server has is on.
 /// When it holds nothing for an item, it gives back the segments Jellyfin holds, so nothing is removed.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(IMediaSegmentProvider))]
@@ -71,7 +71,7 @@ public sealed class PeerSegmentProvider : IMediaSegmentProvider, IHasOrder
     public int Order => int.MaxValue;
 
     /// <summary>
-    /// Says whether Jellyfin should ask for an item's segments, which needs Enable Metadata Sync and Enable Media Segment Provider on.
+    /// Says whether Jellyfin should ask for an item's segments, which needs Enable metadata sync and Enable media segment provider on.
     /// While either is off it says no, so the segments here stay as they are.
     /// </summary>
     /// <inheritdoc />
@@ -155,8 +155,8 @@ public sealed class PeerSegmentProvider : IMediaSegmentProvider, IHasOrder
     /// <param name="fitted">The source's segments, fitted to the file, empty when no server has any.</param>
     /// <param name="others">The segments other providers gave the file.</param>
     /// <param name="ours">The segments Server Sync gave the file before.</param>
-    /// <param name="replace">Whether Replace Existing Segments is on.</param>
-    /// <param name="remove">Whether Remove Segments No Server Has is on.</param>
+    /// <param name="replace">Whether Replace existing segments is on.</param>
+    /// <param name="remove">Whether Remove segments no server has is on.</param>
     /// <returns>Server Sync's segments for the file, and the other providers' segments that are removed.</returns>
     public static SegmentPlan Plan(IReadOnlyList<MediaSegmentDto> fitted, IReadOnlyList<MediaSegmentDto> others, IReadOnlyList<MediaSegmentDto> ours, bool replace, bool remove)
     {

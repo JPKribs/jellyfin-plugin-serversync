@@ -22,7 +22,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Listens for changes made on this server and raises one hint for each object once it has gone untouched for Send Changes After.
+/// Listens for changes made on this server and raises one hint for each object once it has gone untouched for Send changes after.
 /// A hand made edit is stamped the moment it is made, and a save that is the sync's own write raises nothing.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
@@ -58,7 +58,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <param name="userManager">Names the user a history hint is for.</param>
     /// <param name="libraryManager">Raises the events for items added, updated, and removed.</param>
     /// <param name="httpContext">Tells an edit someone made in a request from Jellyfin's own background work.</param>
-    /// <param name="configManager">Reads Send Changes After and the server entries.</param>
+    /// <param name="configManager">Reads Send changes after and the server entries.</param>
     /// <param name="publisher">Queues a hint for each peer once a change is raised.</param>
     /// <param name="worker">Tells what each peer accepts.</param>
     /// <param name="guard">Tells a save that is the echo of an apply.</param>
@@ -117,7 +117,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger = logger;
     }
 
-    /// <summary>Gets how many objects are waiting out Send Changes After, and files whose removal is held.</summary>
+    /// <summary>Gets how many objects are waiting out Send changes after, and files whose removal is held.</summary>
     public int PendingCount => _pending.Count + _heldRemovals.Count;
 
     /// <summary>
@@ -200,7 +200,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         Flush(DateTime.MaxValue);
     }
 
-    /// <summary>Raises every gathered change whose Send Changes After wait has ended.</summary>
+    /// <summary>Raises every gathered change whose Send changes after wait has ended.</summary>
     /// <param name="utcNow">Changes due at or before this time are raised, so <see cref="DateTime.MaxValue"/> raises everything.</param>
     /// <returns>How many changes were raised.</returns>
     public int Flush(DateTime utcNow)

@@ -222,18 +222,18 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Matches a recycled file as the Recycling Bin names it, with an optional suffix of eight hex digits.
+    /// Matches a recycled file as the Recycling bin names it, with an optional suffix of eight hex digits.
     /// </summary>
     private static readonly Regex RecycledFileName = new(
         "^.+_(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})(_[0-9a-f]{8})?(\\.[^.]*)?$",
         RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Reads the UTC time a file was recycled at from its name. Only names the Recycling Bin builds qualify, so a stranger's file is never read as one.
+    /// Reads the UTC time a file was recycled at from its name. Only names the Recycling bin builds qualify, so a stranger's file is never read as one.
     /// </summary>
     /// <param name="filePath">The file's path or name.</param>
     /// <param name="recycledAt">The time it was recycled at.</param>
-    /// <returns><c>true</c> when the name is one the Recycling Bin builds.</returns>
+    /// <returns><c>true</c> when the name is one the Recycling bin builds.</returns>
     public static bool TryReadRecycledTime(string filePath, out DateTime recycledAt)
     {
         recycledAt = default;

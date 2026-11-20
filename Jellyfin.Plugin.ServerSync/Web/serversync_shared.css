@@ -3,7 +3,7 @@
 
 /* serversync-hidden-button */
 /* Keeps a hidden Base button hidden. Base forces a fill button to display, which outranks its own hidden class. */
-/* Example: <button class="raised base-button primary fill hidden"><span>Retry Errors</span></button> */
+/* Example: <button class="raised base-button primary fill hidden"><span>Retry errors</span></button> */
 .pluginConfigurationPage .base-button.hidden,
 .base-dialog .base-button.hidden { display: none !important; }
 
@@ -14,7 +14,7 @@
 
 /* serversync-health-dashboard */
 /* Dark rounded panel holding a row of labeled figures for the last run. */
-/* Example: <div class="serversync-health-dashboard"><div class="serversync-health-row"><div class="serversync-health-card"><span class="serversync-health-label">Last Sync</span><span class="serversync-health-value">Never</span></div></div></div> */
+/* Example: <div class="serversync-health-dashboard"><div class="serversync-health-row"><div class="serversync-health-card"><span class="serversync-health-label">Last sync</span><span class="serversync-health-value">Never</span></div></div></div> */
 .serversync-health-dashboard {
     padding: 16px;
     background: rgba(0, 0, 0, 0.3);
@@ -181,7 +181,7 @@
 
 /* serversync-access-grid */
 /* Bordered list of rows, each a title and description beside a badge. */
-/* Example: <div class="serversync-access-grid"><div class="serversync-access-row"><div class="serversync-access-text"><div class="serversync-access-title">Content Listing</div><div class="serversync-access-description">Every library.</div></div><span class="base-badge green">Available</span></div></div> */
+/* Example: <div class="serversync-access-grid"><div class="serversync-access-row"><div class="serversync-access-text"><div class="serversync-access-title">Content listing</div><div class="serversync-access-description">Every library.</div></div><span class="base-badge green">Available</span></div></div> */
 .serversync-access-grid {
     border: 1px solid var(--base-border);
     border-radius: 6px;
@@ -504,7 +504,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 /* serversync-user-sync-section */
 /* Source and local user side by side in the User detail dialog. */
-/* Example: <div class="serversync-user-sync-section"><div class="serversync-user-sync-block"><div class="serversync-user-sync-label">Source User</div></div></div> */
+/* Example: <div class="serversync-user-sync-section"><div class="serversync-user-sync-block"><div class="serversync-user-sync-label">Source user</div></div></div> */
 .serversync-user-sync-section {
     display: flex; align-items: center; gap: 16px; margin-bottom: 16px;
     padding: 16px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;
@@ -596,8 +596,8 @@ div:not(.serversync-form-row) + .serversync-form-row {
 #btnCheckPeer, #btnTestConnection { white-space: nowrap; flex: 0 0 auto; }
 
 /* serversync-editor-footer */
-/* Footer of a server editor, Save Server and Remove Server with the result line between them. */
-/* Example: <div class="serversync-editor-footer"><button>Save Server</button><span class="serversync-save-status base-status-text"></span><button>Remove Server</button></div> */
+/* Footer of a server editor, Save server and Remove server with the result line between them. */
+/* Example: <div class="serversync-editor-footer"><button>Save server</button><span class="serversync-save-status base-status-text"></span><button>Remove server</button></div> */
 .serversync-editor-footer { display: flex; gap: 8px; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .serversync-save-status { flex: 1; align-self: center; }
 
@@ -703,13 +703,13 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 /* serversync-kept-bulk-button */
 /* Bulk action button with an icon before its label. */
-/* Example: <button class="raised serversync-kept-bulk-button"><span class="material-icons">link</span><span>Turn Back Into Links</span></button> */
+/* Example: <button class="raised serversync-kept-bulk-button"><span class="material-icons">link</span><span>Turn back into links</span></button> */
 .serversync-kept-bulk-button { display: inline-flex; align-items: center; gap: 4px; }
 .serversync-kept-bulk-button .material-icons { font-size: 18px; }
 
 /* serversync-filter-section */
-/* Spaced block for a library's filter or its Always Keep picks. */
-/* Example: <div class="serversync-filter-section"><h3 class="base-subsection-title">Library Filter</h3></div> */
+/* Spaced block for a library's filter or its Always keep picks. */
+/* Example: <div class="serversync-filter-section"><h3 class="base-subsection-title">Library filter</h3></div> */
 .serversync-filter-section {
     margin-top: 1em;
     padding-top: 0.75em;

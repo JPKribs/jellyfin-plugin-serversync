@@ -271,7 +271,7 @@ public sealed class ConfigurationUtilitiesTests
 
     /// <summary>
     /// Carrier NAT addresses, which Tailscale uses, count as a private network, and the broadcast and reserved ranges are always refused.
-    /// True: a server entry reaches 100.64.0.0/10 only with Allow Private Network Address on, and never the ranges no server lives in.
+    /// True: a server entry reaches 100.64.0.0/10 only with Allow private network address on, and never the ranges no server lives in.
     /// False: a public-only entry could be pointed at a private overlay network.
     /// </summary>
     [Theory]

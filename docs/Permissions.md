@@ -1,6 +1,6 @@
 # Permissions
 
-Server Sync talks to every other server with the credential on that server's entry, which is an **API Key** or a token from **Sign In**. That credential decides what this server can read there. Writes always happen on this server through Jellyfin itself, so this server needs no extra rights to apply what it reads.
+Server Sync talks to every other server with the credential on that server's entry, which is an **API Key** or a token from **Sign in**. That credential decides what this server can read there. Writes always happen on this server through Jellyfin itself, so this server needs no extra rights to apply what it reads.
 
 Give each entry the least access that covers what you want it to do. A standard user can pull, push, and sync. It is limited to what that user can see and to that user's own history, settings, and playlists.
 
@@ -9,23 +9,23 @@ Give each entry the least access that covers what you want it to do. A standard 
 | Credential | What Jellyfin treats it as |
 | :--- | :--- |
 | An **API Key** from **Dashboard > API Keys** | Full access to everything. An API Key belongs to no user. |
-| A **Sign In** as an administrator | Full access to everything, plus the media downloading setting of that account. |
-| A **Sign In** as a standard user | What that user may see and do, nothing more. |
+| A **Sign in** as an administrator | Full access to everything, plus the media downloading setting of that account. |
+| A **Sign in** as a standard user | What that user may see and do, nothing more. |
 
-**Test Connection** reads which of these the entry holds, who it belongs to, and whether that account may download media. The **Authentication** step then lists what works with it, and the parts that need more are turned off.
+**Test connection** reads which of these the entry holds, who it belongs to, and whether that account may download media. The **Authentication** step then lists what works with it, and the parts that need more are turned off.
 
 ## What Each Function Needs on the Other Server
 
 | Function | Standard user | Administrator or API Key |
 | :--- | :--- | :--- |
-| Test Connection | Works | Works |
+| Test connection | Works | Works |
 | Content listing | Only the libraries that user can see. Folder paths are only shown to administrators, so type each source root path by hand | Every library, with its folder paths |
 | File downloads | Needs **Allow media downloading** on that user | Works. A signed in administrator also needs **Allow media downloading** |
 | Subtitle and companion files | Works for the items that user can see | Works |
 | Metadata, images, people | Only items in the libraries that user can see | Everything |
 | Collections | Only collections in the libraries that user can see | Everything |
 | Playlist whitelists | Only playlists that user owns or that are shared with them | Playlists the account can open |
-| Skip Items Watched By | Only that user's own plays | Every selected user |
+| Skip items watched by | Only that user's own plays | Every selected user |
 | Watch history | Only that user's own history | Every mapped user |
 | User settings | Only that user's own settings and profile image | Every mapped user |
 | Playlists | Only the playlists that user can see, all owned by that user here | Every playlist owned by a mapped user. Exact owners and shares need Server Sync there |
@@ -51,7 +51,7 @@ With Push and Sync, a change is announced as a hint and the receiving server pul
 * **The sender's key for the receiver** must be allowed by the receiver's whitelist. An administrator's key is allowed from any server on the receiver's **Servers** tab. A standard user's key needs that user on the receiver's whitelist.
 * **The receiver's key for the sender** decides what the receiver can read when it pulls. If it is a standard user's key, the receiver only gets what that user can see, and only that user's history and settings. The sender is never announced a change the receiver could not read.
 
-**Check Link** reports both. It says whether the other server lists this one, and the access the other server holds for this one.
+**Check link** reports both. It says whether the other server lists this one, and the access the other server holds for this one.
 
 ## Whitelist
 
@@ -66,7 +66,7 @@ Each whitelist row is one user and the locations they may call from, separated b
 
 A standard user who is let in reaches only their own data. History and version reads work only for their own user, lookups and playlists cover only what they can see, and playlist items they cannot see are left out.
 
-**Test Connection** on the other server's entry reports whether this server's key may use its sync endpoints, and why not:
+**Test connection** on the other server's entry reports whether this server's key may use its sync endpoints, and why not:
 
 | Message | Meaning |
 | :--- | :--- |
@@ -82,7 +82,7 @@ Host names are looked up once and remembered for an hour. When a caller does not
 
 ## Links
 
-Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play that streams from it, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Unmapped Users** choice, and its limits. A source entry that holds a standard user's key streams as that user only. A link whose file is in the link cache plays under the linking server's rules alone.
+Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play that streams from it, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Unmapped users** choice, and its limits. A source entry that holds a standard user's key streams as that user only. A link whose file is in the link cache plays under the linking server's rules alone.
 
 | Function | Standard user | Administrator or API Key |
 | :--- | :--- | :--- |

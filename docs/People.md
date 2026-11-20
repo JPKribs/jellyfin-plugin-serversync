@@ -6,10 +6,10 @@ People syncing copies person entities from a source Jellyfin server onto this se
 
 ![People](screenshots/settings/People.png)
 
-* **Enable People Sync** turns people syncing on.
+* **Enable people sync** turns people syncing on.
 * **Images** syncs profile images for people, along with any backdrops a person carries.
-* **Enable Metadata Provider** lets a library fill people from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers. It is on by default and works only while **Enable People Sync** is on. See [Metadata Provider](MetadataProvider.md).
-* **Precedence** chooses which server is heard for a person that several servers know, either the one whose edit is newest or always the highest ranked. See [Several Servers](SyncTypes.md#several-servers).
+* **Enable metadata provider** lets a library fill people from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers. It is on by default and works only while **Enable people sync** is on. See [Metadata provider](MetadataProvider.md).
+* **Precedence** chooses which server is heard for a person that several servers know, either the one whose edit is newest or always the highest ranked. See [Several servers](SyncTypes.md#several-servers).
 
 ## Images
 
@@ -17,7 +17,7 @@ When a person's images differ from the source, this server downloads the full so
 
 A scan tells whether an image changed from the tag the source gives it, which changes whenever the source writes the image again. Once an image here has been matched to the source's, an unchanged tag means no change, and a new tag means the image is fetched. An image that has never been matched is compared by file size, so images already on both servers are matched without being downloaded.
 
-**Refresh Parallelism** and **Deep Image Verification** apply to Metadata and People and live under **Settings > Processing**. Deep Image Verification measures every source image on every scan and compares by size, which also catches an image file swapped on the source's disk before the source has noticed.
+**Refresh parallelism** and **Deep image verification** apply to Metadata and People and live under **Settings > Processing**. Deep image verification measures every source image on every scan and compares by size, which also catches an image file swapped on the source's disk before the source has noticed.
 
 ## Live Changes Between Servers
 

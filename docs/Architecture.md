@@ -38,7 +38,7 @@ Provider      Jellyfin refresh ──▶ PeerMetadataProvider ──▶ PeerMeta
 * `LinkPlaybackFilter` is added as an MVC filter on Jellyfin's own routes.
 * Two named `HttpClient`s carry the SSRF guard, Base's `BaseRetryHandler`, and `RedirectRefusingHandler`. `ServerSyncSource` may reach private addresses and `ServerSyncSourcePublic` may not.
 
-`Services/Clients/SourceServerClientFactory` builds every `SourceServerClient`. It decrypts the key, checks the URL, picks the client by **Allow Private Network Address**, and attaches pairing when the entry is saved.
+`Services/Clients/SourceServerClientFactory` builds every `SourceServerClient`. It decrypts the key, checks the URL, picks the client by **Allow private network address**, and attaches pairing when the entry is saved.
 
 ## Configuration
 
@@ -47,9 +47,9 @@ Provider      Jellyfin refresh ──▶ PeerMetadataProvider ──▶ PeerMeta
 * `Servers` is the list of server entries, in rank order. An entry's place in the list is its rank.
 * `Enable*Sync` turns each sync type on.
 * `MetadataSyncPrecedence`, `PeopleSyncPrecedence`, `UserSyncPrecedence`, and `PlaylistSyncPrecedence` are each `Newest` or `Rank`. Content is decided by rank and origin, and history by merging.
-* `UserSyncConflict` is **User Conflicts**, as `Newest`, `Permissive`, or `Restrictive`.
-* `PlaylistRemovedAction` is **Removed Playlists**, as `Delete` or `Keep`.
-* `HintDebounceSeconds` is **Send Changes After**.
+* `UserSyncConflict` is **User conflicts**, as `Newest`, `Permissive`, or `Restrictive`.
+* `PlaylistRemovedAction` is **Removed playlists**, as `Delete` or `Keep`.
+* `HintDebounceSeconds` is **Send changes after**.
 
 `Models/Configuration/SourceServer.cs` is one server entry.
 
@@ -59,7 +59,7 @@ Provider      Jellyfin refresh ──▶ PeerMetadataProvider ──▶ PeerMeta
 | `Url`, `ExternalUrl`, `AllowPrivateNetwork` | How to reach the server |
 | `ApiKey` | The key, encrypted at rest |
 | `Mode` | `Pull`, `Push`, or `Sync`. `Pulls` and `Pushes` read it |
-| `LibraryMappings` | Roots, the library filter, `StorageMode`, `ExcludeFromLinkCache`, history negotiation, and **Always Keep** picks |
+| `LibraryMappings` | Roots, the library filter, `StorageMode`, `ExcludeFromLinkCache`, history negotiation, and **Always keep** picks |
 | `UserMappings` | Users, with each user's link limits |
 | `AllowLinking` and the `Link*` members | What a linking server may stream |
 
@@ -74,7 +74,7 @@ Two visible tasks run every six hours. Each runs hidden tasks in order. Each ste
 | **Sync Content** (`SyncContentTask`) | `UpdateSyncTablesTask`, then `SyncMissingContentTask` when the refresh succeeded, then `SyncCollectionsTask` |
 | **Sync Information** (`SyncInformationTask`) | Metadata, People, Users, and History, each a refresh then an apply, then `SyncPlaylistsTask` |
 
-**Empty Recycling Bin** and **Clean Temporary Directory** run daily. `POST /Sync/Tasks/{taskKey}/Run` starts a single refresh or apply step from the **Sync** tab.
+**Empty Recycling bin** and **Clean Temporary Directory** run daily. `POST /Sync/Tasks/{taskKey}/Run` starts a single refresh or apply step from the **Sync** tab.
 
 The task bases live in `Tasks/Common/`.
 
@@ -99,10 +99,10 @@ Every sync type follows the same path. A refresh task reads the sources and fill
 * When several sources offer the same item, `RefreshSyncTaskBase.CollectAsync` lets one speak for it. Rank decides unless the task's `ContestAsync` names another.
 * Content writes copies with `DownloadService`, links with `LinkWriter`, and removals with `FileDeletionService` and `RecyclingBinService`.
 * Content takes a file from the highest ranked source that holds it. On an incremental scan, `UpdateSyncTablesTask.ApplyReportedRemovalsAsync` asks each source for `GET /Sync/Peer/Changes`, the files that left its library, which the source keeps in `RemovedItems`.
-* History merges three way in `HistorySyncMergeService`. The source whose history of a file moved since the last scan speaks for it, so each source is merged in turn. For a Sync server with **Negotiate History** on, the merge is offered to the other server through `POST /Sync/Peer/History`, which `PeerHistoryService` answers there.
+* History merges three way in `HistorySyncMergeService`. The source whose history of a file moved since the last scan speaks for it, so each source is merged in turn. For a Sync server with **Negotiate history** on, the merge is offered to the other server through `POST /Sync/Peer/History`, which `PeerHistoryService` answers there.
 * Metadata and people let the source with the newest stamp speak, through `ScanConflictSettler.NewestOffersAsync`, unless precedence is `Rank`. `ScanConflictSettler.SettleAsync` then keeps a value this server edited more recently.
-* Users have no stamps and no live changes. The source that changed a user since the last scan speaks for that user. With a Sync server, `UserSyncTableService.SettleBothWays` keeps a change made on this server until that server takes it, and `UserPolicyCombiner` combines the two policies when both changed, by **User Conflicts**.
-* Playlists mirror through `PlaylistMirror` and decide with `VersionConflictResolver`. A deletion is stamped like an edit. `SyncPlaylistsTask.SettleDeletedAsync` settles a deletion that was not announced, by **Removed Playlists**, and a playlist this server knew and no longer holds is not made again from an older copy.
+* Users have no stamps and no live changes. The source that changed a user since the last scan speaks for that user. With a Sync server, `UserSyncTableService.SettleBothWays` keeps a change made on this server until that server takes it, and `UserPolicyCombiner` combines the two policies when both changed, by **User conflicts**.
+* Playlists mirror through `PlaylistMirror` and decide with `VersionConflictResolver`. A deletion is stamped like an edit. `SyncPlaylistsTask.SettleDeletedAsync` settles a deletion that was not announced, by **Removed playlists**, and a playlist this server knew and no longer holds is not made again from an older copy.
 * Content and metadata scan incrementally between full scans, using `ScanWatermarkStore`.
 
 ## Peers
@@ -134,7 +134,7 @@ Every later request carries the secret in `X-ServerSync-Pairing`. `PeerControlle
 | `PeerController.Links` | `/Sync/Peer` | Streams, stream checks, playback reports, remote control, link details, images, removals, copies |
 | `PeerPairController` | `/Sync/Peer/Pair` | Pairing |
 | `LinkController` | `/Sync/Link` | The address a `.strm` holds, for this server only |
-| `HintsController` | `/Sync/Hints` | The **Change Queue**, **Check Link**, and stamp lookups |
+| `HintsController` | `/Sync/Hints` | The **Change queue**, **Check link**, and stamp lookups |
 | `ServersController` | `/Sync/Servers` | Removing a server's rows |
 | `ConfigurationController` | `/Sync` | Everything else the pages call |
 
@@ -146,7 +146,7 @@ A change travels as a hint that says what changed, never the value. The receiver
 
 1. **Observe.** `Services/Queue/LocalChangeObserver` listens to Jellyfin's user data and library events. It stays quiet for a write Server Sync made itself, a file it downloaded, a metadata fill from another server, and anything no peer wants. A file rewritten in place is told by a file time newer than its Content stamp. A file that leaves the library is held for `HintProtocol.RemovalHold` before it is published, so the new file of a rename goes first.
 2. **Stamp.** A hand made edit is stamped at once in `ObjectVersions` with this server and the time. History is also stamped by part, played or favorite, as `HistoryParts` names them.
-3. **Gather.** The change waits until the item has gone untouched for **Send Changes After**.
+3. **Gather.** The change waits until the item has gone untouched for **Send changes after**.
 4. **Publish.** `LocalHintPublisher` writes one `OutboundHints` row per server that this one pushes to and that wants it. `LoopBreaker` holds a change that keeps coming back.
 5. **Deliver.** `OutboundHintWorker` sends batches to `POST /Sync/Peer/Queue`. `HintDelivery` decides what each answer means. A `200` waits for completion, a `400` fails, a refusal pauses the server, and anything else retries with growing delays.
 6. **Receive.** `PeerController.Queue` checks pairing and direction, sorts each hint with `HintTriage`, and stores it in `InboundHints`. A hint for an item that has not arrived yet is parked until it does.
@@ -157,7 +157,7 @@ A change travels as a hint that says what changed, never the value. The receiver
     | History | `HistoryHintHandler` merges three way and writes. When the agreed base cannot be used, it takes only the parts the hint names, each by its own stamp |
     | Metadata, People | `ItemHintHandler` decides with `VersionDecider` and applies through the apply task |
     | Content | `ContentHintHandler` downloads a new file. A new id in the folder of a gone file is paired with its row by `RenameMatcher` and re-keyed, so the file moves or is replaced. Every change to a linked file writes the link again. For a file that left the source, it moves the link to another holder with `LinkRehomer`, or removes it, and applies Removed files to a copy at once |
-    | Playlists | `PlaylistHintHandler` mirrors through `PlaylistMirror`, and deletes or keeps a copy by **Removed Playlists** |
+    | Playlists | `PlaylistHintHandler` mirrors through `PlaylistMirror`, and deletes or keeps a copy by **Removed playlists** |
 
     A history hint names its parts in its item type, such as `Movie+Played`, written by `HintProtocol.HistoryItemType`.
 

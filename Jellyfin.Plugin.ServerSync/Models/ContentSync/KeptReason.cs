@@ -6,7 +6,7 @@ public enum KeptReason
     /// <summary>Not a kept copy, or a copy from before this was recorded.</summary>
     None = 0,
 
-    /// <summary>Copied because an Always Keep pick covers it. Removing the pick turns it back into a link.</summary>
+    /// <summary>Copied because an Always keep pick covers it. Removing the pick turns it back into a link.</summary>
     Pick = 1,
 
     /// <summary>Downloaded by hand with Download. It stays until turned back by hand.</summary>

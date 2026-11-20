@@ -64,7 +64,7 @@ test('resetting the whole database asks first and sends nothing when the questio
     opened.view.querySelector('#btnResetEntireDatabase').click();
     await settle(20);
     var dialog = dialogText(opened.page.dom);
-    assert.equal(dialog.title, 'Reset Database');
+    assert.equal(dialog.title, 'Reset database');
     assert.match(dialog.body, /Reset the entire sync database\?/);
     assert.match(dialog.body, /It cannot be undone\./);
     assert.equal(clickDialogButton(opened.page.dom, 'Cancel'), true);
@@ -89,7 +89,7 @@ test('resetting one table names it in the question and in the result', async fun
     var opened = await openPage();
     opened.view.querySelector('#btnResetContentTable').click();
     await settle(20);
-    assert.equal(dialogText(opened.page.dom).title, 'Reset Table');
+    assert.equal(dialogText(opened.page.dom).title, 'Reset table');
     assert.match(dialogText(opened.page.dom).body, /Reset the content sync table\?/);
     clickDialogButton(opened.page.dom, 'Reset');
     await settle(20);
@@ -114,7 +114,7 @@ test('deleting the cached files asks a destructive question and posts only when 
     opened.view.querySelector('#btnClearLinkCache').click();
     await settle(20);
     var dialog = dialogText(opened.page.dom);
-    assert.equal(dialog.title, 'Delete Cached Files');
+    assert.equal(dialog.title, 'Delete cached files');
     assert.match(dialog.body, /Delete every cached file\? Links keep playing from their sources\./);
     clickDialogButton(opened.page.dom, 'Cancel');
     await settle(20);
@@ -223,7 +223,7 @@ function usersAnswer(options) {
 
 var SCAN = { Key: 'a', Name: 'source-a', Url: 'http://source-a:8096', ApiKey: 'k', Mode: 'Pull', IsEnabled: true };
 
-test('Skip Items Watched By lists each scan server user in a Checkbox List, with the saved users picked', async function () {
+test('Skip items watched by lists each scan server user in a Checkbox List, with the saved users picked', async function () {
     var opened = await openPage({ config: { Servers: [SCAN], WatchedFilterUserIds: ['u2'] }, answer: usersAnswer });
     await settle(20);
     var list = opened.view.querySelector('#watchedFilterUsersList');

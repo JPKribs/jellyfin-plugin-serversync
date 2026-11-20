@@ -13,7 +13,7 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Tasks.ContentSync;
 
 /// <summary>
-/// The Recycling Bin task deletes recycled files past their retention period, and refuses to run when the bin is off, unset, or overlaps a library.
+/// The Recycling bin task deletes recycled files past their retention period, and refuses to run when the bin is off, unset, or overlaps a library.
 /// </summary>
 public sealed class EmptyRecyclingBinTaskTests : IDisposable
 {
@@ -70,7 +70,7 @@ public sealed class EmptyRecyclingBinTaskTests : IDisposable
     }
 
     /// <summary>
-    /// A file the Recycling Bin did not name is never deleted.
+    /// A file the Recycling bin did not name is never deleted.
     /// True: a file someone else put in the folder is safe however old it is.
     /// False: pointing the bin at a shared folder deletes other people's files.
     /// </summary>

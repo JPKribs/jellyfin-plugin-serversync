@@ -98,7 +98,7 @@ public sealed class PeerControllerTests : IDisposable
 
         var body = await Link(serverId);
 
-        Assert.Equal((ControllerTestHarness.ThisServerId, "This Server", false, false, null), (body.ServerId, body.ServerName, body.Listed, body.Paired, body.Mode));
+        Assert.Equal((ControllerTestHarness.ThisServerId, "This server", false, false, null), (body.ServerId, body.ServerName, body.Listed, body.Paired, body.Mode));
         Assert.Empty(_harness.PeerPaths);
     }
 

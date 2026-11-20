@@ -363,7 +363,7 @@ test('runNow delivers what was due and reports it', async function () {
     assert.equal(button.disabled, false);
 });
 
-test('the Dismiss Failed button asks first and sends nothing when the question is declined', async function () {
+test('the Dismiss failed button asks first and sends nothing when the question is declined', async function () {
     ['btnQueueRefresh', 'btnQueueRun', 'btnQueueRetryFailed', 'btnQueueDismissFailed', 'btnQueueUnmatchedDismiss'].forEach(function (id) { env.view.appendChild(env.page.dom.el('button', { id: id })); });
     confirmAnswer = false;
     queue.init();

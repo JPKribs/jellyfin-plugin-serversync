@@ -95,7 +95,7 @@ public sealed class PeerMetadataSource
     }
 
     /// <summary>
-    /// Says whether the provider answers for an item type. A person needs Enable People Sync and its provider switch on, and any other item needs Enable Metadata Sync and its provider switch on.
+    /// Says whether the provider answers for an item type. A person needs Enable people sync and its provider switch on, and any other item needs Enable metadata sync and its provider switch on.
     /// </summary>
     /// <param name="itemType">The item's type name.</param>
     /// <returns><c>true</c> when the provider may ask the sources.</returns>

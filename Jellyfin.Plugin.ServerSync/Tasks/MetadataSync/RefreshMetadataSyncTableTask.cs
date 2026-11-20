@@ -70,7 +70,7 @@ public class RefreshMetadataSyncTableTask
     /// </summary>
     private readonly ConcurrentDictionary<string, ConcurrentBag<(int Rank, string ServerKey, string? ServerId, string SourceItemId, Models.Peer.PeerSegmentsItem Answer)>> _segmentAnswers = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Says whether rows carry media segments, which needs the store and Enable Media Segment Provider on.</summary>
+    /// <summary>Says whether rows carry media segments, which needs the store and Enable media segment provider on.</summary>
     private bool ReadsSegments => _segments is not null && ConfigManager.Configuration.MetadataSyncSegmentProvider;
 
     /// <summary>
@@ -759,7 +759,7 @@ public class RefreshMetadataSyncTableTask
     /// <summary>
     /// Sets a row's media segments: the source value is what the pool holds for the file, picked across every server that answered for it in rank order,
     /// and the local value is what the local segment table holds. With no answer for the file this run, the row keeps the source value it held.
-    /// A pool with no segments for a file that has none kept here is no change, unless Remove Segments No Server Has is on.
+    /// A pool with no segments for a file that has none kept here is no change, unless Remove segments no server has is on.
     /// </summary>
     private void FillSegments(MetadataSyncItem fresh, MetadataSyncItem? prior)
     {

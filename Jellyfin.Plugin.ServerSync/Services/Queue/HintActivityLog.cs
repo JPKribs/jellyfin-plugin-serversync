@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Writes the Change Queue's events to the Activity page.
+/// Writes the Change queue's events to the Activity page.
 /// Changes from peers are summed into one entry for each outcome, such as "12 items synced", so a busy sync never floods it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]

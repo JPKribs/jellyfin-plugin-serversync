@@ -1,9 +1,9 @@
 // serversync_sync_metadata.js
-// The Metadata Sync table and its detail modal. Built by serversync_sync.js from the page context
+// The Metadata sync table and its detail modal. Built by serversync_sync.js from the page context
 // and the table kit in serversync_sync_table.js.
 
 // createMetadataSyncTableModule
-// Builds the Metadata Sync view: its table, status counts, health figures, and detail modal.
+// Builds the Metadata sync view: its table, status counts, health figures, and detail modal.
 //
 // Inputs
 // ctx [object]: The page context from serversync_sync.js.
@@ -311,19 +311,19 @@ export function createMetadataSyncTableModule(ctx, kit) {
 
                 var metadataFields = [
                     { key: 'Name', label: t.tr('Name') },
-                    { key: 'OriginalTitle', label: t.tr('FieldOriginalTitle') },
+                    { key: 'OriginalTitle', label: t.tr('LabelOriginalTitle') },
                     { key: 'ForcedSortName', label: t.tr('FieldForcedSortName') },
                     { key: 'Overview', label: t.tr('Overview'), truncate: true },
                     { key: 'Tagline', label: t.tr('LabelTagline') },
                     { key: 'OfficialRating', label: t.tr('OptionParentalRating') },
-                    { key: 'CustomRating', label: t.tr('FieldCustomRating') },
+                    { key: 'CustomRating', label: t.tr('LabelCustomRating') },
                     { key: 'CommunityRating', label: t.tr('OptionCommunityRating') },
                     { key: 'CriticRating', label: t.tr('FieldCriticRating') },
                     { key: 'PremiereDate', label: t.tr('OptionReleaseDate'), isDate: true },
-                    { key: 'EndDate', label: t.tr('FieldEndDate'), isDate: true },
+                    { key: 'EndDate', label: t.tr('LabelEndDate'), isDate: true },
                     { key: 'ProductionYear', label: t.tr('LabelYear') },
                     { key: 'AspectRatio', label: t.tr('AspectRatio') },
-                    { key: 'Video3DFormat', label: t.tr('Field3DFormat') },
+                    { key: 'Video3DFormat', label: t.tr('Label3DFormat') },
                     { key: 'IndexNumber', label: t.tr('IndexNumber') },
                     { key: 'ParentIndexNumber', label: t.tr('FieldParentIndexNumber') },
                     { key: 'PreferredMetadataCountryCode', label: t.tr('LabelCountry') },

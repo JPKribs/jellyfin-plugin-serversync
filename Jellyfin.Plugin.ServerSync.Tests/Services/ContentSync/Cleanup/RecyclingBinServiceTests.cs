@@ -115,7 +115,7 @@ public class RecyclingBinServiceTests
     }
 
     /// <summary>
-    /// A Recycling Bin overlaps a root folder when either holds the other or they are the same folder, and not when they only share a prefix.
+    /// A Recycling bin overlaps a root folder when either holds the other or they are the same folder, and not when they only share a prefix.
     /// True: a bin inside a library, or a library inside the bin, is refused, and a neighbouring folder is allowed.
     /// False: recycled files would be scanned back in as media, or a safe folder would be refused.
     /// </summary>

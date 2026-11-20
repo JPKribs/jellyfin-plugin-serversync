@@ -1,9 +1,9 @@
 // serversync_sync_queue.js
-// The Change Queue view. Built by serversync_sync.js from the page context once the shared
+// The Change queue view. Built by serversync_sync.js from the page context once the shared
 // module is in.
 
 // createQueueModule
-// Builds the Change Queue view: the hint counts, the servers' delivery states, and the list of changes. It
+// Builds the Change queue view: the hint counts, the servers' delivery states, and the list of changes. It
 // reloads itself every few seconds while it is the view on screen, and the page stops it on viewhide.
 //
 // Inputs
@@ -439,8 +439,8 @@ export function createQueueModule(ctx) {
         },
 
         _kindLabelTitle: function(kind) {
-            return keyed({ 0: 'KindTitleHistory', 1: 'LabelMetadata', 2: 'Person', 3: 'File', 4: 'HeaderUser', 5: 'LabelPlaylist',
-                History: 'KindTitleHistory', Metadata: 'LabelMetadata', People: 'Person', Content: 'File', Users: 'HeaderUser', Playlists: 'LabelPlaylist' }, kind, String(kind));
+            return keyed({ 0: 'AccessWatchHistory', 1: 'LabelMetadata', 2: 'Person', 3: 'File', 4: 'HeaderUser', 5: 'LabelPlaylist',
+                History: 'AccessWatchHistory', Metadata: 'LabelMetadata', People: 'Person', Content: 'File', Users: 'HeaderUser', Playlists: 'LabelPlaylist' }, kind, String(kind));
         },
 
         _kindColor: function(kind) {

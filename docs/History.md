@@ -4,21 +4,21 @@ History syncing copies watch state from a source Jellyfin server onto this serve
 
 ## Settings
 
-* **Enable History Sync** turns watch history syncing on.
-* **Played / Unplayed Status** syncs whether each item is marked played.
-* **Playback Position** syncs the resume position for partly watched items.
-* **Play Count** syncs how many times each item was played.
-* **Last Played Date** syncs the date each item was last played.
+* **Enable history sync** turns watch history syncing on.
+* **Played / unplayed status** syncs whether each item is marked played.
+* **Playback position** syncs the resume position for partly watched items.
+* **Play count** syncs how many times each item was played.
+* **Last played date** syncs the date each item was last played.
 * **Favorites** syncs which items are marked as favorites.
-* **Negotiate History**, on each library of a Sync server in the **Storage** tab, writes the merged history back to that server as well. See [Two Way History](#two-way-history).
+* **Negotiate history**, on each library of a Sync server in the **Storage** tab, writes the merged history back to that server as well. See [Two way history](#two-way-history).
 
 The library filter on the **Storage** tab applies to history as it does to content.
 
-A part that is switched off is left alone in both directions. It is not written on this server, not written back to the source, and not taken from another server that negotiates or sends live changes here. It is still read, so the parts left on merge as they otherwise would. Changing these switches makes the next scan read everything again. An item marked unplayed loses its last played date even with **Last Played Date** off, since clearing the date is how Jellyfin records the mark.
+A part that is switched off is left alone in both directions. It is not written on this server, not written back to the source, and not taken from another server that negotiates or sends live changes here. It is still read, so the parts left on merge as they otherwise would. Changing these switches makes the next scan read everything again. An item marked unplayed loses its last played date even with **Last played date** off, since clearing the date is how Jellyfin records the mark.
 
 ## Two Way History
 
-By default history flows one way. The source's watch state is merged with this server's and the result is written here only. With **Negotiate History** turned on for a library, the merged result is also written to the source, so a play, a resume position, or a favorite made on either server reaches the other. It is offered only for a Sync server, since Pull and Push servers only take history one way and have nothing to negotiate.
+By default history flows one way. The source's watch state is merged with this server's and the result is written here only. With **Negotiate history** turned on for a library, the merged result is also written to the source, so a play, a resume position, or a favorite made on either server reaches the other. It is offered only for a Sync server, since Pull and Push servers only take history one way and have nothing to negotiate.
 
 This needs Server Sync installed on the source too. This server calls the source's plugin at `/Sync/Peer/History` using the same key the other sync types use, and the source accepts the call when its **Whitelist** allows that key. The plugin adds no login of its own. An entry that holds a standard user's key negotiates only that user's history, and only once the source whitelists that user. See [Permissions](Permissions.md).
 
@@ -38,7 +38,7 @@ A change announced as it happens says which part changed. Playing covers played,
 
 ## Live Changes Between Servers
 
-When a server entry is set to **Push** or **Sync**, a change made here is announced to that server as it happens instead of waiting for the next scan. This server watches its own user data for plays, resume positions, and favorites, gathers the edits to one item into one notice once it has gone untouched for **Send Changes After (seconds)**, 60 by default, and queues a hint for every **Push** or **Sync** server whose mappings cover that user and that library. A hint says what changed and where, never the value. The other server runs Server Sync too, lists this server as **Pull** or **Sync**, and pulls the change from here through the same code the scan uses, including the negotiation above, so hints and scans cannot disagree.
+When a server entry is set to **Push** or **Sync**, a change made here is announced to that server as it happens instead of waiting for the next scan. This server watches its own user data for plays, resume positions, and favorites, gathers the edits to one item into one notice once it has gone untouched for **Send changes after (seconds)**, 60 by default, and queues a hint for every **Push** or **Sync** server whose mappings cover that user and that library. A hint says what changed and where, never the value. The other server runs Server Sync too, lists this server as **Pull** or **Sync**, and pulls the change from here through the same code the scan uses, including the negotiation above, so hints and scans cannot disagree.
 
 Hints are stored on both ends until the work is done. A server that is down, refuses the key, or lacks the plugin is retried with backoff and shown on the dashboard with the reason, and a hint the other server accepted but never finished is checked and sent again. A hint is given up only after the retry limits under **Settings > Processing**, and the scheduled **Sync Information** task still runs the full comparison as the safety net for anything the hints missed.
 

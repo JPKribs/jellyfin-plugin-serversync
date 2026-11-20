@@ -23,7 +23,7 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Services.MetadataSync;
 
 /// <summary>
-/// A metadata row is built only for an item this server holds inside the Library Filter, and a refresh replaces only the local side of the categories asked for.
+/// A metadata row is built only for an item this server holds inside the Library filter, and a refresh replaces only the local side of the categories asked for.
 /// </summary>
 public sealed class MetadataSyncTableServiceTests
 {
@@ -275,7 +275,7 @@ public sealed class MetadataSyncTableServiceTests
     }
 
     /// <summary>
-    /// An item the Library Filter leaves out builds no row, and a sibling that only shares its name's start does.
+    /// An item the Library filter leaves out builds no row, and a sibling that only shares its name's start does.
     /// True: filtered titles have no metadata rows, so the scan prunes any they had.
     /// False: metadata would sync for titles the operator filtered out, or a neighbor would be dropped.
     /// </summary>

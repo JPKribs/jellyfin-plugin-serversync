@@ -54,8 +54,8 @@ public static class PaginatedFetchUtility
     /// <param name="processItem">Handles one item.</param>
     /// <param name="libraryName">The library's name, for log entries.</param>
     /// <param name="sourceRootPath">The library's root folder on the source.</param>
-    /// <param name="filterMode">The Library Filter mode.</param>
-    /// <param name="filteredItems">The paths the Library Filter lists, or null.</param>
+    /// <param name="filterMode">The Library filter mode.</param>
+    /// <param name="filteredItems">The paths the Library filter lists, or null.</param>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="cancellationToken">Cancels the loop.</param>
     /// <param name="onItemProcessed">Called after each item, or null.</param>

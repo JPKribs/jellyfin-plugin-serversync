@@ -73,7 +73,7 @@ public class HistorySyncTableService
 
     /// <summary>
     /// Builds the history row for a source item under one user mapping and one library mapping.
-    /// Returns null when the item has no path, the Library Filter leaves it out, or the local user or local item is missing.
+    /// Returns null when the item has no path, the Library filter leaves it out, or the local user or local item is missing.
     /// </summary>
     /// <param name="userMapping">The user mapping the item is read under.</param>
     /// <param name="libraryMapping">The library mapping the item came through.</param>

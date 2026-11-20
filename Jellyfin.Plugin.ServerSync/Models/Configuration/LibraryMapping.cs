@@ -44,7 +44,7 @@ public class LibraryMapping
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the Library Filter mode, which allows everything, only the listed items, or all but the listed items.
+    /// Gets or sets the Library filter mode, which allows everything, only the listed items, or all but the listed items.
     /// </summary>
     public LibraryFilterMode FilterMode { get; set; } = LibraryFilterMode.AllowAll;
 
