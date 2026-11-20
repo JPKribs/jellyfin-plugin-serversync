@@ -14,6 +14,7 @@ Folders inside `Jellyfin.Plugin.ServerSync/` set the namespace, so a file in `Se
 | `Configuration/` | `PluginConfiguration` and the C# classes it is made of. |
 | `Web/` | The dashboard pages, as HTML, JS, and CSS, embedded by a wildcard. |
 | `Assets/` | The logo. |
+| `Localization/` | The plugin's own strings, one file per language. See [translations.md](translations.md). |
 | `Models/` | Data classes, records, and enums, in one subfolder per sync type. |
 | `Services/` | Stores, clients, merge services, links, the queue, and peers, in one subfolder per area. |
 | `Tasks/` | Scheduled tasks. |

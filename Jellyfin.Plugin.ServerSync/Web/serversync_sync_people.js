@@ -25,6 +25,19 @@ export function createPeopleSyncTableModule(ctx, kit) {
     var parseJsonSafe = kit.parseJsonSafe;
     var formatImageDisplay = kit.formatImageDisplay;
     var showObjectVersion = kit.showObjectVersion;
+    var t = ServerSyncShared.t;
+
+    // statusText
+    // Names a row status in the viewer's language, or Unknown when there is none.
+    //
+    // Inputs
+    // status [string]: The status the server sent, such as Synced.
+    //
+    // Output
+    // [string]: The status to show.
+    function statusText(status) {
+        return status ? kit.statusName(status) : t.tr('Unknown');
+    }
 
     var PeopleSyncTableModule = createSyncTableModule({
         name: 'People',
@@ -42,38 +55,50 @@ export function createPeopleSyncTableModule(ctx, kit) {
             refresh: { key: 'ServerSyncRefreshPeopleTable' },
             sync: { key: 'ServerSyncMissingPeople' }
         },
-        taskNoun: 'people',
-        singularNoun: 'Person',
-        nounOne: 'person',
-        nounMany: 'people',
-        failNoun: 'people',
-        searchPlaceholder: 'Search people',
-        emptyMessage: 'No people sync items found. Run a refresh to scan for people.',
+        messages: {
+            startRefreshFailed: 'ErrorStartPeopleRefresh',
+            startSyncFailed: 'ErrorStartPeopleSync',
+            ignoredOne: 'ToastPeopleIgnoredOne',
+            ignoredMany: 'ToastPeopleIgnoredMany',
+            queuedOne: 'ToastPeopleQueuedOne',
+            queuedMany: 'ToastPeopleQueuedMany',
+            ignoreFailed: 'ErrorIgnorePeople',
+            queueFailed: 'ErrorQueuePeople',
+            retryNone: 'ToastNoErroredPeople',
+            retriedOne: 'ToastErroredPeopleRetriedOne',
+            retriedMany: 'ToastErroredPeopleRetriedMany',
+            retriedUnknown: 'ToastErroredPeopleRetried',
+            retryFailed: 'ErrorRetryPeople',
+            statusUpdated: 'ToastPersonStatusUpdated',
+            statusFailed: 'ErrorPersonStatusUpdate'
+        },
+        searchPlaceholder: t.tr('PlaceholderSearchPeople'),
+        emptyMessage: t.tr('EmptyPeopleItems'),
         columns: function() {
             return [
                 {
                     key: 'person',
-                    label: 'Person',
+                    label: t.tr('Person'),
                     type: 'custom',
                     className: 'base-table-cell-with-thumb',
                     image: function(item) { return ServerSyncShared.proxyImage(item.SourcePersonId, false, item.ServerKey); },
                     render: function(item) {
-                        return renderRowInfo(item.PersonName || 'Unknown', null, item, item.Status, '');
+                        return renderRowInfo(item.PersonName || t.tr('Unknown'), null, item, item.Status, '');
                     }
                 },
                 {
                     key: 'changes',
-                    label: 'Changes',
+                    label: t.tr('ColumnChanges'),
                     type: 'custom',
                     className: 'serversync-details-cell',
                     render: function(item) {
                         var changes = [];
-                        if (item.HasChanges && item.HasMetadataChanges) changes.push('Metadata');
-                        if (item.HasChanges && item.HasImagesChanges) changes.push('Images');
+                        if (item.HasChanges && item.HasMetadataChanges) changes.push(t.tr('LabelMetadata'));
+                        if (item.HasChanges && item.HasImagesChanges) changes.push(t.tr('Images'));
                         return renderChangeBadges(changes);
                     }
                 },
-                { key: 'Status', label: 'Status', type: 'status' }
+                { key: 'Status', label: t.tr('HeaderStatus'), type: 'status' }
             ];
         },
         loadHealth: function() {
@@ -100,16 +125,16 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('PeopleItems/' + item.Id).then(function(detail) {
                     if (seq !== self._detailSeq) return;
                     if (!detail) {
-                        ServerSyncShared.syncStatus('Person not found.', true);
+                        ServerSyncShared.syncStatus(t.tr('ErrorPersonNotFound'), true);
                         return;
                     }
 
                     self.currentModalItem = detail;
 
-                    view.querySelector('#peopleSyncModalTitle').textContent = detail.PersonName || 'Unknown';
+                    view.querySelector('#peopleSyncModalTitle').textContent = detail.PersonName || t.tr('Unknown');
 
                     var statusBadge = view.querySelector('#peopleSyncModalStatusBadge');
-                    statusBadge.textContent = detail.Status || 'Unknown';
+                    statusBadge.textContent = statusText(detail.Status);
                     statusBadge.className = 'base-table-status-badge ' + (detail.Status || 'unknown');
 
                     if (detail.LastSyncTime) {
@@ -129,14 +154,14 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     }
 
                     var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail.ServerKey);
-                    var localServerName = ServerSyncShared.localServerName || 'Local';
+                    var localServerName = ServerSyncShared.localServerName || t.tr('ServerLocal');
                     view.querySelector('#peopleSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
                     view.querySelector('#peopleSyncModalSourceHeader').textContent = sourceServerName;
                     view.querySelector('#peopleSyncModalLocalHeader').textContent = localServerName;
 
                     var summaryHtml = '';
-                    summaryHtml += ServerSyncShared.badge(detail.HasMetadataChanges ? 'orange' : 'green', 'Metadata: ' + (detail.HasMetadataChanges ? 'Changes' : 'Synced'));
-                    summaryHtml += ServerSyncShared.badge(detail.HasImagesChanges ? 'orange' : 'green', 'Images: ' + (detail.HasImagesChanges ? 'Changes' : 'Synced'));
+                    summaryHtml += ServerSyncShared.badge(detail.HasMetadataChanges ? 'orange' : 'green', t.format(detail.HasMetadataChanges ? 'BadgeCategoryChanges' : 'BadgeCategorySynced', t.tr('LabelMetadata')));
+                    summaryHtml += ServerSyncShared.badge(detail.HasImagesChanges ? 'orange' : 'green', t.format(detail.HasImagesChanges ? 'BadgeCategoryChanges' : 'BadgeCategorySynced', t.tr('Images')));
                     view.querySelector('#peopleSyncModalChangesSummary').innerHTML = summaryHtml;
 
                     var tbody = view.querySelector('#peopleSyncModalTableBody');
@@ -145,18 +170,18 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     var sourceMetadata = parseJsonSafe(detail.SourceMetadataValue) || {};
                     var localMetadata = parseJsonSafe(detail.LocalMetadataValue) || {};
 
-                    self._addSectionHeader(tbody, 'Metadata');
+                    self._addSectionHeader(tbody, t.tr('LabelMetadata'));
 
                     var metadataFields = [
-                        { key: 'Name', label: 'Name' },
-                        { key: 'OriginalTitle', label: 'Original Title' },
-                        { key: 'ForcedSortName', label: 'Forced Sort Name' },
-                        { key: 'Overview', label: 'Overview', truncate: true },
-                        { key: 'PremiereDate', label: 'Birth Date', isDate: true },
-                        { key: 'EndDate', label: 'Death Date', isDate: true },
-                        { key: 'ProductionYear', label: 'Year' },
-                        { key: 'LockData', label: 'Lock Item' },
-                        { key: 'LockedFields', label: 'Locked Fields' }
+                        { key: 'Name', label: t.tr('Name') },
+                        { key: 'OriginalTitle', label: t.tr('FieldOriginalTitle') },
+                        { key: 'ForcedSortName', label: t.tr('FieldForcedSortName') },
+                        { key: 'Overview', label: t.tr('Overview'), truncate: true },
+                        { key: 'PremiereDate', label: t.tr('FieldBirthDate'), isDate: true },
+                        { key: 'EndDate', label: t.tr('FieldDeathDate'), isDate: true },
+                        { key: 'ProductionYear', label: t.tr('LabelYear') },
+                        { key: 'LockData', label: t.tr('FieldLockItem') },
+                        { key: 'LockedFields', label: t.tr('FieldLockedFields') }
                     ];
 
                     metadataFields.forEach(function(field) {
@@ -172,7 +197,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     var localTags = Array.isArray(localMetadata.Tags) ? localMetadata.Tags : [];
                     var tagsChanged = JSON.stringify(sourceTags.slice().sort()) !== JSON.stringify(localTags.slice().sort());
                     // The comparison cells are filled with textContent, so the values go in unescaped.
-                    self._addComparisonRow(tbody, 'Tags',
+                    self._addComparisonRow(tbody, t.tr('Tags'),
                         sourceTags.length > 0 ? sourceTags.join(', ') : '-',
                         localTags.length > 0 ? localTags.join(', ') : '-',
                         tagsChanged);
@@ -191,14 +216,14 @@ export function createPeopleSyncTableModule(ctx, kit) {
                             self._addComparisonRow(tbody, key, sv, lv, sv !== lv);
                         });
                     } else {
-                        self._addComparisonRow(tbody, 'Provider IDs', '-', '-', false);
+                        self._addComparisonRow(tbody, t.tr('FieldProviderIds'), '-', '-', false);
                     }
 
                     if (detail.HasMetadataChanges) {
                         self._addChangeDetailRow(tbody, detail.MetadataChangesDetail);
                     }
 
-                    self._addSectionHeader(tbody, 'Images');
+                    self._addSectionHeader(tbody, t.tr('Images'));
 
                     var sourceImages = parseJsonSafe(detail.SourceImagesValue);
                     var localImages = parseJsonSafe(detail.LocalImagesValue);
@@ -217,7 +242,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                                 sizeChanged);
                         });
                     } else {
-                        self._addComparisonRow(tbody, 'Images', '-', localImages ? 'Present' : '-', false);
+                        self._addComparisonRow(tbody, t.tr('Images'), '-', localImages ? t.tr('ImagePresent') : '-', false);
                     }
 
                     if (detail.HasImagesChanges) {
@@ -228,7 +253,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load person detail:', err);
-                    ServerSyncShared.syncStatus('Could not load the person details.', true);
+                    ServerSyncShared.syncStatus(t.tr('ErrorPersonDetailsLoad'), true);
                 });
             },
 
@@ -239,7 +264,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
                 cell.classList.add('serversync-note-cell');
-                cell.textContent = 'Changed: ' + text;
+                cell.textContent = t.format('NoteChanged', text);
                 row.appendChild(cell);
                 tbody.appendChild(row);
             },
@@ -270,7 +295,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 if (Array.isArray(val)) {
                     return val.length > 0 ? val.join(', ') : '-';
                 }
-                if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+                if (typeof val === 'boolean') return val ? t.tr('Yes') : t.tr('No');
                 if (typeof val === 'object') return JSON.stringify(val);
                 return String(val);
             },

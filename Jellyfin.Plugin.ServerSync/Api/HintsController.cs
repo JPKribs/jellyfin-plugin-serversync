@@ -113,12 +113,13 @@ public class HintsController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         var result = new PeerCheckResult();
+        var lang = RequestLanguage.Of(Request);
         var mode = string.Equals(request.Mode, "Sync", StringComparison.OrdinalIgnoreCase) ? ServerMode.Sync
             : string.Equals(request.Mode, "Push", StringComparison.OrdinalIgnoreCase) ? ServerMode.Push
             : ServerMode.Pull;
         if (string.IsNullOrWhiteSpace(request.ServerUrl) || string.IsNullOrWhiteSpace(request.ApiKey))
         {
-            result.Message = "Enter the Server URL and API Key.";
+            result.Message = Tr(lang, TranslationKeys.ErrorEnterUrlAndKey);
             return Ok(result);
         }
 
@@ -136,10 +137,10 @@ public class HintsController : ControllerBase
 
         using (client)
         {
-            var connection = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var connection = await client.TestConnectionAsync(lang, cancellationToken).ConfigureAwait(false);
             if (!connection.Success)
             {
-                result.Message = connection.Message ?? connection.ErrorMessage ?? "The server did not answer.";
+                result.Message = connection.Message ?? connection.ErrorMessage ?? Tr(lang, TranslationKeys.ErrorServerNoAnswer);
                 return Ok(result);
             }
 
@@ -153,13 +154,13 @@ public class HintsController : ControllerBase
             }
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
-                var (_, why) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
-                result.Message = $"Connected, but its Server Sync refused this call: {why}. Add this server or its user to the Whitelist there.";
+                var (_, why) = await client.CheckSyncAccessAsync(lang, cancellationToken).ConfigureAwait(false);
+                result.Message = Tr(lang, TranslationKeys.PeerCheckRefused, why);
                 return Ok(result);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                result.Message = $"Connected, but its Server Sync could not be reached: {ex.Message}";
+                result.Message = Tr(lang, TranslationKeys.PeerCheckUnreachable, ex.Message);
                 return Ok(result);
             }
 
@@ -168,8 +169,8 @@ public class HintsController : ControllerBase
                 return Limited(
                     result,
                     mode,
-                    "Connected. Server Sync is not installed there, so this server will pull on a schedule but changes will not arrive as they happen.",
-                    "Connected. Server Sync is not installed there, so it cannot take changes from this server. Install Server Sync there, or use Pull.");
+                    Tr(lang, TranslationKeys.PeerCheckNoPluginPull),
+                    Tr(lang, TranslationKeys.PeerCheckNoPluginOther));
             }
 
             result.HasPlugin = true;
@@ -178,19 +179,19 @@ public class HintsController : ControllerBase
             {
                 result.Severity = "error";
                 result.Incompatible = true;
-                result.Message = "Connected, but " + HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion) + ".";
+                result.Message = Tr(lang, TranslationKeys.PeerCheckIncompatible, HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion, lang));
                 return Ok(result);
             }
 
             var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - JPKribs.Jellyfin.Base.UtcTime.AsUtc(capabilities.ServerTime.Value)).Duration() : TimeSpan.Zero;
             result.ClockSkewSeconds = (int)Math.Round(skew.TotalSeconds);
             var skewNote = skew > HintProtocol.ClockSkewWarning
-                ? $" Its clock is about {FormatSkew(skew)} off from this server's, so edits made on both within that window may be settled the wrong way round. Put both servers on NTP."
+                ? " " + Tr(lang, TranslationKeys.PeerCheckClockSkew, FormatSkew(skew, lang))
                 : string.Empty;
 
             result.Accepts = capabilities.Accepts;
-            var acceptsNote = capabilities.Accepts.Count == 0 ? " Every module is off there, so it applies no changes from this server."
-                : $" It applies {JoinWords(capabilities.Accepts.Select(DescribeKind).ToList())} from this server. Other kinds are off there.";
+            var acceptsNote = " " + (capabilities.Accepts.Count == 0 ? Tr(lang, TranslationKeys.PeerCheckAcceptsNone)
+                : Tr(lang, TranslationKeys.PeerCheckAcceptsSome, JoinWords(capabilities.Accepts.Select(k => DescribeKind(k, lang)).ToList(), lang)));
 
             PeerLinkResponse? link;
             try
@@ -199,7 +200,7 @@ public class HintsController : ControllerBase
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                result.Message = $"Connected, but Server Sync there did not say whether it lists this server: {ex.Message}";
+                result.Message = Tr(lang, TranslationKeys.PeerCheckLinkUnknown, ex.Message);
                 return Ok(result);
             }
 
@@ -211,7 +212,7 @@ public class HintsController : ControllerBase
             result.PeerAccessLevel = link?.AccessLevel;
             result.PeerAccessUser = link?.AccessUser;
             result.PeerCanDownload = link?.CanDownload;
-            (result.Severity, result.Message, result.Headline) = Verdict(mode, link, capabilities.PluginVersion, result);
+            (result.Severity, result.Message, result.Headline) = Verdict(mode, link, capabilities.PluginVersion, result, lang);
 
             if (mode is not ServerMode.Pull || result.SendsToThisServer)
             {
@@ -222,16 +223,16 @@ public class HintsController : ControllerBase
 
             if (link is { Listed: true })
             {
-                result.Message += PeerAccessNote(link);
+                result.Message += PeerAccessNote(link, lang);
             }
 
             // A server that could not pair cannot prove itself, so its hints are refused.
             if (link is { Listed: true } && !result.Paired)
             {
-                AppendWarning(result, $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.");
+                AppendWarning(result, " " + Tr(lang, TranslationKeys.PeerCheckNotPaired, link.PairingError ?? Tr(lang, TranslationKeys.PeerCheckNoReason)));
             }
 
-            result.Details = Details(mode, link, capabilities, result, skew);
+            result.Details = Details(mode, link, capabilities, result, skew, lang);
             return Ok(result);
         }
     }
@@ -239,27 +240,39 @@ public class HintsController : ControllerBase
     /// <summary>
     /// Builds the verdict for the chosen Direction, given how the peer lists this server.
     /// </summary>
-    private static (string Severity, string Message, string Headline) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result)
+    private static (string Severity, string Message, string Headline) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result, string? lang)
     {
         var listing = link is { Listed: true }
-            ? $"lists this server as {link.Mode}{(link.Enabled ? string.Empty : ", disabled")}"
-            : "does not list this server";
+            ? Tr(lang, link.Enabled ? TranslationKeys.PeerListsAs : TranslationKeys.PeerListsAsDisabled, ModeName(link.Mode, lang))
+            : Tr(lang, TranslationKeys.PeerNotListed);
         return mode switch
         {
-            ServerMode.Pull when result.SendsToThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so this server will pull on a schedule and changes will also arrive as they happen.", "Ready. This server pulls on a schedule, and changes also arrive as they happen."),
-            ServerMode.Pull => ("warn", $"Server Sync {version} there {listing}. This server will pull on a schedule, but changes will not arrive as they happen until that server lists this one as Push or Sync.", "Ready on a schedule. Changes do not arrive as they happen."),
-            ServerMode.Push when result.ListsThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so it will pull the changes this server announces.", "Ready. That server pulls the changes this server announces."),
-            ServerMode.Push => ("error", $"Server Sync {version} there {listing}. Push needs that server to list this one as Pull or Sync, enabled, with a URL and key.", "Not ready. That server must list this one as Pull or Sync."),
+            ServerMode.Pull when result.SendsToThisServer => ("ok", Tr(lang, TranslationKeys.VerdictPullLive, version, listing), Tr(lang, TranslationKeys.HeadlinePullLive)),
+            ServerMode.Pull => ("warn", Tr(lang, TranslationKeys.VerdictPullScheduled, version, listing), Tr(lang, TranslationKeys.HeadlinePullScheduled)),
+            ServerMode.Push when result.ListsThisServer => ("ok", Tr(lang, TranslationKeys.VerdictPushReady, version, listing), Tr(lang, TranslationKeys.HeadlinePushReady)),
+            ServerMode.Push => ("error", Tr(lang, TranslationKeys.VerdictPushNotReady, version, listing), Tr(lang, TranslationKeys.HeadlinePushNotReady)),
             _ when link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase)
-                => ("ok", $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen.", "Ready. Changes travel both ways as they happen."),
-            _ => ("error", $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.", "Not ready. That server must list this one as Sync.")
+                => ("ok", Tr(lang, TranslationKeys.VerdictSyncReady, version), Tr(lang, TranslationKeys.HeadlineSyncReady)),
+            _ => ("error", Tr(lang, TranslationKeys.VerdictSyncNotReady, version, listing), Tr(lang, TranslationKeys.HeadlineSyncNotReady))
         };
     }
+
+    /// <summary>Names a Direction, such as Pull, in the reader's language. A name that is not a Direction is kept.</summary>
+    private static string ModeName(string? mode, string? lang) => mode?.ToUpperInvariant() switch
+    {
+        "PULL" => Tr(lang, TranslationKeys.ModePull),
+        "PUSH" => Tr(lang, TranslationKeys.ModePush),
+        "SYNC" => Tr(lang, TranslationKeys.TabSync),
+        _ => mode ?? string.Empty
+    };
+
+    /// <summary>Gets a string in a language and fills its placeholders.</summary>
+    private static string Tr(string? lang, string key, params object?[] args) => BaseTranslations.Format(key, lang, args);
 
     /// <summary>
     /// Builds the verdict as lines with badges, covering how the other server lists this one, which way changes travel, what it applies, and its access here.
     /// </summary>
-    private static List<PeerCheckDetail> Details(ServerMode mode, PeerLinkResponse? link, PeerCapabilities capabilities, PeerCheckResult result, TimeSpan skew)
+    private static List<PeerCheckDetail> Details(ServerMode mode, PeerLinkResponse? link, PeerCapabilities capabilities, PeerCheckResult result, TimeSpan skew, string? lang)
     {
         var rows = new List<PeerCheckDetail>();
         var listed = link is { Listed: true };
@@ -270,15 +283,15 @@ public class HintsController : ControllerBase
             ServerMode.Sync => link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase),
             _ => result.SendsToThisServer
         };
-        var wanted = mode switch { ServerMode.Push => "Pull or Sync", ServerMode.Sync => "Sync", _ => "Push or Sync" };
+        var wanted = mode switch { ServerMode.Push => Tr(lang, TranslationKeys.ModePullOrSync), ServerMode.Sync => Tr(lang, TranslationKeys.TabSync), _ => Tr(lang, TranslationKeys.ModePushOrSync) };
         rows.Add(new PeerCheckDetail
         {
-            Title = "Its entry for this server",
-            Text = !listed ? $"This server is not on its Servers tab. Add it there as {wanted}."
-                : link!.Enabled == false ? "Its entry for this server is switched off."
-                : listedRight ? $"Server Sync {capabilities.PluginVersion} there has this server on its Servers tab."
-                : $"{mode} here needs it to be {wanted} there.",
-            Badge = !listed ? "Not listed" : link!.Enabled ? link.Mode ?? "Listed" : "Disabled",
+            Title = Tr(lang, TranslationKeys.DetailEntryTitle),
+            Text = !listed ? Tr(lang, TranslationKeys.DetailNotOnServersTab, wanted)
+                : link!.Enabled == false ? Tr(lang, TranslationKeys.DetailEntryOff)
+                : listedRight ? Tr(lang, TranslationKeys.DetailListedRight, capabilities.PluginVersion)
+                : Tr(lang, TranslationKeys.DetailNeedsMode, ModeName(mode.ToString(), lang), wanted),
+            Badge = !listed ? Tr(lang, TranslationKeys.BadgeNotListed) : link!.Enabled ? (link.Mode is null ? Tr(lang, TranslationKeys.BadgeListed) : ModeName(link.Mode, lang)) : Tr(lang, TranslationKeys.Disabled),
             State = listedRight ? "ok" : needsListing ? "no" : "limited"
         });
 
@@ -287,9 +300,9 @@ public class HintsController : ControllerBase
             var pulls = result.ListsThisServer;
             rows.Add(new PeerCheckDetail
             {
-                Title = "Changes made here",
-                Text = pulls ? "It pulls what this server announces, as it happens." : "Nothing is sent until it lists this server as Pull or Sync.",
-                Badge = pulls ? "Live" : "Not sent",
+                Title = Tr(lang, TranslationKeys.DetailChangesHere),
+                Text = pulls ? Tr(lang, TranslationKeys.DetailPullsAnnounced) : Tr(lang, TranslationKeys.DetailNothingSent),
+                Badge = pulls ? Tr(lang, TranslationKeys.Live) : Tr(lang, TranslationKeys.BadgeNotSent),
                 State = pulls ? "ok" : "no"
             });
         }
@@ -299,9 +312,9 @@ public class HintsController : ControllerBase
             var live = result.SendsToThisServer;
             rows.Add(new PeerCheckDetail
             {
-                Title = "Changes made there",
-                Text = live ? "Pulled on a schedule, and announced to this server as they happen." : "Pulled on a schedule. They arrive as they happen once it lists this server as Push or Sync.",
-                Badge = live ? "Live" : "Scheduled",
+                Title = Tr(lang, TranslationKeys.DetailChangesThere),
+                Text = live ? Tr(lang, TranslationKeys.DetailPulledAndAnnounced) : Tr(lang, TranslationKeys.DetailPulledOnSchedule),
+                Badge = live ? Tr(lang, TranslationKeys.Live) : Tr(lang, TranslationKeys.ColumnScheduled),
                 State = live ? "ok" : mode is ServerMode.Sync ? "no" : "limited"
             });
         }
@@ -309,15 +322,15 @@ public class HintsController : ControllerBase
         if (mode is not ServerMode.Pull || result.SendsToThisServer)
         {
             var kinds = Enum.GetNames<HintKind>();
-            var on = kinds.Where(k => capabilities.Accepts.Contains(k, StringComparer.OrdinalIgnoreCase)).Select(DescribeKind).ToList();
-            var off = kinds.Where(k => !capabilities.Accepts.Contains(k, StringComparer.OrdinalIgnoreCase)).Select(DescribeKind).ToList();
+            var on = kinds.Where(k => capabilities.Accepts.Contains(k, StringComparer.OrdinalIgnoreCase)).Select(k => DescribeKind(k, lang)).ToList();
+            var off = kinds.Where(k => !capabilities.Accepts.Contains(k, StringComparer.OrdinalIgnoreCase)).Select(k => DescribeKind(k, lang)).ToList();
             rows.Add(new PeerCheckDetail
             {
-                Title = "What it applies from this server",
-                Text = on.Count == 0 ? "Every module is off there, so it applies no changes from this server."
-                    : off.Count == 0 ? Sentence(JoinWords(on)) + "."
-                    : $"{Sentence(JoinWords(on))}. Off there: {JoinWords(off)}.",
-                Badge = on.Count == kinds.Length ? "Everything" : on.Count == 0 ? "Nothing" : $"{on.Count} of {kinds.Length}",
+                Title = Tr(lang, TranslationKeys.DetailApplies),
+                Text = on.Count == 0 ? Tr(lang, TranslationKeys.PeerCheckAcceptsNone)
+                    : off.Count == 0 ? Sentence(JoinWords(on, lang)) + "."
+                    : Tr(lang, TranslationKeys.DetailAppliesSome, Sentence(JoinWords(on, lang)), JoinWords(off, lang)),
+                Badge = on.Count == kinds.Length ? Tr(lang, TranslationKeys.BadgeEverything) : on.Count == 0 ? Tr(lang, TranslationKeys.BadgeNothing) : Tr(lang, TranslationKeys.BadgeCountOf, on.Count, kinds.Length),
                 State = on.Count == kinds.Length ? "ok" : on.Count == 0 ? "no" : "limited"
             });
         }
@@ -325,23 +338,23 @@ public class HintsController : ControllerBase
         if (listed && !string.IsNullOrEmpty(link!.AccessLevel))
         {
             var standard = string.Equals(link.AccessLevel, SourceServer.StandardUserAccess, StringComparison.OrdinalIgnoreCase);
-            var who = string.IsNullOrWhiteSpace(link.AccessUser) ? "a standard user" : link.AccessUser;
+            var who = string.IsNullOrWhiteSpace(link.AccessUser) ? Tr(lang, TranslationKeys.DetailStandardUser) : link.AccessUser;
             rows.Add(new PeerCheckDetail
             {
-                Title = "What it reads here",
+                Title = Tr(lang, TranslationKeys.DetailReads),
                 Text = standard
-                    ? $"It signs in as {who}, so it reads only the libraries that user can see, and only that user's watch history, settings, and playlists."
-                    : "Every library and every user.",
-                Badge = standard ? "Standard user" : "Administrator",
+                    ? Tr(lang, TranslationKeys.DetailSignsInAs, who)
+                    : Tr(lang, TranslationKeys.DetailEveryLibrary),
+                Badge = standard ? Tr(lang, TranslationKeys.BadgeStandardUser) : Tr(lang, TranslationKeys.BadgeAdministrator),
                 State = standard ? "limited" : "ok"
             });
             if (link.CanDownload == false)
             {
                 rows.Add(new PeerCheckDetail
                 {
-                    Title = "File downloads from here",
-                    Text = "The account it signs in with may not download media here, so no files are copied to it.",
-                    Badge = "Blocked",
+                    Title = Tr(lang, TranslationKeys.DetailDownloads),
+                    Text = Tr(lang, TranslationKeys.DetailDownloadsBlocked),
+                    Badge = Tr(lang, TranslationKeys.BadgeBlocked),
                     State = "no"
                 });
             }
@@ -351,9 +364,9 @@ public class HintsController : ControllerBase
         {
             rows.Add(new PeerCheckDetail
             {
-                Title = "What it reads here",
-                Text = "Not known yet. It has not tested its connection to this server. Run Test Connection on its entry for this server.",
-                Badge = "Unknown",
+                Title = Tr(lang, TranslationKeys.DetailReads),
+                Text = Tr(lang, TranslationKeys.DetailReadsUnknown),
+                Badge = Tr(lang, TranslationKeys.Unknown),
                 State = "none"
             });
         }
@@ -362,10 +375,10 @@ public class HintsController : ControllerBase
         {
             rows.Add(new PeerCheckDetail
             {
-                Title = "Pairing",
-                Text = result.Paired ? "The two servers have proved themselves to each other."
-                    : $"It could not pair with this server: {link!.PairingError ?? "no reason was given"}. Until it can, changes between the two are refused.",
-                Badge = result.Paired ? "Paired" : "Not paired",
+                Title = Tr(lang, TranslationKeys.DetailPairing),
+                Text = result.Paired ? Tr(lang, TranslationKeys.DetailPaired)
+                    : Tr(lang, TranslationKeys.DetailNotPaired, link!.PairingError ?? Tr(lang, TranslationKeys.PeerCheckNoReason)),
+                Badge = result.Paired ? Tr(lang, TranslationKeys.BadgePaired) : Tr(lang, TranslationKeys.BadgeNotPaired),
                 State = result.Paired ? "ok" : "no"
             });
         }
@@ -374,9 +387,9 @@ public class HintsController : ControllerBase
         {
             rows.Add(new PeerCheckDetail
             {
-                Title = "Clocks",
-                Text = "Edits made on both servers within that window may be settled the wrong way round. Put both servers on NTP.",
-                Badge = FormatSkew(skew) + " apart",
+                Title = Tr(lang, TranslationKeys.DetailClocks),
+                Text = Tr(lang, TranslationKeys.DetailClocksText),
+                Badge = Tr(lang, TranslationKeys.BadgeApart, FormatSkew(skew, lang)),
                 State = "limited"
             });
         }
@@ -388,19 +401,19 @@ public class HintsController : ControllerBase
     private static string Sentence(string words) => words.Length == 0 ? words : char.ToUpperInvariant(words[0]) + words[1..];
 
     /// <summary>Describes the access the peer's key holds on this server.</summary>
-    private static string PeerAccessNote(PeerLinkResponse link)
+    private static string PeerAccessNote(PeerLinkResponse link, string? lang)
     {
         if (string.Equals(link.AccessLevel, SourceServer.StandardUserAccess, StringComparison.OrdinalIgnoreCase))
         {
-            var who = string.IsNullOrWhiteSpace(link.AccessUser) ? "a standard user" : "the standard user " + link.AccessUser;
-            var files = link.CanDownload == false ? " That user may not download media here, so no files are copied to it." : string.Empty;
-            return $" It pulls from this server as {who}, so it only reads the libraries that user can see here, and only that user's watch history, settings, and playlists.{files}";
+            var who = string.IsNullOrWhiteSpace(link.AccessUser) ? Tr(lang, TranslationKeys.DetailStandardUser) : Tr(lang, TranslationKeys.AccessTheStandardUser, link.AccessUser);
+            var files = link.CanDownload == false ? " " + Tr(lang, TranslationKeys.AccessNoDownloadUser) : string.Empty;
+            return " " + Tr(lang, TranslationKeys.AccessStandardUser, who) + files;
         }
 
         if (string.Equals(link.AccessLevel, SourceServer.AdministratorAccess, StringComparison.OrdinalIgnoreCase))
         {
-            var files = link.CanDownload == false ? " The account it signed in with may not download media here, so no files are copied to it." : string.Empty;
-            return " It pulls from this server with administrator access." + files;
+            var files = link.CanDownload == false ? " " + Tr(lang, TranslationKeys.AccessNoDownloadAccount) : string.Empty;
+            return " " + Tr(lang, TranslationKeys.AccessAdministrator) + files;
         }
 
         return string.Empty;
@@ -466,29 +479,40 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>Names a kind of hint in the reader's words.</summary>
-    private static string DescribeKind(string kind) => kind switch
+    private static string DescribeKind(string kind, string? lang) => kind switch
     {
-        "History" => "watch history",
-        "Users" => "user settings",
-        "Content" => "files",
-        "Playlists" => "playlists",
+        "History" => Tr(lang, TranslationKeys.KindWhatHistory),
+        "Users" => Tr(lang, TranslationKeys.KindWhatUsers),
+        "Content" => Tr(lang, TranslationKeys.KindFilesLower),
+        "Playlists" => Tr(lang, TranslationKeys.KindPlaylistsLower),
+        "Metadata" => Tr(lang, TranslationKeys.KindWhatMetadata),
+        "People" => Tr(lang, TranslationKeys.KindPeopleLower),
         _ => kind.ToLowerInvariant()
     };
 
     /// <summary>
     /// Joins words as a list in prose, with commas and a final "and".
     /// </summary>
-    private static string JoinWords(List<string> words) => words.Count switch
+    private static string JoinWords(List<string> words, string? lang) => words.Count switch
     {
         0 => string.Empty,
         1 => words[0],
-        2 => $"{words[0]} and {words[1]}",
-        _ => string.Join(", ", words.Take(words.Count - 1)) + ", and " + words[^1]
+        2 => Tr(lang, TranslationKeys.ListTwo, words[0], words[1]),
+        _ => Tr(lang, TranslationKeys.ListLast, string.Join(", ", words.Take(words.Count - 1)), words[^1])
     };
 
     /// <summary>Formats a clock difference in minutes, or seconds when under a minute.</summary>
-    private static string FormatSkew(TimeSpan skew)
-        => skew.TotalMinutes >= 1 ? ActivityText.Count((int)Math.Round(skew.TotalMinutes), "minute") : ActivityText.Count((int)Math.Round(skew.TotalSeconds), "second");
+    private static string FormatSkew(TimeSpan skew, string? lang)
+    {
+        if (skew.TotalMinutes >= 1)
+        {
+            var minutes = (int)Math.Round(skew.TotalMinutes);
+            return Tr(lang, minutes == 1 ? TranslationKeys.CountMinuteOne : TranslationKeys.CountMinuteMany, minutes);
+        }
+
+        var seconds = (int)Math.Round(skew.TotalSeconds);
+        return Tr(lang, seconds == 1 ? TranslationKeys.CountSecondOne : TranslationKeys.ValueSeconds, seconds);
+    }
 
     /// <summary>Returns both queues and the state of every peer.</summary>
     /// <returns>Both queues, the changes still gathering, and each peer's state.</returns>
@@ -501,7 +525,7 @@ public class HintsController : ControllerBase
         {
             Pending = _observer.PendingCount,
             Unmatched = _observer.UnmatchedCount,
-            LastUnmatched = _observer.LastUnmatched,
+            LastUnmatched = _observer.DescribeLastUnmatched(RequestLanguage.Of(Request)),
             Inbound = _inbound.GetRecent(OverviewRows).Select(InboundHintDto.From).ToList(),
             InboundCount = _inbound.Count(),
             InboundFailingCount = _inbound.CountFailing()
@@ -523,7 +547,7 @@ public class HintsController : ControllerBase
             overview.Gathering.Add(new GatheringDto
             {
                 Kind = change.Kind,
-                Change = HintActivityLog.Subject(change.Kind, item?.Path ?? change.RemovedPath, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N")),
+                Change = HintActivityLog.Subject(change.Kind, item?.Path ?? change.RemovedPath, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N"), RequestLanguage.Of(Request)),
                 Title = title,
                 Subtitle = subtitle,
                 ItemType = change.RemovedPath is not null ? HintProtocol.ContentRemoved : item?.GetType().Name,
@@ -609,7 +633,7 @@ public class HintsController : ControllerBase
         };
         if (key is null)
         {
-            return BadRequest("The ids for that kind are missing.");
+            return BadRequest(Tr(RequestLanguage.Of(Request), TranslationKeys.ErrorKindIdsMissing));
         }
 
         var version = _versions.Get(kind, key);

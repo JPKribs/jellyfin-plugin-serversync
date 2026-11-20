@@ -5,8 +5,8 @@
 import * as serverSyncModule from './configurationpage?name=serversync_shared.js';
 
 // TYPE_TITLES
-// The heading of each sync type's section, by the key the Statistics route answers with.
-var TYPE_TITLES = { Content: 'Content', History: 'History', Metadata: 'Metadata', People: 'People', User: 'Users' };
+// The string key of each sync type's heading, by the key the Statistics route answers with.
+var TYPE_TITLES = { Content: 'SyncTypeContent', History: 'SyncTypeHistory', Metadata: 'LabelMetadata', People: 'People', User: 'HeaderUsers' };
 
 // runLabel
 // Writes when a scan finished as a short label in the browser's own time: the time for a scan today, such
@@ -63,17 +63,18 @@ export function dayLabel(day) {
 //
 // Inputs
 // runs [object[]]: The scans, oldest first, each with FinishedAt, Added, Updated, and Removed.
+// t [object]: The strings handle that names the series.
 //
 // Output
 // [object]: labels and series for a Bar Chart.
-export function scanChartData(runs) {
+export function scanChartData(runs, t) {
     var list = runs || [];
     return {
         labels: list.map(function (run) { return runLabel(run.FinishedAt); }),
         series: [
-            { name: 'New', color: 'green', values: list.map(function (run) { return run.Added || 0; }) },
-            { name: 'Updated', color: 'blue', values: list.map(function (run) { return run.Updated || 0; }) },
-            { name: 'Removed', color: 'red', values: list.map(function (run) { return run.Removed || 0; }) }
+            { name: t.tr('New'), color: 'green', values: list.map(function (run) { return run.Added || 0; }) },
+            { name: t.tr('ChartUpdated'), color: 'blue', values: list.map(function (run) { return run.Updated || 0; }) },
+            { name: t.tr('ChartRemoved'), color: 'red', values: list.map(function (run) { return run.Removed || 0; }) }
         ]
     };
 }
@@ -83,17 +84,18 @@ export function scanChartData(runs) {
 //
 // Inputs
 // linkStreams [object]: Days, oldest first, and Servers, each with Name and the Streams of every day.
+// t [object]: The strings handle that names a server with no name.
 //
 // Output
 // [object]: labels and series for a Line Chart.
-export function streamChartData(linkStreams) {
+export function streamChartData(linkStreams, t) {
     var days = (linkStreams && linkStreams.Days) || [];
     var servers = (linkStreams && linkStreams.Servers) || [];
     return {
         labels: days.map(dayLabel),
         series: servers.map(function (server) {
             var streams = server.Streams || [];
-            return { name: server.Name || server.Key || 'Server', values: days.map(function (day, index) { return streams[index] || 0; }) };
+            return { name: server.Name || server.Key || t.tr('TabServer'), values: days.map(function (day, index) { return streams[index] || 0; }) };
         })
     };
 }
@@ -171,20 +173,20 @@ export default function (view) {
         if (heading) {
             var title = document.createElement('div');
             title.className = 'base-subsection-title';
-            title.textContent = 'Link Streams';
+            title.textContent = made.shared.t.tr('HeaderLinkStreams');
             content.appendChild(title);
         }
         var note = document.createElement('div');
         note.className = 'fieldDescription serversync-mb-md';
-        note.textContent = 'Streams this server started for each server that links to it, on each of the last 30 days.';
+        note.textContent = made.shared.t.tr('LinkStreamsDescription');
         content.appendChild(note);
-        var streams = streamChartData(linkStreams);
+        var streams = streamChartData(linkStreams, made.shared.t);
         addChart(content, serverSyncModule.createLineChart({
             labels: streams.labels,
             series: streams.series,
             max: countAxisMax(streams.series),
-            label: 'Link streams started each day',
-            emptyText: 'No link stream has started yet.'
+            label: made.shared.t.tr('ChartLinkStreamsLabel'),
+            emptyText: made.shared.t.tr('ChartLinkStreamsEmpty')
         }));
     }
 
@@ -203,19 +205,19 @@ export default function (view) {
         setVisible('statisticsIntro', types.length > 0);
         setVisible('statisticsDisabled', types.length === 0 && !linkStreams);
         types.forEach(function (type) {
-            var title = TYPE_TITLES[type.Key] || type.Key;
+            var title = TYPE_TITLES[type.Key] ? made.shared.t.tr(TYPE_TITLES[type.Key]) : type.Key;
             var content = addSection(title);
-            var scans = scanChartData(type.Runs);
+            var scans = scanChartData(type.Runs, made.shared.t);
             addChart(content, serverSyncModule.createBarChart({
                 labels: scans.labels,
                 series: scans.series,
                 max: countAxisMax(scans.series),
-                label: title + ' items found by each of the last scans',
-                emptyText: 'No scan has finished yet.'
+                label: made.shared.t.format('ChartScansLabel', title),
+                emptyText: made.shared.t.tr('ChartScansEmpty')
             }));
             if (type.Key === 'Content' && linkStreams) addLinkStreams(content, linkStreams, true);
         });
-        if (linkStreams && !hasContent) addLinkStreams(addSection('Link Streams'), linkStreams, false);
+        if (linkStreams && !hasContent) addLinkStreams(addSection(made.shared.t.tr('HeaderLinkStreams')), linkStreams, false);
     }
 
     // loadStatistics
@@ -227,7 +229,7 @@ export default function (view) {
             clearCharts();
             setVisible('statisticsIntro', false);
             setVisible('statisticsDisabled', false);
-            if (status) status.textContent = 'The statistics could not be loaded.';
+            if (status) status.textContent = made.shared.t.tr('ErrorStatisticsLoad');
         });
     }
 }

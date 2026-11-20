@@ -12,13 +12,13 @@
                     <!-- Storage Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
-                        <h1 class="sectionTitle">Storage</h1>
+                        <h1 class="sectionTitle" data-str="TabStorage">Storage</h1>
                     </div>
-                    <div class="fieldDescription serversync-mb-md">Sets how each mapped library keeps its files, and which items it syncs. Libraries are mapped on the Servers tab.</div>
+                    <div class="fieldDescription serversync-mb-md" data-str="HelpStorage">Sets how each mapped library keeps its files, and which items it syncs. Libraries are mapped on the Servers tab.</div>
 
                     <div id="storageStatus" class="base-status-text" role="status"></div>
-                    <div id="storageDisabled" class="base-neutral serversync-mb-md hidden">Content, history, and metadata sync are off, so nothing here applies. Turn one on under Settings.</div>
-                    <div id="storageFiltersOnly" class="base-neutral serversync-mb-md hidden">Content sync is off, so only each library's filter and history setting apply here.</div>
+                    <div id="storageDisabled" class="base-neutral serversync-mb-md hidden" data-str="StorageAllOff">Content, history, and metadata sync are off, so nothing here applies. Turn one on under Settings.</div>
+                    <div id="storageFiltersOnly" class="base-neutral serversync-mb-md hidden" data-str="StorageFiltersOnly">Content sync is off, so only each library's filter and history setting apply here.</div>
 
                     <div id="storageContent" class="hidden">
 
@@ -27,7 +27,7 @@
 
                         <div id="storageUsageSection" class="base-collapsible-section fixed hidden">
                             <div class="base-collapsible-header">
-                                <span class="base-collapsible-title">Usage</span>
+                                <span class="base-collapsible-title" data-str="HeaderUsage">Usage</span>
                             </div>
                             <div class="base-collapsible-content">
                                 <div id="storageUsageMeter"></div>
@@ -37,17 +37,17 @@
                         <!-- Server picker -->
 
                         <div id="storageServerContainer" class="selectContainer">
-                            <label for="selStorageServer">Server</label>
+                            <label for="selStorageServer" data-str="TabServer">Server</label>
                             <select is="emby-select" id="selStorageServer" class="emby-select-withcolor emby-select"></select>
                         </div>
-                        <div id="storageNoServers" class="base-empty-section hidden">No server has library mappings yet. Map libraries on the Servers tab.</div>
+                        <div id="storageNoServers" class="base-empty-section hidden" data-str="EmptyStorageServers">No server has library mappings yet. Map libraries on the Servers tab.</div>
 
                         <!-- Files -->
                         <!-- Shows how many of the picked server's synced files are copies, links, and cached links. -->
 
                         <div id="storageFilesSection" class="base-collapsible-section fixed hidden">
                             <div class="base-collapsible-header">
-                                <span class="base-collapsible-title">Files</span>
+                                <span class="base-collapsible-title" data-str="HeaderFiles">Files</span>
                             </div>
                             <div class="base-collapsible-content">
                                 <div id="storageFilesChart"></div>
@@ -58,16 +58,16 @@
 
                         <div id="storageLibrariesSection" class="base-collapsible-section hidden">
                             <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="storageLibrariesContent">
-                                <span class="base-collapsible-title">Libraries</span>
+                                <span class="base-collapsible-title" data-str="HeaderLibraries">Libraries</span>
                                 <span class="base-collapsible-icon">&#9660;</span>
                             </button>
                             <div id="storageLibrariesContent" class="base-collapsible-content collapsed">
-                                <div class="fieldDescription serversync-mb-md">Shows one card for each enabled library mapping of this server.</div>
+                                <div class="fieldDescription serversync-mb-md" data-str="HelpStorageLibraries">Shows one card for each enabled library mapping of this server.</div>
                                 <div id="storageLibrariesContainer"></div>
-                                <div id="storageNoLibraries" class="base-empty-section hidden">This server has no enabled library mappings. Map libraries on the Servers tab.</div>
+                                <div id="storageNoLibraries" class="base-empty-section hidden" data-str="EmptyStorageLibraries">This server has no enabled library mappings. Map libraries on the Servers tab.</div>
                                 <div class="base-collapsible-actions flush">
                                     <button is="emby-button" type="button" id="btnSaveStorage" class="raised base-button primary small">
-                                        <span>Save</span>
+                                        <span data-str="Save">Save</span>
                                     </button>
                                     <span id="saveStorageStatus" class="base-status-text" role="status"></span>
                                 </div>
@@ -78,11 +78,11 @@
 
                         <div id="keptCopiesSection" class="base-collapsible-section hidden">
                             <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="keptCopiesContent">
-                                <span class="base-collapsible-title">Permanent Copies</span>
+                                <span class="base-collapsible-title" data-str="HeaderPermanentCopies">Permanent Copies</span>
                                 <span class="base-collapsible-icon">&#9660;</span>
                             </button>
                             <div id="keptCopiesContent" class="base-collapsible-content collapsed">
-                                <div class="fieldDescription serversync-mb-md">Lists the full copies in this server's Link libraries. Turning one back into a link moves the copy into the link cache.</div>
+                                <div class="fieldDescription serversync-mb-md" data-str="HelpPermanentCopies">Lists the full copies in this server's Link libraries. Turning one back into a link moves the copy into the link cache.</div>
                                 <div id="keptCopiesStatus" class="base-status-text serversync-mb-md" role="status"></div>
                                 <div id="keptCopiesTableContainer"></div>
                             </div>

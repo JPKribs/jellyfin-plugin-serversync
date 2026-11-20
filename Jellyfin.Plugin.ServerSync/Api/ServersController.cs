@@ -92,7 +92,7 @@ public class ServersController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            return BadRequest("A server key is required.");
+            return BadRequest(BaseTranslations.Get(TranslationKeys.ErrorServerKeyRequired, RequestLanguage.Of(Request)));
         }
 
         var links = 0;

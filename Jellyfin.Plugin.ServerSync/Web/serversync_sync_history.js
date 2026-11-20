@@ -22,6 +22,8 @@ export function createHistorySyncTableModule(ctx, kit) {
     var setHealthLastSync = kit.setHealthLastSync;
     var setHealthCount = kit.setHealthCount;
     var showObjectVersion = kit.showObjectVersion;
+    var statusName = kit.statusName;
+    var t = ServerSyncShared.t;
 
     var HistorySyncTableModule = createSyncTableModule({
         name: 'History',
@@ -37,53 +39,64 @@ export function createHistorySyncTableModule(ctx, kit) {
             refresh: { key: 'ServerSyncRefreshHistoryTable' },
             sync: { key: 'ServerSyncMissingHistory' }
         },
-        taskNoun: 'history',
-        singularNoun: 'Item',
-        nounOne: 'item',
-        nounMany: 'items',
-        retryOne: 'history item',
-        retryMany: 'history items',
-        failNoun: 'items',
+        messages: {
+            startRefreshFailed: 'MessageStartHistoryRefreshFailed',
+            startSyncFailed: 'MessageStartHistorySyncFailed',
+            ignoredOne: 'ToastItemsIgnoredOne',
+            ignoredMany: 'ToastItemsIgnoredMany',
+            queuedOne: 'ToastItemsQueuedOne',
+            queuedMany: 'ToastItemsQueuedMany',
+            ignoreFailed: 'ErrorIgnoreItems',
+            queueFailed: 'ErrorQueueItems',
+            retryNone: 'MessageNoErroredHistoryItems',
+            retriedOne: 'MessageErroredHistoryItemsRetriedOne',
+            retriedMany: 'MessageErroredHistoryItemsRetriedMany',
+            retriedUnknown: 'MessageErroredHistoryItemsRetried',
+            retryFailed: 'ErrorRetryHistoryItems',
+            statusUpdated: 'ToastItemStatusUpdated',
+            statusFailed: 'ErrorItemStatusUpdate'
+        },
         filterStatuses: ['Synced', 'Queued', 'Pending', 'Errored', 'Ignored'],
-        emptyMessage: 'No history items found. Run a refresh to scan for watch history.',
+        emptyMessage: t.tr('EmptyHistoryItems'),
         columns: function(self) {
             return [
                 {
                     key: 'name',
-                    label: 'Item',
+                    label: t.tr('ColumnItem'),
                     type: 'custom',
                     className: 'base-table-cell-with-thumb',
                     image: function(item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey); },
                     render: function(item) {
                         var userMapping = self.findUserMapping(item);
-                        var users = (userMapping ? userMapping.SourceUserName : 'Unknown') + ' → ' + (userMapping ? userMapping.LocalUserName : 'Unknown');
-                        return renderRowInfo(item.ItemName || 'Unknown', users, item, item.Status);
+                        var users = t.format('MappingArrow', userMapping ? userMapping.SourceUserName : t.tr('Unknown'), userMapping ? userMapping.LocalUserName : t.tr('Unknown'));
+                        return renderRowInfo(item.ItemName || t.tr('Unknown'), users, item, item.Status);
                     }
                 },
                 {
                     key: 'details',
-                    label: 'Changes',
+                    label: t.tr('ColumnChanges'),
                     type: 'custom',
                     className: 'serversync-details-cell',
                     render: function(item) {
                         if (!item.HasChanges) {
-                            return '<span class="base-badge gray">No Changes</span>';
+                            return '<span class="base-badge gray">' + ServerSyncShared.escapeHtml(t.tr('BadgeNoChanges')) + '</span>';
                         }
 
                         var details = [];
                         if (item.MergedIsPlayed !== item.LocalIsPlayed) {
-                            details.push('Played: ' + (item.MergedIsPlayed ? 'Yes' : 'No'));
+                            details.push(t.format('ChangePlayed', t.tr(item.MergedIsPlayed ? 'Yes' : 'No')));
                         }
                         if (item.MergedIsFavorite !== item.LocalIsFavorite) {
-                            details.push('Favorite: ' + (item.MergedIsFavorite ? 'Yes' : 'No'));
+                            details.push(t.format('ChangeFavorite', t.tr(item.MergedIsFavorite ? 'Yes' : 'No')));
                         }
                         if (item.MergedPlayCount !== item.LocalPlayCount) {
-                            details.push('Count: ' + (item.MergedPlayCount || 0));
+                            details.push(t.format('ChangeCount', item.MergedPlayCount || 0));
                         }
-                        return ServerSyncShared.escapeHtml(details.join(', ') || 'Changes pending');
+                        var joined = details.reduce(function(text, part) { return text ? t.format('ListSeparator', text, part) : part; }, '');
+                        return ServerSyncShared.escapeHtml(joined || t.tr('MessageChangesPending'));
                     }
                 },
-                { key: 'Status', label: 'Status', type: 'status' }
+                { key: 'Status', label: t.tr('HeaderStatus'), type: 'status' }
             ];
         },
         loadHealth: function() {
@@ -110,15 +123,15 @@ export function createHistorySyncTableModule(ctx, kit) {
 
                 self.currentModalItem = item;
 
-                view.querySelector('#historyModalTitle').textContent = item.ItemName || 'Unknown';
+                view.querySelector('#historyModalTitle').textContent = item.ItemName || t.tr('Unknown');
 
                 var statusBadge = view.querySelector('#historyModalStatusBadge');
-                statusBadge.textContent = item.Status;
+                statusBadge.textContent = statusName(item.Status);
                 statusBadge.className = 'base-table-status-badge ' + item.Status;
 
                 var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
-                var localServerName = ServerSyncShared.localServerName || 'Local';
-                view.querySelector('#historyModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
+                var localServerName = ServerSyncShared.localServerName || t.tr('ServerLocal');
+                view.querySelector('#historyModalServerMapping').textContent = t.format('MappingArrow', sourceServerName, localServerName);
 
                 if (item.LastSyncTime) {
                     view.querySelector('#historyModalLastSync').textContent =
@@ -137,8 +150,8 @@ export function createHistorySyncTableModule(ctx, kit) {
                 }
 
                 var userMapping = self.findUserMapping(item);
-                var sourceUserName = userMapping ? userMapping.SourceUserName : 'Unknown';
-                var localUserName = userMapping ? userMapping.LocalUserName : 'Unknown';
+                var sourceUserName = userMapping ? userMapping.SourceUserName : t.tr('Unknown');
+                var localUserName = userMapping ? userMapping.LocalUserName : t.tr('Unknown');
 
                 view.querySelector('#historyModalSourceUserName').textContent = sourceUserName;
                 view.querySelector('#historyModalSourceUserId').textContent = item.SourceUserId || '';
@@ -185,9 +198,9 @@ export function createHistorySyncTableModule(ctx, kit) {
                     case 'bool':
                     case 'favorite':
                         if (value === true) {
-                            text = 'Yes';
+                            text = t.tr('Yes');
                         } else if (value === false) {
-                            text = 'No';
+                            text = t.tr('No');
                         }
                         break;
                     case 'number':

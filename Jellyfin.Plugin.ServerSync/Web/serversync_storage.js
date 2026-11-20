@@ -20,6 +20,31 @@ export default function (view) {
     // Helpers called by bare name, taken from the shared bag.
     var escapeHtml, apiRequest, setVisible, bindClick, getEl;
 
+    // tr
+    // Reads one of the plugin's strings in the viewer's language.
+    //
+    // Inputs
+    // key [string]: The string's key.
+    //
+    // Output
+    // [string]: The text.
+    function tr(key) {
+        return ServerSyncShared.t.tr(key);
+    }
+
+    // format
+    // Reads one of the plugin's strings and fills its {0}, {1} placeholders.
+    //
+    // Inputs
+    // key [string]: The string's key.
+    // ...args [any]: The values for the placeholders.
+    //
+    // Output
+    // [string]: The text.
+    function format() {
+        return ServerSyncShared.t.format.apply(null, arguments);
+    }
+
     // Base runs bindPage once and loadConfig each time the page shows, and sets the tabs.
     var made = serverSyncModule.createServerSyncPage(view, { page: 'serversync_storage', alwaysStorage: true, bind: function () { bindPage(); }, load: function () { loadConfig(); }, onHide: function () { hidePage(); } });
     ServerSyncShared = made.shared;
@@ -105,7 +130,7 @@ export default function (view) {
             list.forEach(function (server) {
                 var option = document.createElement('option');
                 option.value = server.Key;
-                option.textContent = ServerSyncShared.serverDisplayName(server) + (server.IsEnabled === false ? ' (disabled)' : '');
+                option.textContent = server.IsEnabled === false ? format('OptionServerDisabled', ServerSyncShared.serverDisplayName(server)) : ServerSyncShared.serverDisplayName(server);
                 select.appendChild(option);
             });
             select.value = selectedKey;
@@ -167,70 +192,70 @@ export default function (view) {
         div.className = 'serversync-library-card';
         var filterTableId = 'storageFilterTable_' + (++_tableSeq);
         var permanentTableId = 'storagePermanentTable_' + _tableSeq;
-        var sourceName = mapping.SourceLibraryName || mapping.SourceLibraryId || 'Source library';
-        var localName = mapping.LocalLibraryName || mapping.LocalLibraryId || 'Local library';
+        var sourceName = mapping.SourceLibraryName || mapping.SourceLibraryId || tr('LabelSourceLibraryFallback');
+        var localName = mapping.LocalLibraryName || mapping.LocalLibraryId || tr('LabelLocalLibraryFallback');
         div.innerHTML =
             '<div class="serversync-library-card-header">' +
                 '<span class="serversync-library-card-icon material-icons" aria-hidden="true">video_library</span>' +
-                '<div class="serversync-library-card-route" title="' + escapeHtml(sourceName + ' to ' + localName) + '">' +
+                '<div class="serversync-library-card-route" title="' + escapeHtml(format('LibraryRoute', sourceName, localName)) + '">' +
                     '<div class="serversync-library-card-end">' +
-                        '<span class="serversync-library-card-label">From</span>' +
+                        '<span class="serversync-library-card-label">' + escapeHtml(tr('LabelFrom')) + '</span>' +
                         '<span class="serversync-library-card-name">' + escapeHtml(sourceName) + '</span>' +
                     '</div>' +
                     '<span class="serversync-library-card-arrow material-icons" aria-hidden="true">arrow_forward</span>' +
                     '<div class="serversync-library-card-end">' +
-                        '<span class="serversync-library-card-label">To</span>' +
+                        '<span class="serversync-library-card-label">' + escapeHtml(tr('LabelTo')) + '</span>' +
                         '<span class="serversync-library-card-name">' + escapeHtml(localName) + '</span>' +
                     '</div>' +
                 '</div>' +
                 '<span class="base-badge gray serversync-storage-mode-badge"></span>' +
             '</div>' +
             '<div class="selectContainer serversync-storage-mode-block">' +
-                '<label>Storage</label>' +
+                '<label>' + escapeHtml(tr('TabStorage')) + '</label>' +
                 '<select is="emby-select" class="serversync-storage-mode-select">' +
-                    '<option value="Copy">Copy</option>' +
-                    '<option value="Link">Link</option>' +
+                    '<option value="Copy">' + escapeHtml(tr('Copy')) + '</option>' +
+                    '<option value="Link">' + escapeHtml(tr('StorageModeLink')) + '</option>' +
                 '</select>' +
-                '<div class="fieldDescription">Copy downloads each file and follows that server, so a file it removes is handled by Removed files here. Link writes a .strm that streams from any server that holds the file and allows linking, and goes only when none holds it.</div>' +
+                '<div class="fieldDescription">' + escapeHtml(tr('HelpStorageMode')) + '</div>' +
             '</div>' +
             '<div class="serversync-link-cache-section hidden">' +
-                '<h3 class="base-subsection-title">Link Cache</h3>' +
+                '<h3 class="base-subsection-title">' + escapeHtml(tr('HeaderLinkCache')) + '</h3>' +
                 '<div class="checkboxContainer checkboxContainer-withDescription">' +
-                    '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-cache-links" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
-                    '<div class="fieldDescription checkboxFieldDescription">Cache played links and upcoming episodes. The cache is set up under Settings &gt; Content.</div>' +
+                    '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-cache-links" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">' + escapeHtml(tr('LabelCacheLibraryLinks')) + '</span></label>' +
+                    '<div class="fieldDescription checkboxFieldDescription">' + escapeHtml(tr('HelpCacheLibraryLinks')) + '</div>' +
                 '</div>' +
             '</div>' +
             '<div class="serversync-permanent-section hidden">' +
-                '<h3 class="base-subsection-title">Always Keep</h3>' +
-                '<div class="fieldDescription serversync-mb-md">Picked shows and films, every version included, are full copies here instead of links. Removing a pick turns them back into links on the next sync.</div>' +
+                '<h3 class="base-subsection-title">' + escapeHtml(tr('HeaderAlwaysKeep')) + '</h3>' +
+                '<div class="fieldDescription serversync-mb-md">' + escapeHtml(tr('HelpAlwaysKeep')) + '</div>' +
                 '<div class="serversync-filter-table-container" id="' + permanentTableId + '"></div>' +
             '</div>' +
             '<div class="serversync-filter-section">' +
-                '<h3 class="base-subsection-title">Library Filter</h3>' +
+                '<h3 class="base-subsection-title">' + escapeHtml(tr('HeaderLibraryFilter')) + '</h3>' +
                 '<div class="selectContainer">' +
-                    '<label>Filter Mode</label>' +
+                    '<label>' + escapeHtml(tr('LabelFilterMode')) + '</label>' +
                     '<select is="emby-select" class="serversync-filter-mode-select">' +
-                        '<option value="AllowAll">Allow All</option>' +
-                        '<option value="Whitelist">Whitelist</option>' +
-                        '<option value="Blacklist">Blacklist</option>' +
+                        '<option value="AllowAll">' + escapeHtml(tr('AllowEmbeddedSubtitlesAllowAllOption')) + '</option>' +
+                        '<option value="Whitelist">' + escapeHtml(tr('Whitelist')) + '</option>' +
+                        '<option value="Blacklist">' + escapeHtml(tr('Blacklist')) + '</option>' +
                     '</select>' +
-                    '<div class="fieldDescription">Allow All syncs everything. Whitelist syncs only what is picked. Blacklist syncs everything but what is picked.</div>' +
+                    '<div class="fieldDescription">' + escapeHtml(tr('HelpFilterMode')) + '</div>' +
                 '</div>' +
                 '<div class="serversync-filter-browser-container hidden">' +
                     '<div class="serversync-filter-pills serversync-filter-browse-toggle">' +
-                        '<button type="button" class="serversync-filter-pill serversync-on" data-browse="items">Files</button>' +
-                        '<button type="button" class="serversync-filter-pill" data-browse="collections">Collections</button>' +
-                        '<button type="button" class="serversync-filter-pill" data-browse="playlists">Playlists</button>' +
+                        '<button type="button" class="serversync-filter-pill serversync-on" data-browse="items">' + escapeHtml(tr('HeaderFiles')) + '</button>' +
+                        '<button type="button" class="serversync-filter-pill" data-browse="collections">' + escapeHtml(tr('Collections')) + '</button>' +
+                        '<button type="button" class="serversync-filter-pill" data-browse="playlists">' + escapeHtml(tr('Playlists')) + '</button>' +
                     '</div>' +
                     '<div class="serversync-filter-table-container" id="' + filterTableId + '"></div>' +
                 '</div>' +
             '</div>' +
             (negotiable
                 ? '<div class="serversync-history-section">' +
-                    '<h3 class="base-subsection-title">History</h3>' +
+                    '<h3 class="base-subsection-title">' + escapeHtml(tr('SyncTypeHistory')) + '</h3>' +
                     '<div class="checkboxContainer checkboxContainer-withDescription">' +
-                        '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-negotiate-history" ' + (mapping.NegotiateHistory ? 'checked' : '') + ' /><span class="checkboxLabel">Negotiate History</span></label>' +
-                        '<div class="fieldDescription checkboxFieldDescription">Write merged watch history back to that server too.</div>' +
+                        '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-negotiate-history" ' + (mapping.NegotiateHistory ? 'checked' : '') + ' /><span class="checkboxLabel">' + escapeHtml(tr('LabelNegotiateHistory')) + '</span></label>' +
+                        '<div class="fieldDescription checkboxFieldDescription">' + escapeHtml(tr('HelpNegotiateHistory')) + '</div>' +
                     '</div>' +
                   '</div>'
                 : '');
@@ -309,9 +334,9 @@ export default function (view) {
                 containerId: containerId,
                 endpoint: 'SourceLibraryItems',
                 pagination: { pageSize: 50, loadMore: true },
-                search: { enabled: true, placeholder: 'Search items' },
+                search: { enabled: true, placeholder: tr('PlaceholderSearchItems') },
                 selection: { enabled: false, idKey: 'Id' },
-                emptyState: { message: 'No items found.' },
+                emptyState: { message: tr('EmptyItemsFound') },
                 filters: { buildParams: function () { var mode = browse(); return { libraryId: libraryId, serverKey: serverKey, collections: mode === 'collections', playlists: mode === 'playlists' }; } },
                 columns: [{ key: 'Id', type: 'custom', render: function (item) { return renderPickerItem(item, selected); } }],
                 rowClass: function (item) { return selected[item.Id] ? 'selected' : ''; },
@@ -336,7 +361,7 @@ export default function (view) {
             var linked = storageModeSelect.value === 'Link';
             var badge = div.querySelector('.serversync-storage-mode-badge');
             if (badge) {
-                badge.textContent = linked ? 'Link' : 'Copy';
+                badge.textContent = linked ? tr('StorageModeLink') : tr('Copy');
                 badge.classList.toggle('blue', linked);
                 badge.classList.toggle('gray', !linked);
             }
@@ -411,11 +436,11 @@ export default function (view) {
                 }
                 Object.keys(edit.values).forEach(function (field) { target[field] = edit.values[field]; });
             });
-        }, 'saveStorageStatus', 'Storage saved.', 'Could not save the storage.').then(function (saved) {
+        }, 'saveStorageStatus', tr('ToastStorageSaved'), tr('ErrorSaveStorage')).then(function (saved) {
             if (!saved) return;
             currentConfig = saved;
             if (missing > 0) {
-                ServerSyncShared.setStatus('saveStorageStatus', ServerSyncShared.plural(missing, 'library mapping', 'library mappings') + ' changed on the Servers tab meanwhile and ' + (missing === 1 ? 'was' : 'were') + ' not saved. The cards were reloaded.', true, { timeout: 10000 });
+                ServerSyncShared.setStatus('saveStorageStatus', ServerSyncShared.plural(missing, 'ErrorMappingsChangedOne', 'ErrorMappingsChangedMany'), true, { timeout: 10000 });
                 renderServerPicker();
                 renderLibraries();
             }
@@ -425,11 +450,12 @@ export default function (view) {
 
     var keptTable = null;
     var keptRows = {};
+    // The badge of each reason a copy is kept, with the keys of its label and its title.
     var KEPT_BADGES = {
-        Pick: { label: 'Always Keep', cls: 'blue', title: 'Copied because of an Always Keep pick.' },
-        Hand: { label: 'Kept by Hand', cls: 'purple', title: 'Downloaded by hand with Download.' },
-        Own: { label: 'Already Here', cls: 'green', title: 'On this server before it was matched to that server\'s file. It stays when that server removes its file.' },
-        Unknown: { label: 'Earlier Copy', cls: 'gray', title: 'A copy from before Server Sync recorded why it is a copy.' }
+        Pick: { label: 'HeaderAlwaysKeep', cls: 'blue', title: 'HelpKeptPick' },
+        Hand: { label: 'BadgeKeptByHand', cls: 'purple', title: 'HelpKeptHand' },
+        Own: { label: 'BadgeAlreadyHere', cls: 'green', title: 'HelpKeptOwn' },
+        Unknown: { label: 'BadgeEarlierCopy', cls: 'gray', title: 'HelpKeptUnknown' }
     };
 
     function ensureKeptTable() {
@@ -438,7 +464,7 @@ export default function (view) {
             containerId: 'keptCopiesTableContainer',
             endpoint: 'KeptCopies',
             pagination: { pageSize: 50 },
-            search: { enabled: true, placeholder: 'Search permanent copies' },
+            search: { enabled: true, placeholder: tr('PlaceholderSearchPermanentCopies') },
             selection: {
                 enabled: true,
                 idKey: 'Id',
@@ -448,11 +474,11 @@ export default function (view) {
                 }
             },
             filters: { buildParams: function () { return { serverKey: selectedKey }; } },
-            emptyState: { message: 'No permanent copies in this server\'s Link libraries.' },
+            emptyState: { message: tr('EmptyPermanentCopies') },
             columns: [
                 {
                     key: 'name',
-                    label: 'Item',
+                    label: tr('ColumnItem'),
                     type: 'custom',
                     className: 'base-table-cell-with-thumb',
                     image: function (item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey || selectedKey); },
@@ -467,23 +493,23 @@ export default function (view) {
                 },
                 {
                     key: 'details',
-                    label: 'Details',
+                    label: tr('ColumnDetails'),
                     type: 'custom',
                     className: 'serversync-details-cell',
                     render: function (item) {
                         var badge = KEPT_BADGES[item.Kept] || KEPT_BADGES.Unknown;
                         var size = item.SourceSizeFormatted || '';
-                        return '<span class="base-badge ' + badge.cls + '" title="' + escapeHtml(badge.title) + '">' + escapeHtml(badge.label) + '</span>' +
+                        return '<span class="base-badge ' + badge.cls + '" title="' + escapeHtml(tr(badge.title)) + '">' + escapeHtml(tr(badge.label)) + '</span>' +
                             (size ? ' <span class="base-badge purple">' + escapeHtml(size) + '</span>' : '');
                     }
                 },
-                { key: 'Status', label: 'Status', type: 'status' }
+                { key: 'Status', label: tr('HeaderStatus'), type: 'status' }
             ]
         });
         var bulk = keptTable.getBulkActionsContainer();
         if (bulk) {
             bulk.innerHTML = '<button is="emby-button" type="button" id="btnUnkeepCopies" class="raised base-button primary small serversync-kept-bulk-button" disabled>' +
-                '<span class="material-icons" aria-hidden="true">link</span><span>Turn Back Into Links</span></button>';
+                '<span class="material-icons" aria-hidden="true">link</span><span>' + escapeHtml(tr('ButtonTurnBackIntoLinks')) + '</span></button>';
             bulk.querySelector('#btnUnkeepCopies').addEventListener('click', unkeepSelected);
         }
         return keptTable;
@@ -540,27 +566,27 @@ export default function (view) {
         apiRequest('KeptCopies/Unkeep', 'POST', { Ids: ids }).then(function (result) {
             var queued = (result && result.Queued) || 0;
             var skipped = (result && result.Skipped) || [];
-            var lines = [queued === 1 ? '1 copy will turn back into a link.' : queued + ' copies will turn back into links.'];
+            var lines = [ServerSyncShared.plural(queued, 'ToastCopiesUnkeptOne', 'ToastCopiesUnkeptMany')];
             if (skipped.length) {
                 var picked = 0;
                 var reasons = {};
                 skipped.forEach(function (s) {
                     var row = keptRows[String(s.Id)];
                     if (row && row.Kept === 'Pick') picked++;
-                    var reason = s.Reason || 'Skipped';
+                    var reason = s.Reason || tr('StatusSkipped');
                     reasons[reason] = (reasons[reason] || 0) + 1;
                 });
-                lines.push(skipped.length + ' skipped. ' + Object.keys(reasons).map(function (reason) {
-                    return reason + ' (' + reasons[reason] + ')';
-                }).join(', ') + '.');
+                lines.push(format('ToastUnkeepSkipped', skipped.length, Object.keys(reasons).map(function (reason) {
+                    return format('ReasonCount', reason, reasons[reason]);
+                }).join(', ')));
                 if (picked > 0) {
-                    lines.push('Copies covered by an Always Keep pick stay copies. Remove the pick under Always Keep on this tab instead.');
+                    lines.push(tr('HelpUnkeepPicked'));
                 }
             }
             ServerSyncShared.setStatus('keptCopiesStatus', lines.join(' '), false, { timeout: 15000 });
         }, function (err) {
             console.error('Unkeep failed:', err);
-            ServerSyncShared.setStatus('keptCopiesStatus', 'Could not turn the copies back into links.', true, { timeout: 10000 });
+            ServerSyncShared.setStatus('keptCopiesStatus', tr('ErrorUnkeepCopies'), true, { timeout: 10000 });
         }).then(function () {
             keptTable.clearSelection();
             keptRows = {};
@@ -598,9 +624,9 @@ export default function (view) {
             if (key !== selectedKey) return;
             var cached = Math.min(counts[2], counts[1]);
             var slices = [
-                { label: 'Copies', value: counts[0] },
-                { label: 'Links', value: counts[1] - cached },
-                { label: 'Cached Links', value: cached }
+                { label: tr('ChartCopies'), value: counts[0] },
+                { label: tr('ChartLinks'), value: counts[1] - cached },
+                { label: tr('ChartCachedLinks'), value: cached }
             ];
             var holder = getEl('storageFilesChart');
             if (!holder) return;
@@ -608,12 +634,12 @@ export default function (view) {
             holder.innerHTML = '';
             filesChart = serverSyncModule.createPieChart({
                 slices: slices,
-                label: 'Synced files by storage',
+                label: tr('ChartFilesLabel'),
                 donut: true,
                 centerText: String(counts[0] + counts[1]),
-                centerLabel: 'Files',
-                valueName: 'Files',
-                emptyText: 'No files are synced yet.'
+                centerLabel: tr('HeaderFiles'),
+                valueName: tr('HeaderFiles'),
+                emptyText: tr('ChartFilesEmpty')
             });
             holder.appendChild(filesChart.element);
             setVisible('storageFilesSection', true);
@@ -642,7 +668,7 @@ export default function (view) {
                 usageMeter.setValue(value);
                 return;
             }
-            usageMeter = serverSyncModule.createUsageMeter({ label: 'Link Cache', bytes: true, used: value.used, total: value.total });
+            usageMeter = serverSyncModule.createUsageMeter({ label: tr('HeaderLinkCache'), bytes: true, used: value.used, total: value.total });
             holder.appendChild(usageMeter.element);
         }).catch(function () {
             setVisible('storageUsageSection', false);
@@ -671,7 +697,7 @@ export default function (view) {
             renderLibraries();
             reloadKeptCopies();
         }).catch(function () {
-            ServerSyncShared.setStatus('storageStatus', 'Could not load the storage settings. Reload the page.', true, { timeout: 0 });
+            ServerSyncShared.setStatus('storageStatus', tr('ErrorLoadStorage'), true, { timeout: 0 });
         });
     }
 

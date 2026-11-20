@@ -129,6 +129,16 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>Gets a description of the last change that matched no mapping, or null.</summary>
     public string? LastUnmatched => _unmatched.Values.OrderByDescending(u => u.At).FirstOrDefault()?.Description;
 
+    /// <summary>
+    /// Describes the last change that matched no mapping in a language.
+    /// </summary>
+    /// <param name="language">The language, or <c>null</c> for US English.</param>
+    /// <returns>The description, or null when every change matched.</returns>
+    public string? DescribeLastUnmatched(string? language)
+        => _unmatched.Values.OrderByDescending(u => u.At).FirstOrDefault() is { } last
+            ? HintActivityLog.Describe(last.Kind, last.ItemPath, last.UserName, last.ItemPath ?? last.UserName ?? string.Empty, language)
+            : null;
+
     /// <summary>Forgets the unmatched changes once the operator has seen them and accepts them.</summary>
     public void DismissUnmatched() => _unmatched.Clear();
 
@@ -673,15 +683,15 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
 
         var description = HintActivityLog.Describe(kind, itemPath, userName, itemPath ?? userName ?? string.Empty);
-        _unmatched[HintProtocol.GuardKey(change.Kind, change.LocalKey)] = new UnmatchedChange(change, description, DateTime.UtcNow);
+        _unmatched[HintProtocol.GuardKey(change.Kind, change.LocalKey)] = new UnmatchedChange(change, description, DateTime.UtcNow, kind, itemPath, userName);
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", FormatUtilities.SanitizeForLog(description));
     }
 
     /// <summary>A file that left the library, with when it left and when its removal is announced.</summary>
     private sealed record HeldRemoval(Guid ItemId, string Path, string ItemType, DateTime RemovedAt, DateTime Due);
 
-    /// <summary>A change that matched no mapping, with its description and when it was raised.</summary>
-    private sealed record UnmatchedChange(PendingChange Change, string Description, DateTime At);
+    /// <summary>A change that matched no mapping, with its description, when it was raised, and what it concerns.</summary>
+    private sealed record UnmatchedChange(PendingChange Change, string Description, DateTime At, HintKind Kind, string? ItemPath, string? UserName);
 
     /// <summary>One object's gathering changes, with when it is due and the time its stamp carries.</summary>
     private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt, HistoryParts Parts = HistoryParts.None);

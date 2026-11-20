@@ -31,7 +31,7 @@ async function build(opts) {
     page.dom.document.documentElement.appendChild(view);
     mod = await loadScript('serversync_shared.js');
     shared = mod.createServerSyncShared(view);
-    await Promise.resolve();
+    await shared.translations;
     return shared;
 }
 
@@ -40,10 +40,10 @@ beforeEach(async function () {
     await build();
 });
 
-test('plural writes the singular for one and the plural for every other count', function () {
-    assert.equal(shared.plural(1, 'item', 'items'), '1 item');
-    assert.equal(shared.plural(0, 'item', 'items'), '0 items');
-    assert.equal(shared.plural(3, 'person', 'people'), '3 people');
+test('plural writes the one form for one and the many form for every other count', function () {
+    assert.equal(shared.plural(1, 'ToastItemsIgnoredOne', 'ToastItemsIgnoredMany'), '1 item ignored.');
+    assert.equal(shared.plural(0, 'ToastItemsIgnoredOne', 'ToastItemsIgnoredMany'), '0 items ignored.');
+    assert.equal(shared.plural(3, 'ToastItemsIgnoredOne', 'ToastItemsIgnoredMany'), '3 items ignored.');
 });
 
 test('scanServers keeps enabled Pull and Sync servers that have a Server URL and API Key, in order', function () {

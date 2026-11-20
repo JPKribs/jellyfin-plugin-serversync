@@ -233,7 +233,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         try
@@ -245,7 +245,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore {Count} content item(s)", request.SourceItemIds.Count);
-            return StatusCode(500, new { Error = "Could not ignore the items. See the server log." });
+            return StatusCode(500, new { Error = Text(TranslationKeys.ErrorIgnoreItemsSeeLog) });
         }
     }
 
@@ -265,7 +265,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         try
@@ -277,7 +277,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue {Count} content item(s)", request.SourceItemIds.Count);
-            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
+            return StatusCode(500, new { Error = Text(TranslationKeys.ErrorQueueItemsSeeLog) });
         }
     }
 
@@ -340,7 +340,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(cache);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         var promoted = 0;
@@ -458,7 +458,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids is not { Count: > 0 })
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         var config = _configManager.Configuration;
@@ -471,13 +471,13 @@ public partial class ConfigurationController
                 .Where(m => string.Equals(m.SourceLibraryId, row.SourceLibraryId, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(m => UnderRoot(row.SourcePath, m.SourceRootPath))
                 .FirstOrDefault();
-            string? reason = row is null ? "the row no longer exists"
-                : row.StorageMode != Models.ContentSync.StorageMode.Copy ? "it is not a copy"
-                : row.Status != SyncStatus.Synced ? "it is not a synced copy yet"
-                : mapping is null || mapping.StorageMode != Models.ContentSync.StorageMode.Link ? "its library is not mapped as Link"
-                : Services.Links.AlwaysKeep.Covers(mapping, row.SourcePath) ? "an Always Keep pick covers it. Remove the pick on the Storage tab instead"
-                : Services.Links.LinkPaths.LinkPathFor(row.LocalPath ?? string.Empty) is null ? "it cannot be a link"
-                : !System.IO.File.Exists(row.LocalPath) ? "its file is not here"
+            string? reason = row is null ? Text(TranslationKeys.SkipRowGone)
+                : row.StorageMode != Models.ContentSync.StorageMode.Copy ? Text(TranslationKeys.SkipNotCopy)
+                : row.Status != SyncStatus.Synced ? Text(TranslationKeys.SkipNotSyncedCopy)
+                : mapping is null || mapping.StorageMode != Models.ContentSync.StorageMode.Link ? Text(TranslationKeys.SkipNotLinkLibrary)
+                : Services.Links.AlwaysKeep.Covers(mapping, row.SourcePath) ? Text(TranslationKeys.SkipAlwaysKeep)
+                : Services.Links.LinkPaths.LinkPathFor(row.LocalPath ?? string.Empty) is null ? Text(TranslationKeys.SkipCannotLink)
+                : !System.IO.File.Exists(row.LocalPath) ? Text(TranslationKeys.SkipFileMissing)
                 : null;
             if (reason is not null)
             {
@@ -525,7 +525,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         var syncedCount = 0;
@@ -587,7 +587,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         var config = _configManager.Configuration;

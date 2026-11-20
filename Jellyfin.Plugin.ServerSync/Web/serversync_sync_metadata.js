@@ -42,6 +42,19 @@ export function createMetadataSyncTableModule(ctx, kit) {
     var parseJsonSafe = kit.parseJsonSafe;
     var formatImageDisplay = kit.formatImageDisplay;
     var showObjectVersion = kit.showObjectVersion;
+    var t = ServerSyncShared.t;
+
+    // sectionRow
+    // Builds the heading row of one category in the comparison table.
+    //
+    // Inputs
+    // title [string]: The category's name, in the viewer's language.
+    //
+    // Output
+    // [string]: The row's HTML.
+    function sectionRow(title) {
+        return '<tr class="serversync-modal-section-header"><td colspan="4">' + ServerSyncShared.escapeHtml(title) + '</td></tr>';
+    }
 
     var MetadataSyncTableModule = createSyncTableModule({
         name: 'Metadata',
@@ -57,46 +70,56 @@ export function createMetadataSyncTableModule(ctx, kit) {
             refresh: { key: 'ServerSyncRefreshMetadataTable' },
             sync: { key: 'ServerSyncMissingMetadata' }
         },
-        taskNoun: 'metadata',
-        singularNoun: 'Item',
-        nounOne: 'item',
-        nounMany: 'items',
-        retryOne: 'metadata item',
-        retryMany: 'metadata items',
-        failNoun: 'items',
-        searchPlaceholder: 'Search items',
-        emptyMessage: 'No metadata items found. Run a refresh to scan for metadata.',
+        messages: {
+            startRefreshFailed: 'ErrorStartMetadataRefresh',
+            startSyncFailed: 'ErrorStartMetadataSync',
+            ignoredOne: 'ToastItemsIgnoredOne',
+            ignoredMany: 'ToastItemsIgnoredMany',
+            queuedOne: 'ToastItemsQueuedOne',
+            queuedMany: 'ToastItemsQueuedMany',
+            ignoreFailed: 'ErrorIgnoreItems',
+            queueFailed: 'ErrorQueueItems',
+            retryNone: 'ToastNoErroredMetadata',
+            retriedOne: 'ToastErroredMetadataRetriedOne',
+            retriedMany: 'ToastErroredMetadataRetriedMany',
+            retriedUnknown: 'ToastErroredMetadataRetried',
+            retryFailed: 'ErrorRetryMetadata',
+            statusUpdated: 'ToastItemStatusUpdated',
+            statusFailed: 'ErrorItemStatusUpdate'
+        },
+        searchPlaceholder: t.tr('PlaceholderSearchItems'),
+        emptyMessage: t.tr('EmptyMetadataItems'),
         columns: function(self) {
             return [
                 {
                     key: 'item',
-                    label: 'Item',
+                    label: t.tr('ColumnItem'),
                     type: 'custom',
                     className: 'base-table-cell-with-thumb',
                     image: function(item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey); },
                     render: function(item) {
-                        var libraries = (item.SourceLibraryName || 'Unknown') + ' → ' + (item.LocalLibraryName || 'Unknown');
-                        return renderRowInfo(item.ItemName || 'Unknown', libraries, item, item.Status);
+                        var libraries = (item.SourceLibraryName || t.tr('Unknown')) + ' → ' + (item.LocalLibraryName || t.tr('Unknown'));
+                        return renderRowInfo(item.ItemName || t.tr('Unknown'), libraries, item, item.Status);
                     }
                 },
                 {
                     key: 'changes',
-                    label: 'Changes',
+                    label: t.tr('ColumnChanges'),
                     type: 'custom',
                     className: 'serversync-details-cell',
                     render: function(item) {
                         // Only categories enabled in the config count.
                         var config = self.currentConfig || {};
                         var changes = [];
-                        if (config.MetadataSyncMetadata !== false && item.HasMetadataChanges) changes.push('Metadata');
-                        if (config.MetadataSyncImages !== false && item.HasImagesChanges) changes.push('Images');
-                        if (config.MetadataSyncPeople === true && item.HasPeopleChanges) changes.push('People');
-                        if (config.MetadataSyncStudios !== false && item.HasStudiosChanges) changes.push('Studios');
-                        if (config.MetadataSyncSegmentProvider === true && item.HasSegmentsChanges) changes.push('Segments');
+                        if (config.MetadataSyncMetadata !== false && item.HasMetadataChanges) changes.push(t.tr('LabelMetadata'));
+                        if (config.MetadataSyncImages !== false && item.HasImagesChanges) changes.push(t.tr('Images'));
+                        if (config.MetadataSyncPeople === true && item.HasPeopleChanges) changes.push(t.tr('People'));
+                        if (config.MetadataSyncStudios !== false && item.HasStudiosChanges) changes.push(t.tr('Studios'));
+                        if (config.MetadataSyncSegmentProvider === true && item.HasSegmentsChanges) changes.push(t.tr('ChangeSegments'));
                         return renderChangeBadges(changes);
                     }
                 },
-                { key: 'Status', label: 'Status', type: 'status' }
+                { key: 'Status', label: t.tr('HeaderStatus'), type: 'status' }
             ];
         },
         loadHealth: function() {
@@ -122,20 +145,20 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('MetadataItems/' + itemId).then(function(item) {
                     if (seq !== self._detailSeq) return;
                     if (!item) {
-                        ServerSyncShared.syncStatus('Item not found.', true);
+                        ServerSyncShared.syncStatus(t.tr('ErrorItemNotFound'), true);
                         return;
                     }
 
                     self.currentModalItem = item;
 
-                    view.querySelector('#metadataSyncModalTitle').textContent = item.ItemName || 'Unknown';
+                    view.querySelector('#metadataSyncModalTitle').textContent = item.ItemName || t.tr('Unknown');
 
                     var statusBadge = view.querySelector('#metadataSyncModalStatusBadge');
-                    statusBadge.textContent = item.Status;
+                    statusBadge.textContent = item.Status ? kit.statusName(item.Status) : t.tr('Unknown');
                     statusBadge.className = 'base-table-status-badge ' + item.Status;
 
                     var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
-                    var localServerName = ServerSyncShared.localServerName || 'Local';
+                    var localServerName = ServerSyncShared.localServerName || t.tr('ServerLocal');
                     view.querySelector('#metadataSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
                     if (item.LastSyncTime) {
@@ -146,8 +169,8 @@ export function createMetadataSyncTableModule(ctx, kit) {
                     }
                     showObjectVersion('metadataSyncModalVersion', { kind: 'Metadata', localItemId: item.LocalItemId });
 
-                    var sourceLib = item.SourceLibraryName || 'Unknown';
-                    var localLib = item.LocalLibraryName || 'Unknown';
+                    var sourceLib = item.SourceLibraryName || t.tr('Unknown');
+                    var localLib = item.LocalLibraryName || t.tr('Unknown');
                     view.querySelector('#metadataSyncModalLibrary').textContent = sourceLib + ' \u2192 ' + localLib;
 
                     var errorSection = view.querySelector('#metadataSyncModalErrorSection');
@@ -172,7 +195,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load metadata item details:', err);
-                    ServerSyncShared.syncStatus('Could not load the item details.', true);
+                    ServerSyncShared.syncStatus(t.tr('ErrorItemDetailsLoad'), true);
                 });
             },
 
@@ -181,7 +204,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var config = this.currentConfig || {};
                 var html = '';
                 var badge = function(label, changed) {
-                    html += ServerSyncShared.badge(changed ? 'orange' : 'green', label + ': ' + (changed ? 'Changes' : 'Synced'));
+                    html += ServerSyncShared.badge(changed ? 'orange' : 'green', t.format(changed ? 'BadgeCategoryChanges' : 'BadgeCategorySynced', label));
                 };
 
                 var sourceMetadata = parseJsonSafe(item.SourceMetadataValue) || {};
@@ -190,13 +213,13 @@ export function createMetadataSyncTableModule(ctx, kit) {
                     return JSON.stringify((source || []).slice().sort()) !== JSON.stringify((local || []).slice().sort());
                 };
 
-                if (config.MetadataSyncMetadata !== false) badge('Metadata', item.HasMetadataChanges === true);
-                if (config.MetadataSyncGenres !== false) badge('Genres', differs(sourceMetadata.Genres, localMetadata.Genres));
-                if (config.MetadataSyncTags !== false) badge('Tags', differs(sourceMetadata.Tags, localMetadata.Tags));
-                if (config.MetadataSyncImages !== false) badge('Images', item.HasImagesChanges === true);
-                if (config.MetadataSyncPeople === true) badge('People', item.HasPeopleChanges === true);
-                if (config.MetadataSyncStudios !== false) badge('Studios', item.HasStudiosChanges === true);
-                if (config.MetadataSyncSegmentProvider === true) badge('Segments', item.HasSegmentsChanges === true);
+                if (config.MetadataSyncMetadata !== false) badge(t.tr('LabelMetadata'), item.HasMetadataChanges === true);
+                if (config.MetadataSyncGenres !== false) badge(t.tr('Genres'), differs(sourceMetadata.Genres, localMetadata.Genres));
+                if (config.MetadataSyncTags !== false) badge(t.tr('Tags'), differs(sourceMetadata.Tags, localMetadata.Tags));
+                if (config.MetadataSyncImages !== false) badge(t.tr('Images'), item.HasImagesChanges === true);
+                if (config.MetadataSyncPeople === true) badge(t.tr('People'), item.HasPeopleChanges === true);
+                if (config.MetadataSyncStudios !== false) badge(t.tr('Studios'), item.HasStudiosChanges === true);
+                if (config.MetadataSyncSegmentProvider === true) badge(t.tr('ChangeSegments'), item.HasSegmentsChanges === true);
 
                 container.innerHTML = html;
             },
@@ -225,7 +248,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var localStudios = parseJsonSafe(item.LocalStudiosValue);
 
                 if (metadataEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Metadata</td></tr>';
+                    html += sectionRow(t.tr('LabelMetadata'));
                     html += self.buildCoreMetadataRows(sourceMetadata, localMetadata);
                     if (item.HasMetadataChanges) {
                         html += self.buildChangeDetailRow(item.MetadataChangesDetail);
@@ -233,27 +256,27 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 }
 
                 if (genresEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Genres</td></tr>';
-                    html += self.buildArrayComparisonRow('Genres', sourceMetadata.Genres, localMetadata.Genres);
+                    html += sectionRow(t.tr('Genres'));
+                    html += self.buildArrayComparisonRow(t.tr('Genres'), sourceMetadata.Genres, localMetadata.Genres);
                 }
 
                 if (tagsEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Tags</td></tr>';
-                    html += self.buildArrayComparisonRow('Tags', sourceMetadata.Tags, localMetadata.Tags);
+                    html += sectionRow(t.tr('Tags'));
+                    html += self.buildArrayComparisonRow(t.tr('Tags'), sourceMetadata.Tags, localMetadata.Tags);
                 }
 
                 if (studiosEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Studios</td></tr>';
-                    html += self.buildArrayComparisonRow('Studios', sourceStudios, localStudios);
+                    html += sectionRow(t.tr('Studios'));
+                    html += self.buildArrayComparisonRow(t.tr('Studios'), sourceStudios, localStudios);
                 }
 
                 if (peopleEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">People</td></tr>';
+                    html += sectionRow(t.tr('People'));
                     html += self.buildPeopleComparisonRow(sourcePeople, localPeople);
                 }
 
                 if (imagesEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Images</td></tr>';
+                    html += sectionRow(t.tr('Images'));
                     html += self.buildImagesRows(sourceImages, localImages);
                     if (item.HasImagesChanges) {
                         html += self.buildChangeDetailRow(item.ImagesChangesDetail);
@@ -261,12 +284,12 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 }
 
                 if (segmentsEnabled) {
-                    html += '<tr class="serversync-modal-section-header"><td colspan="4">Media Segments</td></tr>';
+                    html += sectionRow(t.tr('HeaderMediaSegments'));
                     html += self.buildSegmentsRows(parseJsonSafe(item.SourceSegmentsValue), parseJsonSafe(item.LocalSegmentsValue));
                 }
 
                 if (html === '') {
-                    html = '<tr><td colspan="4" class="serversync-empty-cell">No sync categories are on.</td></tr>';
+                    html = '<tr><td colspan="4" class="serversync-empty-cell">' + ServerSyncShared.escapeHtml(t.tr('EmptyNoSyncCategories')) + '</td></tr>';
                 }
 
                 tbody.innerHTML = html;
@@ -278,8 +301,8 @@ export function createMetadataSyncTableModule(ctx, kit) {
             // unexplainable from the UI.
             buildChangeDetailRow: function(text) {
                 if (!text) return '';
-                return '<tr><td colspan="4" class="serversync-note-cell">Changed: ' +
-                    ServerSyncShared.escapeHtml(text) + '</td></tr>';
+                return '<tr><td colspan="4" class="serversync-note-cell">' +
+                    ServerSyncShared.escapeHtml(t.format('NoteChanged', text)) + '</td></tr>';
             },
 
             buildCoreMetadataRows: function(source, local) {
@@ -287,26 +310,26 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var html = '';
 
                 var metadataFields = [
-                    { key: 'Name', label: 'Name' },
-                    { key: 'OriginalTitle', label: 'Original Title' },
-                    { key: 'ForcedSortName', label: 'Forced Sort Name' },
-                    { key: 'Overview', label: 'Overview', truncate: true },
-                    { key: 'Tagline', label: 'Tagline' },
-                    { key: 'OfficialRating', label: 'Parental Rating' },
-                    { key: 'CustomRating', label: 'Custom Rating' },
-                    { key: 'CommunityRating', label: 'Community Rating' },
-                    { key: 'CriticRating', label: 'Critic Rating' },
-                    { key: 'PremiereDate', label: 'Release Date', isDate: true },
-                    { key: 'EndDate', label: 'End Date', isDate: true },
-                    { key: 'ProductionYear', label: 'Year' },
-                    { key: 'AspectRatio', label: 'Aspect Ratio' },
-                    { key: 'Video3DFormat', label: '3D Format' },
-                    { key: 'IndexNumber', label: 'Index Number' },
-                    { key: 'ParentIndexNumber', label: 'Parent Index Number' },
-                    { key: 'PreferredMetadataCountryCode', label: 'Country/Region' },
-                    { key: 'PreferredMetadataLanguage', label: 'Preferred Language' },
-                    { key: 'LockData', label: 'Lock Item', isBoolean: true },
-                    { key: 'LockedFields', label: 'Locked Fields', isArray: true }
+                    { key: 'Name', label: t.tr('Name') },
+                    { key: 'OriginalTitle', label: t.tr('FieldOriginalTitle') },
+                    { key: 'ForcedSortName', label: t.tr('FieldForcedSortName') },
+                    { key: 'Overview', label: t.tr('Overview'), truncate: true },
+                    { key: 'Tagline', label: t.tr('LabelTagline') },
+                    { key: 'OfficialRating', label: t.tr('OptionParentalRating') },
+                    { key: 'CustomRating', label: t.tr('FieldCustomRating') },
+                    { key: 'CommunityRating', label: t.tr('OptionCommunityRating') },
+                    { key: 'CriticRating', label: t.tr('FieldCriticRating') },
+                    { key: 'PremiereDate', label: t.tr('OptionReleaseDate'), isDate: true },
+                    { key: 'EndDate', label: t.tr('FieldEndDate'), isDate: true },
+                    { key: 'ProductionYear', label: t.tr('LabelYear') },
+                    { key: 'AspectRatio', label: t.tr('AspectRatio') },
+                    { key: 'Video3DFormat', label: t.tr('Field3DFormat') },
+                    { key: 'IndexNumber', label: t.tr('IndexNumber') },
+                    { key: 'ParentIndexNumber', label: t.tr('FieldParentIndexNumber') },
+                    { key: 'PreferredMetadataCountryCode', label: t.tr('LabelCountry') },
+                    { key: 'PreferredMetadataLanguage', label: t.tr('FieldPreferredLanguage') },
+                    { key: 'LockData', label: t.tr('FieldLockItem'), isBoolean: true },
+                    { key: 'LockedFields', label: t.tr('FieldLockedFields'), isArray: true }
                 ];
 
                 metadataFields.forEach(function(field) {
@@ -354,7 +377,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
 
                 if (uniqueKeys.length === 0) {
                     html += '<tr>';
-                    html += '<td class="serversync-compare-table-property">Provider IDs</td>';
+                    html += '<td class="serversync-compare-table-property">' + ServerSyncShared.escapeHtml(t.tr('FieldProviderIds')) + '</td>';
                     html += '<td class="serversync-compare-table-value">-</td>';
                     html += '<td class="serversync-compare-table-value">-</td>';
                     html += '<td class="serversync-compare-table-value serversync-compare-table-merged">-</td>';
@@ -375,7 +398,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var countChanged = sourceCount !== localCount;
                 var countRowClass = countChanged ? 'serversync-modal-changed-row' : '';
                 html += '<tr class="' + countRowClass + '">';
-                html += '<td class="serversync-compare-table-property">Count</td>';
+                html += '<td class="serversync-compare-table-property">' + ServerSyncShared.escapeHtml(t.tr('FieldCount')) + '</td>';
                 html += '<td class="serversync-compare-table-value">' + sourceCount + '</td>';
                 html += '<td class="serversync-compare-table-value">' + localCount + '</td>';
                 html += '<td class="serversync-compare-table-value serversync-compare-table-merged">' + sourceCount + '</td>';
@@ -390,7 +413,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var itemsRowClass = itemsChanged ? 'serversync-modal-changed-row' : '';
 
                 html += '<tr class="' + itemsRowClass + '">';
-                html += '<td class="serversync-compare-table-property">Items</td>';
+                html += '<td class="serversync-compare-table-property">' + ServerSyncShared.escapeHtml(t.tr('Items')) + '</td>';
                 html += '<td class="serversync-compare-table-value">' + sourceDisplay + '</td>';
                 html += '<td class="serversync-compare-table-value">' + localDisplay + '</td>';
                 html += '<td class="serversync-compare-table-value serversync-compare-table-merged">' + sourceDisplay + '</td>';
@@ -427,7 +450,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var countChanged = sourceCount !== localCount;
                 var countRowClass = countChanged ? 'serversync-modal-changed-row' : '';
                 html += '<tr class="' + countRowClass + '">';
-                html += '<td class="serversync-compare-table-property">Count</td>';
+                html += '<td class="serversync-compare-table-property">' + ServerSyncShared.escapeHtml(t.tr('FieldCount')) + '</td>';
                 html += '<td class="serversync-compare-table-value">' + sourceCount + '</td>';
                 html += '<td class="serversync-compare-table-value">' + localCount + '</td>';
                 html += '<td class="serversync-compare-table-value serversync-compare-table-merged">' + sourceCount + '</td>';
@@ -442,7 +465,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var itemsRowClass = itemsChanged ? 'serversync-modal-changed-row' : '';
 
                 html += '<tr class="' + itemsRowClass + '">';
-                html += '<td class="serversync-compare-table-property">Items</td>';
+                html += '<td class="serversync-compare-table-property">' + ServerSyncShared.escapeHtml(t.tr('Items')) + '</td>';
                 html += '<td class="serversync-compare-table-value">' + sourceDisplay + '</td>';
                 html += '<td class="serversync-compare-table-value">' + localDisplay + '</td>';
                 html += '<td class="serversync-compare-table-value serversync-compare-table-merged">' + sourceDisplay + '</td>';
@@ -453,8 +476,8 @@ export function createMetadataSyncTableModule(ctx, kit) {
 
             formatMetadataValue: function(value, field) {
                 if (field.isBoolean) {
-                    if (value === true) return 'Yes';
-                    if (value === false) return 'No';
+                    if (value === true) return ServerSyncShared.escapeHtml(t.tr('Yes'));
+                    if (value === false) return ServerSyncShared.escapeHtml(t.tr('No'));
                     return '-';
                 }
 
@@ -531,7 +554,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 var html = '';
                 var timesOf = function(value, type) {
                     var list = (value && Array.isArray(value.Segments) ? value.Segments : []).filter(function(s) { return s && s.Type === type; });
-                    return list.map(function(s) { return formatSegmentTime(s.StartTicks) + ' to ' + formatSegmentTime(s.EndTicks); }).join(', ');
+                    return list.map(function(s) { return t.format('LibraryRoute', formatSegmentTime(s.StartTicks), formatSegmentTime(s.EndTicks)); }).join(', ');
                 };
 
                 var types = new Set();
@@ -552,7 +575,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 });
 
                 if (types.size === 0) {
-                    html += '<tr><td colspan="4" class="serversync-empty-cell">No media segments</td></tr>';
+                    html += '<tr><td colspan="4" class="serversync-empty-cell">' + ServerSyncShared.escapeHtml(t.tr('EmptyNoMediaSegments')) + '</td></tr>';
                 }
 
                 return html;
@@ -606,7 +629,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 });
 
                 if (typesArray.length === 0) {
-                    html += '<tr><td colspan="4" class="serversync-empty-cell">No images</td></tr>';
+                    html += '<tr><td colspan="4" class="serversync-empty-cell">' + ServerSyncShared.escapeHtml(t.tr('EmptyNoImages')) + '</td></tr>';
                 }
 
                 return html;

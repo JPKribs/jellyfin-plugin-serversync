@@ -337,7 +337,7 @@ test('failedAction posts to its route and says how many changes it handled', asy
     });
     env.responses.push({ Retried: 2 });
     env.responses.push({});
-    queue.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'failed change tried again', 'failed changes tried again');
+    queue.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'ToastFailedRetriedOne', 'ToastFailedRetriedMany');
     assert.equal(buttons[0].disabled, true);
     await flush();
     assert.equal(env.page.requests.find(function (r) { return r.url === 'Sync/Hints/Failed/Retry'; }).type, 'POST');

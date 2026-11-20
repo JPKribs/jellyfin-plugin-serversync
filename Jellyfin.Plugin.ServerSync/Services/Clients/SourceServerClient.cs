@@ -93,8 +93,17 @@ public partial class SourceServerClient : IDisposable
     /// Calls the source server and reports who it is and what access the API Key has.
     /// </summary>
     /// <param name="cancellationToken">Cancels the test.</param>
+    /// <returns>The outcome, with the server's name and id on success, and its message in US English.</returns>
+    public Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default)
+        => TestConnectionAsync(null, cancellationToken);
+
+    /// <summary>
+    /// Calls the source server and reports who it is and what access the API Key has, with the message in a language.
+    /// </summary>
+    /// <param name="language">The language of the message, or <c>null</c> for US English.</param>
+    /// <param name="cancellationToken">Cancels the test.</param>
     /// <returns>The outcome, with the server's name and id on success.</returns>
-    public async Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default)
+    public async Task<ConnectionTestResult> TestConnectionAsync(string? language, CancellationToken cancellationToken)
     {
         try
         {
@@ -112,7 +121,7 @@ public partial class SourceServerClient : IDisposable
                     UserId = access.UserId,
                     UserName = access.UserName,
                     CanDownload = access.CanDownload,
-                    Message = access.IsAdministrator ? "Connection successful" : "Connection successful, with a standard user's access"
+                    Message = BaseTranslations.Get(access.IsAdministrator ? TranslationKeys.MessageConnectionOk : TranslationKeys.MessageConnectionStandardUser, language)
                 };
             }
             // Only 403 proves a valid API Key, so nothing else may fall back.
@@ -129,12 +138,12 @@ public partial class SourceServerClient : IDisposable
                 ServerName = publicInfo?.ServerName,
                 ServerId = publicInfo?.Id,
                 IsAdministrator = false,
-                Message = "Connection successful, with a standard user's access"
+                Message = BaseTranslations.Get(TranslationKeys.MessageConnectionStandardUser, language)
             };
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            var errorMsg = "Connection timed out - server may be unreachable or slow to respond";
+            var errorMsg = BaseTranslations.Get(TranslationKeys.ErrorConnectionTimedOutSlow, language);
             _logger.LogWarning("Connection to source server timed out");
             return new ConnectionTestResult
             {
@@ -145,7 +154,7 @@ public partial class SourceServerClient : IDisposable
         }
         catch (HttpRequestException ex)
         {
-            var errorMsg = $"HTTP error: {ex.Message}";
+            var errorMsg = BaseTranslations.Format(TranslationKeys.ErrorHttp, language, ex.Message);
             _logger.LogError(ex, "HTTP error connecting to source server");
             return new ConnectionTestResult
             {
@@ -157,7 +166,7 @@ public partial class SourceServerClient : IDisposable
         // A cancelled test propagates, since a failed result would blame the API Key.
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var errorMsg = $"Connection failed: {ex.Message}";
+            var errorMsg = BaseTranslations.Format(TranslationKeys.ErrorConnectionFailed, language, ex.Message);
             _logger.LogError(ex, "Failed to connect to source server");
             return new ConnectionTestResult
             {
@@ -178,6 +187,7 @@ public partial class SourceServerClient : IDisposable
     /// <param name="localServerName">This server's name, sent as the device name.</param>
     /// <param name="pluginVersion">The plugin version, sent as the client version.</param>
     /// <param name="allowPrivateNetwork">Whether the server may use a private network address. When it may not, every resolved address is checked at connect time.</param>
+    /// <param name="language">The language of the message, or <c>null</c> for US English.</param>
     /// <param name="cancellationToken">Cancels the sign in.</param>
     /// <returns>The outcome, with the access token on success.</returns>
     public static async Task<AuthenticateResponse> AuthenticateAsync(
@@ -188,6 +198,7 @@ public partial class SourceServerClient : IDisposable
         string localServerName,
         string pluginVersion,
         bool allowPrivateNetwork,
+        string? language = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
@@ -222,8 +233,8 @@ public partial class SourceServerClient : IDisposable
                 {
                     Success = false,
                     Message = response.StatusCode == System.Net.HttpStatusCode.Unauthorized
-                        ? "Invalid username or password"
-                        : $"Authentication failed: {response.StatusCode}"
+                        ? BaseTranslations.Get(TranslationKeys.ErrorInvalidCredentials, language)
+                        : BaseTranslations.Format(TranslationKeys.ErrorAuthenticationFailedWith, language, response.StatusCode)
                 };
             }
 
@@ -283,7 +294,7 @@ public partial class SourceServerClient : IDisposable
             return new AuthenticateResponse
             {
                 Success = false,
-                Message = "Connection timed out - server may be unreachable"
+                Message = BaseTranslations.Get(TranslationKeys.ErrorConnectionTimedOut, language)
             };
         }
         catch (HttpRequestException ex)
@@ -291,7 +302,7 @@ public partial class SourceServerClient : IDisposable
             return new AuthenticateResponse
             {
                 Success = false,
-                Message = $"Connection error: {ex.Message}"
+                Message = BaseTranslations.Format(TranslationKeys.ErrorConnectionError, language, ex.Message)
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -299,7 +310,7 @@ public partial class SourceServerClient : IDisposable
             return new AuthenticateResponse
             {
                 Success = false,
-                Message = $"Authentication failed: {ex.Message}"
+                Message = BaseTranslations.Format(TranslationKeys.ErrorAuthenticationFailedWith, language, ex.Message)
             };
         }
     }

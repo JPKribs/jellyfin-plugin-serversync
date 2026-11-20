@@ -12,7 +12,7 @@
                     <!-- Sync Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
-                        <h1 class="sectionTitle" id="syncPageTitle">Content Sync</h1>
+                        <h1 class="sectionTitle" id="syncPageTitle" data-str="LabelContentSync">Content Sync</h1>
                     </div>
 
                     <!-- Sync Type Selector -->
@@ -21,14 +21,14 @@
                     <div id="syncStatus" class="base-status-text serversync-sync-status" role="status"></div>
 
                     <div id="syncTypeContainer" class="selectContainer">
-                        <label for="syncTypeDropdown">Sync Type</label>
+                        <label for="syncTypeDropdown" data-str="LabelSyncType">Sync Type</label>
                         <select is="emby-select" id="syncTypeDropdown" class="emby-select-withcolor emby-select">
-                            <option value="content" data-config-key="EnableContentSync">Content</option>
-                            <option value="history" data-config-key="EnableHistorySync">History</option>
-                            <option value="metadata" data-config-key="EnableMetadataSync">Metadata</option>
-                            <option value="people" data-config-key="EnablePeopleSync">People</option>
-                            <option value="users" data-config-key="EnableUserSync">Users</option>
-                            <option value="queue">Queue</option>
+                            <option value="content" data-config-key="EnableContentSync" data-str="SyncTypeContent">Content</option>
+                            <option value="history" data-config-key="EnableHistorySync" data-str="SyncTypeHistory">History</option>
+                            <option value="metadata" data-config-key="EnableMetadataSync" data-str="LabelMetadata">Metadata</option>
+                            <option value="people" data-config-key="EnablePeopleSync" data-str="People">People</option>
+                            <option value="users" data-config-key="EnableUserSync" data-str="HeaderUsers">Users</option>
+                            <option value="queue" data-str="ButtonQueue">Queue</option>
                         </select>
                     </div>
 
@@ -41,39 +41,39 @@
                             <div class="base-cards compact" id="mainStatusRow">
                                 <div class="base-card green" id="statusGroupSynced" title="">
                                     <span class="base-card-count" id="syncedCount">0</span>
-                                    <span class="base-card-label">Synced</span>
+                                    <span class="base-card-label" data-str="StatusSynced">Synced</span>
                                 </div>
                                 <div class="base-card purple" id="statusGroupPending" title="">
                                     <span class="base-card-count" id="pendingCount">0</span>
-                                    <span class="base-card-label">Pending</span>
+                                    <span class="base-card-label" data-str="StatusPending">Pending</span>
                                 </div>
                                 <div class="base-card orange" id="statusGroupQueued" title="">
                                     <span class="base-card-count" id="queuedCount">0</span>
-                                    <span class="base-card-label">Queued</span>
+                                    <span class="base-card-label" data-str="StatusQueued">Queued</span>
                                 </div>
                                 <div class="base-card red" id="statusGroupErrored" title="">
                                     <span class="base-card-count" id="erroredCount">0</span>
-                                    <span class="base-card-label">Errored</span>
+                                    <span class="base-card-label" data-str="StatusErrored">Errored</span>
                                 </div>
                                 <div class="base-card gray" id="statusGroupIgnored" title="">
                                     <span class="base-card-count" id="ignoredCount">0</span>
-                                    <span class="base-card-label">Ignored</span>
+                                    <span class="base-card-label" data-str="StatusIgnored">Ignored</span>
                                 </div>
                                 <div class="base-card blue hidden" id="statusGroupPendingDownload" title="">
                                     <span class="base-card-count" id="pendingDownloadCount">0</span>
-                                    <span class="base-card-label">Pending Download</span>
+                                    <span class="base-card-label" data-str="StatusPendingDownload">Pending Download</span>
                                 </div>
                                 <div class="base-card yellow hidden" id="statusGroupPendingReplacement" title="">
                                     <span class="base-card-count" id="pendingReplacementCount">0</span>
-                                    <span class="base-card-label">Pending Replacement</span>
+                                    <span class="base-card-label" data-str="StatusPendingReplacement">Pending Replacement</span>
                                 </div>
                                 <div class="base-card pink hidden" id="statusGroupPendingDeletion" title="">
                                     <span class="base-card-count" id="pendingDeletionCount">0</span>
-                                    <span class="base-card-label">Pending Deletion</span>
+                                    <span class="base-card-label" data-str="StatusPendingDeletion">Pending Deletion</span>
                                 </div>
                                 <div class="base-card teal hidden" id="statusGroupDeleting" title="">
                                     <span class="base-card-count" id="deletingCount">0</span>
-                                    <span class="base-card-label">Deleting</span>
+                                    <span class="base-card-label" data-str="StatusDeleting">Deleting</span>
                                 </div>
                             </div>
                         </div>
@@ -82,15 +82,15 @@
                         <div id="healthDashboard" class="serversync-health-dashboard">
                             <div class="serversync-health-row">
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Last Sync</span>
-                                    <span class="serversync-health-value" id="healthLastSync">Never</span>
+                                    <span class="serversync-health-label" data-str="LabelLastSync">Last Sync</span>
+                                    <span class="serversync-health-value" id="healthLastSync" data-str="Never">Never</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Libraries Mapped</span>
+                                    <span class="serversync-health-label" data-str="LabelLibrariesMapped">Libraries Mapped</span>
                                     <span class="serversync-health-value" id="healthLibraryCount">0</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Pending</span>
+                                    <span class="serversync-health-label" data-str="StatusPending">Pending</span>
                                     <span class="serversync-health-value" id="healthPendingCount">0</span>
                                 </div>
                             </div>
@@ -99,13 +99,13 @@
                         <!-- Action buttons -->
                         <div class="base-button-row">
                             <button is="emby-button" type="button" id="btnRefreshItems" class="raised base-button secondary fill">
-                                <span>Refresh</span>
+                                <span data-str="Refresh">Refresh</span>
                             </button>
                             <button is="emby-button" type="button" id="btnTriggerSync" class="raised base-button primary fill">
-                                <span>Sync</span>
+                                <span data-str="TabSync">Sync</span>
                             </button>
                             <button is="emby-button" type="button" id="btnRetryErrors" class="raised base-button primary fill hidden">
-                                <span>Retry Errors</span>
+                                <span data-str="ButtonRetryErrors">Retry Errors</span>
                             </button>
                         </div>
 
@@ -119,7 +119,7 @@
                         <!-- Content Item Detail Modal -->
                         <div id="itemDetailModal" class="base-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
                             <div class="base-dialog-content serversync-modal-dialog serversync-modal-relative">
-                                <button type="button" id="btnModalClose" class="base-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <button type="button" id="btnModalClose" class="base-dialog-close" title="Close" data-str-title="ButtonClose" aria-label="Close" data-str-label="ButtonClose">&times;</button>
                                 <h2 id="modalTitle" class="base-modal-title"></h2>
                                 <div id="modalContent" class="base-modal-body">
                                     <div class="serversync-modal-top-row">
@@ -128,63 +128,63 @@
                                     </div>
                                     <div class="serversync-modal-info-grid">
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div class="serversync-modal-info-label" data-str="LabelLastSync">Last Sync</div>
                                             <div id="modalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Library</div>
+                                            <div class="serversync-modal-info-label" data-str="TasksLibraryCategory">Library</div>
                                             <div id="modalLibraryMapping" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="modalErrorSection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Error</div>
+                                        <div class="base-modal-field-label" data-str="HeaderError">Error</div>
                                         <div id="modalError" class="base-error-message"></div>
                                     </div>
                                     <div id="modalRetrySection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Retry Count</div>
+                                        <div class="base-modal-field-label" data-str="LabelRetryCount">Retry Count</div>
                                         <div id="modalRetryCount"></div>
                                     </div>
                                     <div class="serversync-modal-paths-section">
                                         <div class="serversync-modal-path-row">
                                             <div class="serversync-modal-path-block">
-                                                <div class="serversync-modal-path-label">Source Path</div>
+                                                <div class="serversync-modal-path-label" data-str="LabelSourcePath">Source Path</div>
                                                 <div id="modalSourcePath" class="serversync-modal-path-value"></div>
                                                 <div class="serversync-modal-path-meta">
-                                                    <span class="serversync-modal-path-meta-label">Size</span>
+                                                    <span class="serversync-modal-path-meta-label" data-str="LabelSize">Size</span>
                                                     <span id="modalSourceSize" class="serversync-modal-path-meta-value"></span>
                                                 </div>
                                             </div>
                                             <div class="serversync-modal-path-block">
-                                                <div class="serversync-modal-path-label">Local Path</div>
+                                                <div class="serversync-modal-path-label" data-str="LabelLocalPath">Local Path</div>
                                                 <div id="modalLocalPath" class="serversync-modal-path-value"></div>
                                                 <div id="modalLocalPathNote" class="serversync-modal-path-note"></div>
                                                 <div id="modalLocalSizeRow" class="serversync-modal-path-meta">
-                                                    <span class="serversync-modal-path-meta-label">Size</span>
+                                                    <span class="serversync-modal-path-meta-label" data-str="LabelSize">Size</span>
                                                     <span id="modalLocalSize" class="serversync-modal-path-meta-value"></span>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                     <div id="modalCompanionFilesSection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Companion Files</div>
+                                        <div class="base-modal-field-label" data-str="HeaderCompanionFiles">Companion Files</div>
                                         <div id="modalCompanionFiles"></div>
                                     </div>
                                 </div>
                                 <div class="base-modal-button-row">
                                     <button is="emby-button" type="button" id="btnModalIgnore" class="raised base-button secondary base-modal-button">
-                                        <span>Ignore</span>
+                                        <span data-str="ButtonIgnore">Ignore</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnModalMarkSynced" class="raised base-button secondary base-modal-button">
-                                        <span>Mark Synced</span>
+                                        <span data-str="ButtonMarkSynced">Mark Synced</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalKeep" class="raised base-button secondary base-modal-button hidden" title="Keep a Copy">
-                                        <span>Download</span>
+                                    <button is="emby-button" type="button" id="btnModalKeep" class="raised base-button secondary base-modal-button hidden" title="Keep a Copy" data-str-title="ButtonKeepCopy">
+                                        <span data-str="Download">Download</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnModalQueue" class="raised base-button primary base-modal-button">
-                                        <span>Queue</span>
+                                        <span data-str="ButtonQueue">Queue</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalDelete" class="raised base-button destructive base-modal-button" title="Delete Local File">
-                                        <span>Delete</span>
+                                    <button is="emby-button" type="button" id="btnModalDelete" class="raised base-button destructive base-modal-button" title="Delete Local File" data-str-title="ButtonDeleteLocalFile">
+                                        <span data-str="Delete">Delete</span>
                                     </button>
                                 </div>
                             </div>
@@ -200,19 +200,19 @@
                             <div class="base-cards" id="historyStatusRow">
                                 <div class="base-card green" id="historyStatusGroupSynced" title="">
                                     <span class="base-card-count" id="historySyncedCount">0</span>
-                                    <span class="base-card-label">Synced</span>
+                                    <span class="base-card-label" data-str="StatusSynced">Synced</span>
                                 </div>
                                 <div class="base-card orange" id="historyStatusGroupQueued" title="">
                                     <span class="base-card-count" id="historyQueuedCount">0</span>
-                                    <span class="base-card-label">Queued</span>
+                                    <span class="base-card-label" data-str="StatusQueued">Queued</span>
                                 </div>
                                 <div class="base-card red" id="historyStatusGroupErrored" title="">
                                     <span class="base-card-count" id="historyErroredCount">0</span>
-                                    <span class="base-card-label">Errored</span>
+                                    <span class="base-card-label" data-str="StatusErrored">Errored</span>
                                 </div>
                                 <div class="base-card gray" id="historyStatusGroupIgnored" title="">
                                     <span class="base-card-count" id="historyIgnoredCount">0</span>
-                                    <span class="base-card-label">Ignored</span>
+                                    <span class="base-card-label" data-str="StatusIgnored">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -221,15 +221,15 @@
                         <div id="historyHealthDashboard" class="serversync-health-dashboard">
                             <div class="serversync-health-row">
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Last Sync</span>
-                                    <span class="serversync-health-value" id="historyHealthLastSync">Never</span>
+                                    <span class="serversync-health-label" data-str="LabelLastSync">Last Sync</span>
+                                    <span class="serversync-health-value" id="historyHealthLastSync" data-str="Never">Never</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Users Mapped</span>
+                                    <span class="serversync-health-label" data-str="LabelUsersMapped">Users Mapped</span>
                                     <span class="serversync-health-value" id="historyHealthUserCount">0</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Libraries Mapped</span>
+                                    <span class="serversync-health-label" data-str="LabelLibrariesMapped">Libraries Mapped</span>
                                     <span class="serversync-health-value" id="historyHealthLibraryCount">0</span>
                                 </div>
                             </div>
@@ -238,13 +238,13 @@
                         <!-- Action buttons -->
                         <div class="base-button-row">
                             <button is="emby-button" type="button" id="btnRefreshHistoryItems" class="raised base-button secondary fill">
-                                <span>Refresh</span>
+                                <span data-str="Refresh">Refresh</span>
                             </button>
                             <button is="emby-button" type="button" id="btnTriggerHistorySync" class="raised base-button primary fill">
-                                <span>Sync</span>
+                                <span data-str="TabSync">Sync</span>
                             </button>
                             <button is="emby-button" type="button" id="btnRetryHistoryErrors" class="raised base-button primary fill hidden">
-                                <span>Retry Errors</span>
+                                <span data-str="ButtonRetryErrors">Retry Errors</span>
                             </button>
                         </div>
 
@@ -258,7 +258,7 @@
                         <!-- History Item Detail Modal -->
                         <div id="historyItemDetailModal" class="base-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
                             <div class="base-dialog-content serversync-modal-dialog serversync-modal-relative">
-                                <button type="button" id="btnHistoryModalClose" class="base-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <button type="button" id="btnHistoryModalClose" class="base-dialog-close" title="Close" data-str-title="ButtonClose" aria-label="Close" data-str-label="ButtonClose">&times;</button>
                                 <h2 id="historyModalTitle" class="base-modal-title"></h2>
                                 <div id="historyModalContent" class="base-modal-body">
                                     <div class="serversync-modal-top-row">
@@ -267,27 +267,27 @@
                                     </div>
                                     <div id="historyModalInfoGrid" class="serversync-modal-info-grid">
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div class="serversync-modal-info-label" data-str="LabelLastSync">Last Sync</div>
                                             <div id="historyModalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div class="serversync-modal-info-label" data-str="ColumnLastEdited">Last Edited</div>
                                             <div id="historyModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="historyModalErrorSection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Error</div>
+                                        <div class="base-modal-field-label" data-str="HeaderError">Error</div>
                                         <div id="historyModalError" class="base-error-message"></div>
                                     </div>
                                     <div class="serversync-history-user-section">
                                         <div class="serversync-history-user-row">
                                             <div class="serversync-history-user-block">
-                                                <div class="serversync-history-user-label">Source User</div>
+                                                <div class="serversync-history-user-label" data-str="LabelSourceUser">Source User</div>
                                                 <div id="historyModalSourceUserName" class="serversync-history-user-name"></div>
                                                 <div id="historyModalSourceUserId" class="serversync-history-user-guid"></div>
                                             </div>
                                             <div class="serversync-history-user-block">
-                                                <div class="serversync-history-user-label">Local User</div>
+                                                <div class="serversync-history-user-label" data-str="LabelLocalUser">Local User</div>
                                                 <div id="historyModalLocalUserName" class="serversync-history-user-name"></div>
                                                 <div id="historyModalLocalUserId" class="serversync-history-user-guid"></div>
                                             </div>
@@ -297,39 +297,39 @@
                                         <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="serversync-compare-table-property">Property</th>
-                                                    <th id="historyModalSourceHeader" class="serversync-compare-table-server">Source</th>
-                                                    <th id="historyModalLocalHeader" class="serversync-compare-table-server">Local</th>
-                                                    <th class="serversync-compare-table-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property" data-str="ColumnProperty">Property</th>
+                                                    <th id="historyModalSourceHeader" class="serversync-compare-table-server" data-str="LabelSource">Source</th>
+                                                    <th id="historyModalLocalHeader" class="serversync-compare-table-server" data-str="ServerLocal">Local</th>
+                                                    <th class="serversync-compare-table-merged" data-str="ColumnAfterSync">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 <tr id="historyModalRowPlayed">
-                                                    <td class="serversync-compare-table-property">Played</td>
+                                                    <td class="serversync-compare-table-property" data-str="Played">Played</td>
                                                     <td id="historyModalSourcePlayed" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalLocalPlayed" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalMergedPlayed" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
                                                 </tr>
                                                 <tr id="historyModalRowFavorite">
-                                                    <td class="serversync-compare-table-property">Favorite</td>
+                                                    <td class="serversync-compare-table-property" data-str="Favorite">Favorite</td>
                                                     <td id="historyModalSourceFavorite" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalLocalFavorite" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalMergedFavorite" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
                                                 </tr>
                                                 <tr id="historyModalRowPlayCount">
-                                                    <td class="serversync-compare-table-property">Play Count</td>
+                                                    <td class="serversync-compare-table-property" data-str="OptionPlayCount">Play Count</td>
                                                     <td id="historyModalSourcePlayCount" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalLocalPlayCount" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalMergedPlayCount" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
                                                 </tr>
                                                 <tr id="historyModalRowPosition">
-                                                    <td class="serversync-compare-table-property">Position</td>
+                                                    <td class="serversync-compare-table-property" data-str="LabelPosition">Position</td>
                                                     <td id="historyModalSourcePosition" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalLocalPosition" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalMergedPosition" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
                                                 </tr>
                                                 <tr id="historyModalRowLastPlayed">
-                                                    <td class="serversync-compare-table-property">Last Played</td>
+                                                    <td class="serversync-compare-table-property" data-str="LabelLastPlayed">Last Played</td>
                                                     <td id="historyModalSourceLastPlayed" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalLocalLastPlayed" class="serversync-compare-table-value">-</td>
                                                     <td id="historyModalMergedLastPlayed" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
@@ -340,10 +340,10 @@
                                 </div>
                                 <div class="base-modal-button-row">
                                     <button is="emby-button" type="button" id="btnHistoryModalIgnore" class="raised base-button secondary base-modal-button">
-                                        <span>Ignore</span>
+                                        <span data-str="ButtonIgnore">Ignore</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnHistoryModalQueue" class="raised base-button primary base-modal-button">
-                                        <span>Queue</span>
+                                        <span data-str="ButtonQueue">Queue</span>
                                     </button>
                                 </div>
                             </div>
@@ -359,19 +359,19 @@
                             <div class="base-cards" id="metadataStatusRow">
                                 <div class="base-card green" id="metadataStatusGroupSynced" title="">
                                     <span class="base-card-count" id="metadataSyncedCount">0</span>
-                                    <span class="base-card-label">Synced</span>
+                                    <span class="base-card-label" data-str="StatusSynced">Synced</span>
                                 </div>
                                 <div class="base-card orange" id="metadataStatusGroupQueued" title="">
                                     <span class="base-card-count" id="metadataQueuedCount">0</span>
-                                    <span class="base-card-label">Queued</span>
+                                    <span class="base-card-label" data-str="StatusQueued">Queued</span>
                                 </div>
                                 <div class="base-card red" id="metadataStatusGroupErrored" title="">
                                     <span class="base-card-count" id="metadataErroredCount">0</span>
-                                    <span class="base-card-label">Errored</span>
+                                    <span class="base-card-label" data-str="StatusErrored">Errored</span>
                                 </div>
                                 <div class="base-card gray" id="metadataStatusGroupIgnored" title="">
                                     <span class="base-card-count" id="metadataIgnoredCount">0</span>
-                                    <span class="base-card-label">Ignored</span>
+                                    <span class="base-card-label" data-str="StatusIgnored">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -380,11 +380,11 @@
                         <div id="metadataHealthDashboard" class="serversync-health-dashboard">
                             <div class="serversync-health-row">
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Last Sync</span>
-                                    <span class="serversync-health-value" id="metadataHealthLastSync">Never</span>
+                                    <span class="serversync-health-label" data-str="LabelLastSync">Last Sync</span>
+                                    <span class="serversync-health-value" id="metadataHealthLastSync" data-str="Never">Never</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Libraries Mapped</span>
+                                    <span class="serversync-health-label" data-str="LabelLibrariesMapped">Libraries Mapped</span>
                                     <span class="serversync-health-value" id="metadataHealthLibraryCount">0</span>
                                 </div>
                             </div>
@@ -393,13 +393,13 @@
                         <!-- Action buttons -->
                         <div class="base-button-row">
                             <button is="emby-button" type="button" id="btnRefreshMetadataItems" class="raised base-button secondary fill">
-                                <span>Refresh</span>
+                                <span data-str="Refresh">Refresh</span>
                             </button>
                             <button is="emby-button" type="button" id="btnTriggerMetadataSync" class="raised base-button primary fill">
-                                <span>Sync</span>
+                                <span data-str="TabSync">Sync</span>
                             </button>
                             <button is="emby-button" type="button" id="btnRetryMetadataErrors" class="raised base-button primary fill hidden">
-                                <span>Retry Errors</span>
+                                <span data-str="ButtonRetryErrors">Retry Errors</span>
                             </button>
                         </div>
 
@@ -413,7 +413,7 @@
                         <!-- Metadata Item Detail Modal -->
                         <div id="metadataSyncItemDetailModal" class="base-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="metadataSyncModalTitle">
                             <div class="base-dialog-content serversync-modal-dialog serversync-modal-relative">
-                                <button type="button" id="btnMetadataSyncModalClose" class="base-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <button type="button" id="btnMetadataSyncModalClose" class="base-dialog-close" title="Close" data-str-title="ButtonClose" aria-label="Close" data-str-label="ButtonClose">&times;</button>
                                 <h2 id="metadataSyncModalTitle" class="base-modal-title"></h2>
                                 <div class="base-modal-body">
                                     <div class="serversync-modal-top-row">
@@ -422,31 +422,31 @@
                                     </div>
                                     <div id="metadataSyncModalInfoGrid" class="serversync-modal-info-grid">
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div class="serversync-modal-info-label" data-str="LabelLastSync">Last Sync</div>
                                             <div id="metadataSyncModalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div class="serversync-modal-info-label" data-str="ColumnLastEdited">Last Edited</div>
                                             <div id="metadataSyncModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Library</div>
+                                            <div class="serversync-modal-info-label" data-str="TasksLibraryCategory">Library</div>
                                             <div id="metadataSyncModalLibrary" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="metadataSyncModalErrorSection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Error</div>
+                                        <div class="base-modal-field-label" data-str="HeaderError">Error</div>
                                         <div id="metadataSyncModalError" class="base-error-message"></div>
                                     </div>
                                     <div id="metadataSyncModalChangesSummary" class="serversync-modal-changes-summary"></div>
                                     <div class="serversync-modal-paths-section">
                                         <div class="serversync-modal-path-row">
                                             <div class="serversync-modal-path-block">
-                                                <div class="serversync-modal-path-label">Source File</div>
+                                                <div class="serversync-modal-path-label" data-str="LabelSourceFile">Source File</div>
                                                 <div id="metadataSyncModalSourcePath" class="serversync-modal-path-value"></div>
                                             </div>
                                             <div class="serversync-modal-path-block">
-                                                <div class="serversync-modal-path-label">Local File</div>
+                                                <div class="serversync-modal-path-label" data-str="LabelLocalFile">Local File</div>
                                                 <div id="metadataSyncModalLocalPath" class="serversync-modal-path-value"></div>
                                             </div>
                                         </div>
@@ -455,10 +455,10 @@
                                         <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="serversync-compare-table-property">Property</th>
-                                                    <th id="metadataSyncModalSourceHeader" class="serversync-compare-table-server">Source</th>
-                                                    <th id="metadataSyncModalLocalHeader" class="serversync-compare-table-server">Local</th>
-                                                    <th class="serversync-compare-table-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property" data-str="ColumnProperty">Property</th>
+                                                    <th id="metadataSyncModalSourceHeader" class="serversync-compare-table-server" data-str="LabelSource">Source</th>
+                                                    <th id="metadataSyncModalLocalHeader" class="serversync-compare-table-server" data-str="ServerLocal">Local</th>
+                                                    <th class="serversync-compare-table-merged" data-str="ColumnAfterSync">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="metadataSyncModalTableBody"></tbody>
@@ -467,10 +467,10 @@
                                 </div>
                                 <div class="base-modal-button-row">
                                     <button is="emby-button" type="button" id="btnMetadataSyncModalIgnore" class="raised base-button secondary base-modal-button">
-                                        <span>Ignore</span>
+                                        <span data-str="ButtonIgnore">Ignore</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnMetadataSyncModalQueue" class="raised base-button primary base-modal-button">
-                                        <span>Queue</span>
+                                        <span data-str="ButtonQueue">Queue</span>
                                     </button>
                                 </div>
                             </div>
@@ -486,19 +486,19 @@
                             <div class="base-cards">
                                 <div class="base-card green" id="userStatusGroupSynced" title="">
                                     <span class="base-card-count" id="userSyncedCount">0</span>
-                                    <span class="base-card-label">Synced</span>
+                                    <span class="base-card-label" data-str="StatusSynced">Synced</span>
                                 </div>
                                 <div class="base-card orange" id="userStatusGroupQueued" title="">
                                     <span class="base-card-count" id="userQueuedCount">0</span>
-                                    <span class="base-card-label">Queued</span>
+                                    <span class="base-card-label" data-str="StatusQueued">Queued</span>
                                 </div>
                                 <div class="base-card red" id="userStatusGroupErrored" title="">
                                     <span class="base-card-count" id="userErroredCount">0</span>
-                                    <span class="base-card-label">Errored</span>
+                                    <span class="base-card-label" data-str="StatusErrored">Errored</span>
                                 </div>
                                 <div class="base-card gray" id="userStatusGroupIgnored" title="">
                                     <span class="base-card-count" id="userIgnoredCount">0</span>
-                                    <span class="base-card-label">Ignored</span>
+                                    <span class="base-card-label" data-str="StatusIgnored">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -507,11 +507,11 @@
                         <div id="userHealthDashboard" class="serversync-health-dashboard">
                             <div class="serversync-health-row">
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Last Sync</span>
-                                    <span class="serversync-health-value" id="userHealthLastSync">Never</span>
+                                    <span class="serversync-health-label" data-str="LabelLastSync">Last Sync</span>
+                                    <span class="serversync-health-value" id="userHealthLastSync" data-str="Never">Never</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Users Mapped</span>
+                                    <span class="serversync-health-label" data-str="LabelUsersMapped">Users Mapped</span>
                                     <span class="serversync-health-value" id="userHealthUserCount">0</span>
                                 </div>
                             </div>
@@ -520,13 +520,13 @@
                         <!-- Action buttons -->
                         <div class="base-button-row">
                             <button is="emby-button" type="button" id="btnRefreshUserItems" class="raised base-button secondary fill">
-                                <span>Refresh</span>
+                                <span data-str="Refresh">Refresh</span>
                             </button>
                             <button is="emby-button" type="button" id="btnTriggerUserSync" class="raised base-button primary fill">
-                                <span>Sync</span>
+                                <span data-str="TabSync">Sync</span>
                             </button>
                             <button is="emby-button" type="button" id="btnRetryUserErrors" class="raised base-button primary fill hidden">
-                                <span>Retry Errors</span>
+                                <span data-str="ButtonRetryErrors">Retry Errors</span>
                             </button>
                         </div>
 
@@ -540,7 +540,7 @@
                         <!-- User Item Detail Modal -->
                         <div id="userSyncItemDetailModal" class="base-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="userSyncModalTitle">
                             <div class="base-dialog-content serversync-modal-dialog serversync-modal-relative">
-                                <button type="button" id="btnUserSyncModalClose" class="base-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <button type="button" id="btnUserSyncModalClose" class="base-dialog-close" title="Close" data-str-title="ButtonClose" aria-label="Close" data-str-label="ButtonClose">&times;</button>
                                 <h2 id="userSyncModalTitle" class="base-modal-title"></h2>
                                 <div class="base-modal-body">
                                     <div class="serversync-modal-top-row">
@@ -549,27 +549,27 @@
                                     </div>
                                     <div id="userSyncModalInfoGrid" class="serversync-modal-info-grid hidden">
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div class="serversync-modal-info-label" data-str="LabelLastSync">Last Sync</div>
                                             <div id="userSyncModalLastSync" class="serversync-modal-info-value"></div>
                                         </div>
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div class="serversync-modal-info-label" data-str="ColumnLastEdited">Last Edited</div>
                                             <div id="userSyncModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="userSyncModalErrorSection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Error</div>
+                                        <div class="base-modal-field-label" data-str="HeaderError">Error</div>
                                         <div id="userSyncModalError" class="base-error-message"></div>
                                     </div>
                                     <div id="userSyncModalChangesSummary" class="serversync-modal-changes-summary"></div>
                                     <div class="serversync-user-sync-section">
                                         <div class="serversync-user-sync-block">
-                                            <div class="serversync-user-sync-label">Source User</div>
+                                            <div class="serversync-user-sync-label" data-str="LabelSourceUser">Source User</div>
                                             <div id="userSyncModalSourceUser" class="serversync-user-sync-name"></div>
                                             <div id="userSyncModalSourceUserId" class="serversync-user-sync-id"></div>
                                         </div>
                                         <div class="serversync-user-sync-block">
-                                            <div class="serversync-user-sync-label">Local User</div>
+                                            <div class="serversync-user-sync-label" data-str="LabelLocalUser">Local User</div>
                                             <div id="userSyncModalLocalUser" class="serversync-user-sync-name"></div>
                                             <div id="userSyncModalLocalUserId" class="serversync-user-sync-id"></div>
                                         </div>
@@ -578,10 +578,10 @@
                                         <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="serversync-compare-table-property">Property</th>
-                                                    <th id="userSyncModalSourceHeader" class="serversync-compare-table-server">Source</th>
-                                                    <th id="userSyncModalLocalHeader" class="serversync-compare-table-server">Local</th>
-                                                    <th class="serversync-compare-table-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property" data-str="ColumnProperty">Property</th>
+                                                    <th id="userSyncModalSourceHeader" class="serversync-compare-table-server" data-str="LabelSource">Source</th>
+                                                    <th id="userSyncModalLocalHeader" class="serversync-compare-table-server" data-str="ServerLocal">Local</th>
+                                                    <th class="serversync-compare-table-merged" data-str="ColumnAfterSync">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="userSyncModalTableBody"></tbody>
@@ -590,10 +590,10 @@
                                 </div>
                                 <div class="base-modal-button-row">
                                     <button is="emby-button" type="button" id="btnUserSyncModalIgnore" class="raised base-button secondary base-modal-button">
-                                        <span>Ignore</span>
+                                        <span data-str="ButtonIgnore">Ignore</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnUserSyncModalQueue" class="raised base-button primary base-modal-button">
-                                        <span>Queue</span>
+                                        <span data-str="ButtonQueue">Queue</span>
                                     </button>
                                 </div>
                             </div>
@@ -608,19 +608,19 @@
                             <div class="base-cards">
                                 <div class="base-card green" id="peopleStatusGroupSynced" title="">
                                     <span class="base-card-count" id="peopleSyncedCount">0</span>
-                                    <span class="base-card-label">Synced</span>
+                                    <span class="base-card-label" data-str="StatusSynced">Synced</span>
                                 </div>
                                 <div class="base-card orange" id="peopleStatusGroupQueued" title="">
                                     <span class="base-card-count" id="peopleQueuedCount">0</span>
-                                    <span class="base-card-label">Queued</span>
+                                    <span class="base-card-label" data-str="StatusQueued">Queued</span>
                                 </div>
                                 <div class="base-card red" id="peopleStatusGroupErrored" title="">
                                     <span class="base-card-count" id="peopleErroredCount">0</span>
-                                    <span class="base-card-label">Errored</span>
+                                    <span class="base-card-label" data-str="StatusErrored">Errored</span>
                                 </div>
                                 <div class="base-card gray" id="peopleStatusGroupIgnored" title="">
                                     <span class="base-card-count" id="peopleIgnoredCount">0</span>
-                                    <span class="base-card-label">Ignored</span>
+                                    <span class="base-card-label" data-str="StatusIgnored">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -629,11 +629,11 @@
                         <div id="peopleHealthDashboard" class="serversync-health-dashboard">
                             <div class="serversync-health-row">
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">Last Sync</span>
-                                    <span class="serversync-health-value" id="peopleHealthLastSync">Never</span>
+                                    <span class="serversync-health-label" data-str="LabelLastSync">Last Sync</span>
+                                    <span class="serversync-health-value" id="peopleHealthLastSync" data-str="Never">Never</span>
                                 </div>
                                 <div class="serversync-health-card">
-                                    <span class="serversync-health-label">People Tracked</span>
+                                    <span class="serversync-health-label" data-str="LabelPeopleTracked">People Tracked</span>
                                     <span class="serversync-health-value" id="peopleHealthPersonCount">0</span>
                                 </div>
                             </div>
@@ -642,13 +642,13 @@
                         <!-- Action buttons -->
                         <div class="base-button-row">
                             <button is="emby-button" type="button" id="btnRefreshPeopleItems" class="raised base-button secondary fill">
-                                <span>Refresh</span>
+                                <span data-str="Refresh">Refresh</span>
                             </button>
                             <button is="emby-button" type="button" id="btnTriggerPeopleSync" class="raised base-button primary fill">
-                                <span>Sync</span>
+                                <span data-str="TabSync">Sync</span>
                             </button>
                             <button is="emby-button" type="button" id="btnRetryPeopleErrors" class="raised base-button primary fill hidden">
-                                <span>Retry Errors</span>
+                                <span data-str="ButtonRetryErrors">Retry Errors</span>
                             </button>
                         </div>
 
@@ -662,7 +662,7 @@
                         <!-- People Item Detail Modal -->
                         <div id="peopleSyncItemDetailModal" class="base-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="peopleSyncModalTitle">
                             <div class="base-dialog-content serversync-modal-dialog serversync-modal-relative">
-                                <button type="button" id="btnPeopleSyncModalClose" class="base-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <button type="button" id="btnPeopleSyncModalClose" class="base-dialog-close" title="Close" data-str-title="ButtonClose" aria-label="Close" data-str-label="ButtonClose">&times;</button>
                                 <h2 id="peopleSyncModalTitle" class="base-modal-title"></h2>
                                 <div class="base-modal-body">
                                     <div class="serversync-modal-top-row">
@@ -671,16 +671,16 @@
                                     </div>
                                     <div id="peopleSyncModalInfoGrid" class="serversync-modal-info-grid">
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div class="serversync-modal-info-label" data-str="LabelLastSync">Last Sync</div>
                                             <div id="peopleSyncModalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
                                         <div class="serversync-modal-info-item">
-                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div class="serversync-modal-info-label" data-str="ColumnLastEdited">Last Edited</div>
                                             <div id="peopleSyncModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="peopleSyncModalErrorSection" class="base-modal-field hidden">
-                                        <div class="base-modal-field-label">Error</div>
+                                        <div class="base-modal-field-label" data-str="HeaderError">Error</div>
                                         <div id="peopleSyncModalError" class="base-error-message"></div>
                                     </div>
                                     <div id="peopleSyncModalChangesSummary" class="serversync-modal-changes-summary"></div>
@@ -690,10 +690,10 @@
                                         <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="serversync-compare-table-property">Property</th>
-                                                    <th id="peopleSyncModalSourceHeader" class="serversync-compare-table-server">Source</th>
-                                                    <th id="peopleSyncModalLocalHeader" class="serversync-compare-table-server">Local</th>
-                                                    <th class="serversync-compare-table-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property" data-str="ColumnProperty">Property</th>
+                                                    <th id="peopleSyncModalSourceHeader" class="serversync-compare-table-server" data-str="LabelSource">Source</th>
+                                                    <th id="peopleSyncModalLocalHeader" class="serversync-compare-table-server" data-str="ServerLocal">Local</th>
+                                                    <th class="serversync-compare-table-merged" data-str="ColumnAfterSync">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="peopleSyncModalTableBody"></tbody>
@@ -702,10 +702,10 @@
                                 </div>
                                 <div class="base-modal-button-row">
                                     <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised base-button secondary base-modal-button">
-                                        <span>Ignore</span>
+                                        <span data-str="ButtonIgnore">Ignore</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnPeopleSyncModalQueue" class="raised base-button primary base-modal-button">
-                                        <span>Queue</span>
+                                        <span data-str="ButtonQueue">Queue</span>
                                     </button>
                                 </div>
                             </div>
@@ -718,25 +718,25 @@
 
                         <!-- Summary cards, which double as filters -->
                         <div class="base-cards compact serversync-queue-cards">
-                            <div class="base-card gray serversync-queue-card serversync-on" data-state="Gathering" title="Local changes waiting out Send Changes After.">
+                            <div class="base-card gray serversync-queue-card serversync-on" data-state="Gathering" title="Local changes waiting out Send Changes After." data-str-title="HelpHintsGathering">
                                 <span class="base-card-count" id="queueGatheringCount">0</span>
-                                <span class="base-card-label">Gathering</span>
+                                <span class="base-card-label" data-str="StatusGathering">Gathering</span>
                             </div>
-                            <div class="base-card orange serversync-queue-card serversync-on" data-state="Pending" title="Hints waiting to be sent to a server.">
+                            <div class="base-card orange serversync-queue-card serversync-on" data-state="Pending" title="Hints waiting to be sent to a server." data-str-title="HelpHintsWaiting">
                                 <span class="base-card-count" id="queuePendingCount">0</span>
-                                <span class="base-card-label">Pending</span>
+                                <span class="base-card-label" data-str="StatusPending">Pending</span>
                             </div>
-                            <div class="base-card blue serversync-queue-card serversync-on" data-state="Sent" title="Hints a server accepted and is still working on.">
+                            <div class="base-card blue serversync-queue-card serversync-on" data-state="Sent" title="Hints a server accepted and is still working on." data-str-title="HelpHintsAccepted">
                                 <span class="base-card-count" id="queueSentCount">0</span>
-                                <span class="base-card-label">Sent</span>
+                                <span class="base-card-label" data-str="StatusSent">Sent</span>
                             </div>
-                            <div class="base-card purple serversync-queue-card serversync-on" data-state="Received" title="Hints received from servers and not yet applied.">
+                            <div class="base-card purple serversync-queue-card serversync-on" data-state="Received" title="Hints received from servers and not yet applied." data-str-title="HelpHintsReceived">
                                 <span class="base-card-count" id="queueInboundCount">0</span>
-                                <span class="base-card-label">Received</span>
+                                <span class="base-card-label" data-str="StatusReceived">Received</span>
                             </div>
-                            <div class="base-card red serversync-queue-card serversync-on" data-state="Failed" title="Hints a server refused as malformed.">
+                            <div class="base-card red serversync-queue-card serversync-on" data-state="Failed" title="Hints a server refused as malformed." data-str-title="HelpHintsMalformed">
                                 <span class="base-card-count" id="queueFailedCount">0</span>
-                                <span class="base-card-label">Failed</span>
+                                <span class="base-card-label" data-str="LabelFailed">Failed</span>
                             </div>
                         </div>
 
@@ -744,24 +744,24 @@
                         <div id="queuePeers" class="serversync-health-dashboard">
                             <div class="serversync-health-row" id="queuePeerRow"></div>
                         </div>
-                        <div id="queueNoPeers" class="base-info hidden">No server is set to Push or Sync, so this server sends no hints. Hints it receives from other servers still appear below.</div>
-                        <div id="queueUnmatched" class="base-warn hidden"><span id="queueUnmatchedText"></span> <button is="emby-button" type="button" id="btnQueueUnmatchedDismiss" class="raised base-button small"><span>Dismiss</span></button></div>
+                        <div id="queueNoPeers" class="base-info hidden" data-str="QueueNoPeers">No server is set to Push or Sync, so this server sends no hints. Hints it receives from other servers still appear below.</div>
+                        <div id="queueUnmatched" class="base-warn hidden"><span id="queueUnmatchedText"></span> <button is="emby-button" type="button" id="btnQueueUnmatchedDismiss" class="raised base-button small"><span data-str="ButtonDismiss">Dismiss</span></button></div>
 
                         <!-- Action buttons -->
                         <div class="base-button-row">
                             <button is="emby-button" type="button" id="btnQueueRefresh" class="raised base-button secondary fill">
-                                <span>Refresh</span>
+                                <span data-str="Refresh">Refresh</span>
                             </button>
                             <button is="emby-button" type="button" id="btnQueueRun" class="raised base-button primary fill">
-                                <span>Run Now</span>
+                                <span data-str="ButtonRunNow">Run Now</span>
                             </button>
                         </div>
                         <div id="queueFailedActions" class="base-button-row hidden">
                             <button is="emby-button" type="button" id="btnQueueRetryFailed" class="raised base-button primary fill">
-                                <span>Retry Failed</span>
+                                <span data-str="ButtonRetryFailed">Retry Failed</span>
                             </button>
                             <button is="emby-button" type="button" id="btnQueueDismissFailed" class="raised base-button destructive fill">
-                                <span>Dismiss Failed</span>
+                                <span data-str="ButtonDismissFailed">Dismiss Failed</span>
                             </button>
                         </div>
 
@@ -769,13 +769,13 @@
 
                         <!-- Direction and server filters -->
                         <div class="serversync-filter-pills" id="queueFilters">
-                            <button type="button" class="serversync-filter-pill serversync-on" data-dir="all">All</button>
-                            <button type="button" class="serversync-filter-pill" data-dir="out">Outbound</button>
-                            <button type="button" class="serversync-filter-pill" data-dir="in">Inbound</button>
+                            <button type="button" class="serversync-filter-pill serversync-on" data-dir="all" data-str="All">All</button>
+                            <button type="button" class="serversync-filter-pill" data-dir="out" data-str="FilterOutbound">Outbound</button>
+                            <button type="button" class="serversync-filter-pill" data-dir="in" data-str="FilterInbound">Inbound</button>
                         </div>
 
                         <!-- One list, a change is one row for its whole life -->
-                        <div id="queueEmpty" class="base-empty-section hidden">Nothing is moving between servers right now.</div>
+                        <div id="queueEmpty" class="base-empty-section hidden" data-str="EmptyQueue">Nothing is moving between servers right now.</div>
                         <div id="queueList" class="serversync-queue-list"></div>
                     </div>
 

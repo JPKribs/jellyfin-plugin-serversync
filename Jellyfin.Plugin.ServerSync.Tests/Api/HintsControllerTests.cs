@@ -203,7 +203,7 @@ public sealed class HintsControllerTests : IDisposable
         Assert.Equal((listsThisServer, sendsToThisServer, peerMode), (result.ListsThisServer, result.SendsToThisServer, result.PeerMode));
         Assert.Equal(severity == "ok", result.Headline.StartsWith("Ready.", StringComparison.Ordinal));
         Assert.Equal(severity == "error", result.Headline.StartsWith("Not ready.", StringComparison.Ordinal));
-        Assert.Equal(!listed ? "Not listed" : enabled ? peerMode : "Disabled", result.Details[0].Badge);
+        Assert.Equal(!listed ? "Not listed" : enabled ? System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(peerMode!) : "Disabled", result.Details[0].Badge);
     }
 
     /// <summary>

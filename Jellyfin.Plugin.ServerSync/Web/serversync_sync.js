@@ -42,8 +42,8 @@ export default function (view) {
     });
 
     // The shared helpers and each part of this page live in their own resource. Every part is built
-    // from one context once all of them have loaded, and everything that needs them waits on
-    // _sharedPromise.
+    // from one context once all of them and the strings have loaded, so a part may read its strings
+    // as it is built. Everything that needs them waits on _sharedPromise.
 
     var ServerSyncShared = null;
     var openSyncView = null;
@@ -64,7 +64,8 @@ export default function (view) {
         import('./configurationpage?name=serversync_sync_metadata.js'),
         import('./configurationpage?name=serversync_sync_users.js'),
         import('./configurationpage?name=serversync_sync_people.js'),
-        import('./configurationpage?name=serversync_sync_queue.js')
+        import('./configurationpage?name=serversync_sync_queue.js'),
+        made.shared.translations
     ]).then(function(loaded) {
         var shared = loaded[0];
         ServerSyncShared = made.shared;
@@ -234,17 +235,17 @@ export default function (view) {
                 targetView.classList.remove('hidden');
             }
 
-            var dropdown = view.querySelector('#syncTypeDropdown');
-            var displayName = viewName.charAt(0).toUpperCase() + viewName.slice(1);
-            if (dropdown) {
-                var selected = dropdown.options[dropdown.selectedIndex];
-                if (selected) {
-                    displayName = selected.text;
-                }
-            }
             var titleEl = view.querySelector('#syncPageTitle');
             if (titleEl) {
-                titleEl.textContent = viewName === 'queue' ? 'Change Queue' : displayName + ' Sync';
+                var titles = {
+                    content: 'LabelContentSync',
+                    history: 'LabelHistorySync',
+                    metadata: 'LabelMetadataSync',
+                    people: 'LabelPeopleSync',
+                    users: 'TitleUsersSync',
+                    queue: 'HeaderChangeQueue'
+                };
+                titleEl.textContent = titles[viewName] ? made.shared.t.tr(titles[viewName]) : viewName;
             }
 
             // The queue view refreshes itself while it is showing. Before the page's modules load there is
@@ -260,14 +261,14 @@ export default function (view) {
             var descEl = view.querySelector('#syncTypeDescription');
             if (descEl) {
                 var descriptions = {
-                    content: 'Media files copied or linked into mapped libraries from your Pull and Sync servers.',
-                    history: 'Watch state of mapped users, such as played status, play count, resume position, last played date, and favorites.',
-                    metadata: 'Item metadata and images, copied onto local items matched by file path.',
-                    people: 'Biographies, provider IDs, and photos of people, matched by name.',
-                    users: 'Permissions, preferences, and profile images of mapped users. Library permissions follow your library mappings.',
-                    queue: 'Changes sent between servers as they happen. Outbound rows wait for a Push or Sync server to finish them, and inbound rows wait to be applied here.'
+                    content: 'DescSyncContent',
+                    history: 'DescSyncHistory',
+                    metadata: 'DescSyncMetadata',
+                    people: 'DescSyncPeople',
+                    users: 'DescSyncUsers',
+                    queue: 'DescSyncQueue'
                 };
-                descEl.textContent = descriptions[viewName] || '';
+                descEl.textContent = descriptions[viewName] ? made.shared.t.tr(descriptions[viewName]) : '';
             }
 
             this.currentView = viewName;

@@ -1,15 +1,16 @@
 // support.mjs
 // Shared setup for the config page tests. It installs Base's fake DOM, stubs the Jellyfin globals the pages
-// read, and loads a page script from the plugin's Web folder through the loader hook.
+// read, serves the plugin's US English strings, and loads a page script from the plugin's Web folder through the loader hook.
 
 import { register } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 var realSetTimeout = globalThis.setTimeout;
 var here = dirname(fileURLToPath(import.meta.url));
-var configDir = join(here, '..', '..', 'Jellyfin.Plugin.ServerSync', 'Web');
+var projectDir = join(here, '..', '..', 'Jellyfin.Plugin.ServerSync');
+var configDir = join(projectDir, 'Web');
 var baseRoot = join(here, '..', '..', '..', 'Shared', 'jellyfin-plugin-base');
 var baseBundle = join(baseRoot, 'dist', 'jpkribs_shared.js');
 var baseEntry = pathToFileURL(baseBundle).href;
@@ -27,6 +28,33 @@ if (!existsSync(baseBundle)) {
 register(pathToFileURL(join(here, 'loader.mjs')).href, { parentURL: import.meta.url, data: { configDir: configDir, baseEntry: baseEntry } });
 
 var fakeDom = await import(pathToFileURL(fakeDomPath).href);
+
+// usEnglish
+// Builds the strings the Translations route answers with in US English: the plugin's own, and the Jellyfin
+// strings the project declares, read from the copy of Jellyfin's strings in Base.
+//
+// Output
+// [object]: The strings by key.
+function usEnglish() {
+    var strings = {};
+    var jellyfin = {
+        web: JSON.parse(readFileSync(join(baseRoot, 'dist', 'jellyfin', 'web', 'en-us.json'), 'utf8')),
+        server: JSON.parse(readFileSync(join(baseRoot, 'dist', 'jellyfin', 'server', 'en-us.json'), 'utf8'))
+    };
+    var project = readFileSync(join(projectDir, 'Jellyfin.Plugin.ServerSync.csproj'), 'utf8');
+    for (var match of project.matchAll(/<JellyfinString Include="([^"]+)"( Source="server")?/g)) {
+        strings[match[1]] = jellyfin[match[2] ? 'server' : 'web'][match[1]];
+    }
+    return Object.assign(strings, JSON.parse(readFileSync(join(projectDir, 'Localization', 'en-us.json'), 'utf8')));
+}
+
+export var strings = usEnglish();
+
+// The pages load their strings with fetch, which answers here with US English.
+globalThis.fetch = function (url) {
+    if (String(url).indexOf('Sync/Translations') < 0) return Promise.reject(new Error('No route for ' + url));
+    return Promise.resolve({ ok: true, json: function () { return Promise.resolve(strings); } });
+};
 
 // The fake element has no dataset or remove, which the page scripts use.
 var elementProto = Object.getPrototypeOf(new fakeDom.FakeElement({}, 'div'));
@@ -110,6 +138,7 @@ export async function createSyncContext(ids, opts) {
     page.dom.document.documentElement.appendChild(view);
     var sharedMod = await loadScript('serversync_shared.js');
     var shared = sharedMod.createServerSyncShared(view);
+    await shared.translations;
     var responses = [];
     globalThis.ApiClient.fetch = function (options) {
         page.requests.push(options);

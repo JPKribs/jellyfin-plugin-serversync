@@ -185,36 +185,45 @@ public static class HintProtocol
     /// <summary>Describes a plugin version mismatch with a peer that sends no protocol.</summary>
     /// <param name="peerVersion">The peer's plugin version.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
+    /// <param name="language">The language of the reason, or <c>null</c> for US English, as the log and the peers read it.</param>
     /// <returns>The reason.</returns>
-    public static string VersionMismatch(string? peerVersion, string thisVersion)
-        => $"Server Sync {(string.IsNullOrWhiteSpace(peerVersion) ? "of an unknown version" : peerVersion.Trim())} on the peer and {thisVersion} on this server differ. Update both servers to the same version";
+    public static string VersionMismatch(string? peerVersion, string thisVersion, string? language = null)
+        => BaseTranslations.Format(
+            TranslationKeys.ProtocolVersionMismatch,
+            language,
+            string.IsNullOrWhiteSpace(peerVersion) ? BaseTranslations.Get(TranslationKeys.ProtocolVersionUnknown, language) : peerVersion.Trim(),
+            thisVersion);
 
     /// <summary>Describes why a peer's protocol is not compatible with this build.</summary>
     /// <param name="peerProtocol">The peer's protocol, or null when it sent none.</param>
     /// <param name="peerMinProtocol">The oldest protocol the peer speaks.</param>
     /// <param name="peerVersion">The peer's plugin version.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
+    /// <param name="language">The language of the reason, or <c>null</c> for US English, as the log and the peers read it.</param>
     /// <returns>The reason, for the dashboard and the log.</returns>
-    public static string ProtocolMismatch(int? peerProtocol, int? peerMinProtocol, string? peerVersion, string thisVersion)
+    public static string ProtocolMismatch(int? peerProtocol, int? peerMinProtocol, string? peerVersion, string thisVersion, string? language = null)
     {
         if (peerProtocol is not { } protocol)
         {
-            return VersionMismatch(peerVersion, thisVersion);
+            return VersionMismatch(peerVersion, thisVersion, language);
         }
 
-        var peer = string.IsNullOrWhiteSpace(peerVersion) ? "Server Sync on the peer" : $"Server Sync {peerVersion.Trim()} on the peer";
-        var older = protocol < MinProtocolVersion ? "the peer" : "this server";
-        return $"{peer} speaks protocol {protocol} (oldest {peerMinProtocol ?? protocol}) and Server Sync {thisVersion} on this server speaks {ProtocolVersion} (oldest {MinProtocolVersion}). Update {older} so the two overlap";
+        var peer = string.IsNullOrWhiteSpace(peerVersion)
+            ? BaseTranslations.Get(TranslationKeys.ProtocolPeerUnknown, language)
+            : BaseTranslations.Format(TranslationKeys.ProtocolPeerVersion, language, peerVersion.Trim());
+        var older = BaseTranslations.Get(protocol < MinProtocolVersion ? TranslationKeys.ProtocolThePeer : TranslationKeys.ServerThisServer, language);
+        return BaseTranslations.Format(TranslationKeys.ProtocolMismatch, language, peer, protocol, peerMinProtocol ?? protocol, thisVersion, ProtocolVersion, MinProtocolVersion, older);
     }
 
     /// <summary>Describes why a peer's capabilities are not compatible with this build.</summary>
     /// <param name="capabilities">The peer's capabilities.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
+    /// <param name="language">The language of the reason, or <c>null</c> for US English.</param>
     /// <returns>The reason.</returns>
-    public static string ProtocolMismatch(PeerCapabilities capabilities, string thisVersion)
+    public static string ProtocolMismatch(PeerCapabilities capabilities, string thisVersion, string? language = null)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
-        return ProtocolMismatch(capabilities.ProtocolVersion, capabilities.MinProtocolVersion, capabilities.PluginVersion, thisVersion);
+        return ProtocolMismatch(capabilities.ProtocolVersion, capabilities.MinProtocolVersion, capabilities.PluginVersion, thisVersion, language);
     }
 
     /// <summary>

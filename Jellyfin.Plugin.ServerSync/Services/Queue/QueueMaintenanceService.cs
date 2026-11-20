@@ -15,6 +15,7 @@ using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
 using Microsoft.Extensions.DependencyInjection;
@@ -153,14 +154,24 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         }
 
         var total = failing.Sum(kind => kind.Count);
-        var kinds = string.Join(", ", failing.Select(kind => $"{kind.Count} {kind.Label}{(kind.Count == 1 ? string.Empty : " items")}"));
         var example = failing.Select(kind => kind.Reason).FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason));
-        var overview = $"{kinds} have failed on every run for a day and are still being retried. Open Server Sync and filter the Sync tab by Errored to see each one"
-            + (example is null ? string.Empty : $". For example: {example}");
-        _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(overview, 1000));
+        string Overview(string? language)
+        {
+            var kinds = string.Join(", ", failing.Select(kind => CountFailing(kind, language)));
+            return example is null
+                ? BaseTranslations.Format(TranslationKeys.AttentionFailingOverview, language, kinds)
+                : BaseTranslations.Format(TranslationKeys.AttentionFailingExample, language, kinds, example);
+        }
+
+        _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(Overview(null), 1000));
         if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
         {
-            _ = activity.LogAndWaitAsync($"Server Sync Needs Attention: {total} Item{(total == 1 ? string.Empty : "s")} Keep Failing", "ServerSyncAttention", JPKribs.Jellyfin.Base.ActivityText.Sentence(overview), LogLevel.Warning);
+            var language = ActivityLanguage();
+            _ = activity.LogAndWaitAsync(
+                BaseTranslations.Format(total == 1 ? TranslationKeys.AttentionFailingNameOne : TranslationKeys.AttentionFailingNameMany, language, total),
+                "ServerSyncAttention",
+                ActivityText.Sentence(Overview(language)),
+                LogLevel.Warning);
         }
 
         return total;
@@ -174,15 +185,39 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         var standing = RunFailureLog.TakeUnreported(_configManager, FailingBeforeTold);
         foreach (var failure in standing)
         {
-            var overview = $"{failure.ModuleKey} {failure.Phase.ToLowerInvariant()} has ended this way on every run for a day: {failure.Reason}";
-            _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(overview, 1000));
+            var phase = failure.Phase.ToLowerInvariant();
+            _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(BaseTranslations.Format(TranslationKeys.AttentionHeldOverview, null, failure.ModuleKey, phase, failure.Reason), 1000));
             if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
             {
-                _ = activity.LogAndWaitAsync($"Server Sync Needs Attention: {failure.ModuleKey} {failure.Phase} Is Held Up", "ServerSyncAttention", JPKribs.Jellyfin.Base.ActivityText.Sentence(overview), LogLevel.Warning);
+                var language = ActivityLanguage();
+                _ = activity.LogAndWaitAsync(
+                    BaseTranslations.Format(TranslationKeys.AttentionHeldName, language, failure.ModuleKey, failure.Phase),
+                    "ServerSyncAttention",
+                    ActivityText.Sentence(BaseTranslations.Format(TranslationKeys.AttentionHeldOverview, language, failure.ModuleKey, phase, failure.Reason)),
+                    LogLevel.Warning);
             }
         }
 
         return standing.Count;
+    }
+
+    /// <summary>Gets the server's display language, which Activity page entries are written in.</summary>
+    private string? ActivityLanguage()
+        => _services.GetService<IServerConfigurationManager>() is { } config ? BaseTranslations.ServerLanguage(config) : null;
+
+    /// <summary>Counts the failing rows of one kind, such as "3 file items", in a language.</summary>
+    private static string CountFailing(FailingRows kind, string? language)
+    {
+        var one = kind.Count == 1;
+        var key = kind.Label switch
+        {
+            "file" => one ? TranslationKeys.FailingFileOne : TranslationKeys.FailingFileMany,
+            "watch history" => one ? TranslationKeys.FailingHistoryOne : TranslationKeys.FailingHistoryMany,
+            "metadata" => one ? TranslationKeys.FailingMetadataOne : TranslationKeys.FailingMetadataMany,
+            "person" => one ? TranslationKeys.FailingPersonOne : TranslationKeys.FailingPersonMany,
+            _ => one ? TranslationKeys.FailingUserOne : TranslationKeys.FailingUserMany
+        };
+        return BaseTranslations.Format(key, language, kind.Count);
     }
 
     /// <summary>Forgets the copies of playlists that no longer exist here.</summary>

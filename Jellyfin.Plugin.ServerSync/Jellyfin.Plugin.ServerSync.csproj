@@ -38,4 +38,87 @@
     <EmbeddedResource Include="Web\**\*" />
   </ItemGroup>
 
+  <!-- Jellyfin strings the pages use. Base builds them in with Localization/*.json, in every language Jellyfin has. -->
+  <ItemGroup>
+    <JellyfinString Include="All" />
+    <JellyfinString Include="AllowEmbeddedSubtitlesAllowAllOption" />
+    <JellyfinString Include="AspectRatio" />
+    <JellyfinString Include="Blacklist" />
+    <JellyfinString Include="ButtonAddServer" />
+    <JellyfinString Include="ButtonAddUser" />
+    <JellyfinString Include="ButtonCancel" />
+    <JellyfinString Include="ButtonClose" />
+    <JellyfinString Include="ButtonRemove" />
+    <JellyfinString Include="ButtonSignIn" />
+    <JellyfinString Include="Collections" />
+    <JellyfinString Include="Copy" />
+    <JellyfinString Include="Default" />
+    <JellyfinString Include="Delete" />
+    <JellyfinString Include="Disabled" />
+    <JellyfinString Include="Download" />
+    <JellyfinString Include="DownloadManager" />
+    <JellyfinString Include="Favorite" />
+    <JellyfinString Include="Favorites" />
+    <JellyfinString Include="File" />
+    <JellyfinString Include="Genres" />
+    <JellyfinString Include="HeaderApiKey" />
+    <JellyfinString Include="HeaderApiKeys" />
+    <JellyfinString Include="HeaderDeleteItems" />
+    <JellyfinString Include="HeaderError" />
+    <JellyfinString Include="HeaderLibraries" />
+    <JellyfinString Include="HeaderStatus" />
+    <JellyfinString Include="HeaderUser" />
+    <JellyfinString Include="HeaderUsers" />
+    <JellyfinString Include="Image" />
+    <JellyfinString Include="Images" />
+    <JellyfinString Include="IndexNumber" />
+    <JellyfinString Include="ItemCount" />
+    <JellyfinString Include="Items" />
+    <JellyfinString Include="LabelAvailable" />
+    <JellyfinString Include="LabelCountry" />
+    <JellyfinString Include="LabelDatabase" />
+    <JellyfinString Include="LabelFailed" />
+    <JellyfinString Include="LabelMetadata" />
+    <JellyfinString Include="LabelName" />
+    <JellyfinString Include="LabelPassword" />
+    <JellyfinString Include="LabelPlaylist" />
+    <JellyfinString Include="LabelSize" />
+    <JellyfinString Include="LabelSource" />
+    <JellyfinString Include="LabelTagline" />
+    <JellyfinString Include="LabelUser" />
+    <JellyfinString Include="LabelUsername" />
+    <JellyfinString Include="LabelValue" />
+    <JellyfinString Include="LabelYear" />
+    <JellyfinString Include="Live" />
+    <JellyfinString Include="Name" />
+    <JellyfinString Include="Never" />
+    <JellyfinString Include="New" />
+    <JellyfinString Include="No" />
+    <JellyfinString Include="None" />
+    <JellyfinString Include="Normal" />
+    <JellyfinString Include="Off" />
+    <JellyfinString Include="OptionCommunityRating" />
+    <JellyfinString Include="OptionParentalRating" />
+    <JellyfinString Include="OptionPlayCount" />
+    <JellyfinString Include="OptionReleaseDate" />
+    <JellyfinString Include="Overview" />
+    <JellyfinString Include="People" />
+    <JellyfinString Include="Person" />
+    <JellyfinString Include="Played" />
+    <JellyfinString Include="Playlists" />
+    <JellyfinString Include="Refresh" />
+    <JellyfinString Include="Reset" />
+    <JellyfinString Include="Save" />
+    <JellyfinString Include="Settings" />
+    <JellyfinString Include="StorageType.Fixed" />
+    <JellyfinString Include="Studios" />
+    <JellyfinString Include="TabServer" />
+    <JellyfinString Include="Tags" />
+    <JellyfinString Include="TasksLibraryCategory" Source="server" />
+    <JellyfinString Include="Unknown" />
+    <JellyfinString Include="ValueSeconds" />
+    <JellyfinString Include="Whitelist" />
+    <JellyfinString Include="Yes" />
+  </ItemGroup>
+
 </Project>

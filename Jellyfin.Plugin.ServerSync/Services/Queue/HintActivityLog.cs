@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using JPKribs.Jellyfin.Base;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,35 +24,71 @@ public sealed class HintActivityLog : IDisposable
 {
     private readonly ActivityLogger _activity;
     private readonly ActivitySummary _summary;
+    private readonly IServerConfigurationManager? _serverConfig;
+    private readonly ActivityOutcome _synced;
+    private readonly ActivityOutcome _notSynced;
+    private readonly ActivityOutcome _retrying;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HintActivityLog"/> class.
     /// </summary>
     /// <param name="activity">Writes entries to the Activity page.</param>
-    public HintActivityLog(ActivityLogger activity)
+    /// <param name="serverConfig">Gives the server's display language the entries are written in, or <c>null</c> for US English.</param>
+    public HintActivityLog(ActivityLogger activity, IServerConfigurationManager? serverConfig = null)
     {
         ArgumentNullException.ThrowIfNull(activity);
         _activity = activity;
+        _serverConfig = serverConfig;
         _summary = new ActivitySummary(activity);
+        _synced = new ActivityOutcome(
+            "ServerSync.HintsApplied",
+            "Synced",
+            t => Text(t.Total == 1 ? TranslationKeys.ActivitySyncedOne : TranslationKeys.ActivitySyncedMany, CountItems(t.Total, Language), ActivityText.CountedList(t.Sources)));
+        _notSynced = new ActivityOutcome(
+            "ServerSync.HintsDropped",
+            "Not Synced",
+            t => Text(t.Total == 1 ? TranslationKeys.ActivityNotSyncedOne : TranslationKeys.ActivityNotSyncedMany, CountItems(t.Total, Language), ActivityText.CountedList(t.Sources), ActivityText.CountedList(t.Reasons)));
+        _retrying = new ActivityOutcome(
+            "ServerSync.HintsRetrying",
+            "Retrying",
+            t => Text(TranslationKeys.ActivityRetrying, CountItems(t.Total, Language), ActivityText.CountedList(t.Sources)),
+            LogLevel.Warning);
     }
+
+    /// <summary>Gets the language entries are written in, the server's display language.</summary>
+    private string? Language => _serverConfig is null ? null : BaseTranslations.ServerLanguage(_serverConfig);
+
+    /// <summary>Gets a string in the entries' language with its placeholders filled.</summary>
+    private string Text(string key, params object?[] args) => BaseTranslations.Format(key, Language, args);
+
+    /// <summary>Counts items, such as "1 item" or "3 items", in a language.</summary>
+    private static string CountItems(int count, string? language)
+        => BaseTranslations.Format(count == 1 ? TranslationKeys.CountItemOne : TranslationKeys.ItemCount, language, count);
+
+    /// <summary>Counts changes, such as "1 change" or "3 changes", in a language.</summary>
+    private static string CountChanges(int count, string? language)
+        => BaseTranslations.Format(count == 1 ? TranslationKeys.CountChangeOne : TranslationKeys.CountChangeMany, language, count);
 
     /// <summary>Describes what a hint concerns, for logs and the dashboard.</summary>
     /// <param name="kind">The sync type the hint belongs to.</param>
     /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
     /// <param name="userName">The username, when the kind concerns a user.</param>
     /// <param name="key">The key, as a fallback.</param>
+    /// <param name="language">The language, or <c>null</c> for US English, as the log reads it.</param>
     /// <returns>The description.</returns>
-    public static string Describe(HintKind kind, string? itemPath, string? userName, string key)
+    public static string Describe(HintKind kind, string? itemPath, string? userName, string key, string? language = null)
     {
         var file = string.IsNullOrEmpty(itemPath) ? null : Path.GetFileNameWithoutExtension(itemPath);
         return kind switch
         {
-            HintKind.History => string.IsNullOrEmpty(userName) ? $"watch history for {file ?? key}" : $"{userName}'s watch history for {file ?? key}",
-            HintKind.Metadata => $"metadata for {file ?? key}",
-            HintKind.People => $"person {userName ?? key}",
-            HintKind.Content => $"file {file ?? key}",
-            HintKind.Users => $"user {userName ?? key}",
-            HintKind.Playlists => $"playlist {userName ?? key}",
+            HintKind.History => string.IsNullOrEmpty(userName)
+                ? BaseTranslations.Format(TranslationKeys.DescribeHistory, language, file ?? key)
+                : BaseTranslations.Format(TranslationKeys.DescribeHistoryOf, language, file ?? key, userName),
+            HintKind.Metadata => BaseTranslations.Format(TranslationKeys.DescribeMetadata, language, file ?? key),
+            HintKind.People => BaseTranslations.Format(TranslationKeys.DescribePerson, language, userName ?? key),
+            HintKind.Content => BaseTranslations.Format(TranslationKeys.DescribeFile, language, file ?? key),
+            HintKind.Users => BaseTranslations.Format(TranslationKeys.DescribeUser, language, userName ?? key),
+            HintKind.Playlists => BaseTranslations.Format(TranslationKeys.DescribePlaylist, language, userName ?? key),
             _ => key
         };
     }
@@ -61,23 +98,27 @@ public sealed class HintActivityLog : IDisposable
     /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
     /// <param name="userName">The username, when the kind concerns a user.</param>
     /// <param name="key">The key, as a fallback.</param>
+    /// <param name="language">The language, or <c>null</c> for US English.</param>
     /// <returns>The subject.</returns>
-    public static string Subject(HintKind kind, string? itemPath, string? userName, string key)
-        => SubjectOf(kind, NameOf(kind, itemPath, userName, key), userName);
+    public static string Subject(HintKind kind, string? itemPath, string? userName, string key, string? language = null)
+        => SubjectOf(kind, NameOf(kind, itemPath, userName, key), userName, language);
 
     /// <summary>Words the subject of a hint around a name already chosen, such as a Jellyfin title.</summary>
     /// <param name="kind">The sync type the hint belongs to.</param>
     /// <param name="name">The item's, person's, or user's name.</param>
     /// <param name="userName">The username, when watch history is concerned.</param>
+    /// <param name="language">The language, or <c>null</c> for US English.</param>
     /// <returns>The subject.</returns>
-    public static string SubjectOf(HintKind kind, string name, string? userName) => kind switch
+    public static string SubjectOf(HintKind kind, string name, string? userName, string? language = null) => kind switch
     {
-        HintKind.History => string.IsNullOrEmpty(userName) ? $"Watch history for {name}" : $"Watch history for {name} ({userName})",
-        HintKind.Metadata => $"Metadata for {name}",
-        HintKind.People => $"Person {name}",
-        HintKind.Content => $"File {name}",
-        HintKind.Users => $"User {name}",
-        HintKind.Playlists => $"Playlist {name}",
+        HintKind.History => string.IsNullOrEmpty(userName)
+            ? BaseTranslations.Format(TranslationKeys.SubjectHistory, language, name)
+            : BaseTranslations.Format(TranslationKeys.SubjectHistoryOf, language, name, userName),
+        HintKind.Metadata => BaseTranslations.Format(TranslationKeys.SubjectMetadata, language, name),
+        HintKind.People => BaseTranslations.Format(TranslationKeys.SubjectPerson, language, name),
+        HintKind.Content => BaseTranslations.Format(TranslationKeys.SubjectFile, language, name),
+        HintKind.Users => BaseTranslations.Format(TranslationKeys.SubjectUser, language, name),
+        HintKind.Playlists => BaseTranslations.Format(TranslationKeys.SubjectPlaylist, language, name),
         _ => name
     };
 
@@ -107,7 +148,7 @@ public sealed class HintActivityLog : IDisposable
     public Task AppliedAsync(InboundHint hint, string originName, HintApplyResult result = default)
     {
         ArgumentNullException.ThrowIfNull(hint);
-        _summary.Add(Synced, originName);
+        _summary.Add(_synced, originName);
         return Task.CompletedTask;
     }
 
@@ -121,7 +162,7 @@ public sealed class HintActivityLog : IDisposable
     public Task DroppedAsync(InboundHint hint, string originName, HintCode code)
     {
         ArgumentNullException.ThrowIfNull(hint);
-        _summary.Add(NotSynced, originName, ReasonOf(code));
+        _summary.Add(_notSynced, originName, ReasonOf(code, Language));
         return Task.CompletedTask;
     }
 
@@ -138,7 +179,7 @@ public sealed class HintActivityLog : IDisposable
         ArgumentNullException.ThrowIfNull(hint);
         if (hint.Attempts is 1 or 5)
         {
-            _summary.Add(Retrying, originName);
+            _summary.Add(_retrying, originName);
         }
 
         return Task.CompletedTask;
@@ -153,11 +194,14 @@ public sealed class HintActivityLog : IDisposable
     public Task PausedAsync(string peerName, string reason, IReadOnlyList<OutboundHint> waiting, DateTime until)
     {
         ArgumentNullException.ThrowIfNull(waiting);
-        var held = waiting.Count == 0 ? string.Empty : $". {ActivityText.Count(waiting.Count, "change")} wait to go";
+        var at = until.ToLocalTime().ToString("t", System.Globalization.CultureInfo.CurrentCulture);
+        var overview = waiting.Count == 0
+            ? Text(TranslationKeys.ActivityPausedOverview, ActivityText.Sentence(reason), peerName, at)
+            : Text(TranslationKeys.ActivityPausedWaiting, ActivityText.Sentence(reason), peerName, at, CountChanges(waiting.Count, Language));
         return WriteAsync(
-            $"Changes Paused for {peerName}",
+            Text(TranslationKeys.ActivityPausedName, peerName),
             "ServerSync.PeerPaused",
-            $"{ActivityText.Sentence(reason)}. Changes are sent to {peerName} again at {until.ToLocalTime():t}{held}",
+            overview,
             LogLevel.Warning);
     }
 
@@ -170,9 +214,9 @@ public sealed class HintActivityLog : IDisposable
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
-            $"Changes Rejected by {peerName}",
+            Text(TranslationKeys.ActivityRejectedName, peerName),
             "ServerSync.HintRejected",
-            $"{peerName} rejected {ActivityText.Count(rows.Count, "change")} as malformed and they are marked failed: {reason}",
+            Text(TranslationKeys.ActivityRejectedOverview, peerName, CountChanges(rows.Count, Language), reason),
             LogLevel.Error);
     }
 
@@ -184,28 +228,11 @@ public sealed class HintActivityLog : IDisposable
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
-            $"Changes Resent to {peerName}",
+            Text(TranslationKeys.ActivityResentName, peerName),
             "ServerSync.HintResent",
-            $"{ActivityText.Count(rows.Count, "change")} {(rows.Count == 1 ? "was" : "were")} sent to {peerName} again after it lost them, as happens when it restarts before reporting them done",
+            Text(rows.Count == 1 ? TranslationKeys.ActivityResentOne : TranslationKeys.ActivityResentMany, CountChanges(rows.Count, Language), peerName),
             LogLevel.Warning);
     }
-
-    /// <summary>The summed entry for applied changes, written once the queue is quiet and every few minutes in a long burst.</summary>
-    private static readonly ActivityOutcome Synced = new(
-        "ServerSync.HintsApplied",
-        "Synced",
-        t => $"{ActivityText.Count(t.Total, "item")} {ActivityText.WasOrWere(t.Total)} synced from {ActivityText.CountedList(t.Sources)}");
-
-    private static readonly ActivityOutcome NotSynced = new(
-        "ServerSync.HintsDropped",
-        "Not Synced",
-        t => $"{ActivityText.Count(t.Total, "item")} from {ActivityText.CountedList(t.Sources)} {ActivityText.WasOrWere(t.Total)} not synced: {ActivityText.CountedList(t.Reasons)}");
-
-    private static readonly ActivityOutcome Retrying = new(
-        "ServerSync.HintsRetrying",
-        "Retrying",
-        t => $"{ActivityText.Count(t.Total, "item")} from {ActivityText.CountedList(t.Sources)} could not be applied yet and will be retried",
-        LogLevel.Warning);
 
     /// <inheritdoc />
     public void Dispose() => _summary.Dispose();
@@ -215,44 +242,52 @@ public sealed class HintActivityLog : IDisposable
 
     /// <summary>Words a short reason a change was not synced, for the summary.</summary>
     /// <param name="code">The code it was dropped with.</param>
+    /// <param name="language">The language, or <c>null</c> for US English.</param>
     /// <returns>The reason.</returns>
-    public static string ReasonOf(HintCode code) => code switch
-    {
-        HintCode.Filtered => "filtered out",
-        HintCode.NotMapped => "not in a mapped library",
-        HintCode.Ignored => "ignored here",
-        HintCode.ModuleOff => "sync type off",
-        HintCode.Priority => "another server provides it",
-        HintCode.SourceGone => "gone from the source",
-        HintCode.Unreadable => "path not given",
-        HintCode.NoLocalItem => "never arrived here",
-        HintCode.GaveUp => "failed too often",
-        HintCode.Unsupported => "not supported",
-        HintCode.Invalid => "invalid",
-        _ => "could not apply"
-    };
+    public static string ReasonOf(HintCode code, string? language = null) => BaseTranslations.Get(
+        code switch
+        {
+            HintCode.Filtered => TranslationKeys.ReasonFiltered,
+            HintCode.NotMapped => TranslationKeys.ReasonNotMapped,
+            HintCode.Ignored => TranslationKeys.ReasonIgnored,
+            HintCode.ModuleOff => TranslationKeys.ReasonModuleOff,
+            HintCode.Priority => TranslationKeys.ReasonPriority,
+            HintCode.SourceGone => TranslationKeys.ReasonSourceGone,
+            HintCode.Unreadable => TranslationKeys.ReasonUnreadable,
+            HintCode.NoLocalItem => TranslationKeys.ReasonNoLocalItem,
+            HintCode.GaveUp => TranslationKeys.ReasonGaveUp,
+            HintCode.Unsupported => TranslationKeys.ReasonUnsupported,
+            HintCode.Invalid => TranslationKeys.ReasonInvalid,
+            _ => TranslationKeys.ReasonCouldNotApply
+        },
+        language);
 
     /// <summary>Lists the subjects of some changes in a sentence, naming at most a few and counting the rest.</summary>
     /// <param name="rows">The changes whose subjects are listed.</param>
     /// <param name="shown">How many subjects to name.</param>
+    /// <param name="language">The language, or <c>null</c> for US English.</param>
     /// <returns>The list.</returns>
-    public static string Changes(IReadOnlyList<OutboundHint> rows, int shown = 5)
+    public static string Changes(IReadOnlyList<OutboundHint> rows, int shown = 5, string? language = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        var names = rows.Select(row => Subject(row.Kind, row.ItemPath, row.UserName, row.Key)).Distinct(StringComparer.Ordinal).ToList();
+        var names = rows.Select(row => Subject(row.Kind, row.ItemPath, row.UserName, row.Key, language)).Distinct(StringComparer.Ordinal).ToList();
         if (names.Count == 0)
         {
-            return "changes";
+            return BaseTranslations.Get(TranslationKeys.ChangesWord, language);
         }
 
         var listed = names.Count > shown ? names.GetRange(0, shown) : names;
-        var text = listed.Count switch
+        if (names.Count > shown)
+        {
+            return BaseTranslations.Format(TranslationKeys.ListAndMore, language, string.Join(", ", listed), names.Count - shown);
+        }
+
+        return listed.Count switch
         {
             1 => listed[0],
-            2 => $"{listed[0]} and {listed[1]}",
-            _ => string.Join(", ", listed.GetRange(0, listed.Count - 1)) + ", and " + listed[^1]
+            2 => BaseTranslations.Format(TranslationKeys.ListTwo, language, listed[0], listed[1]),
+            _ => BaseTranslations.Format(TranslationKeys.ListLast, language, string.Join(", ", listed.GetRange(0, listed.Count - 1)), listed[^1])
         };
-        return names.Count > shown ? $"{string.Join(", ", listed)}, and {names.Count - shown} more" : text;
     }
 
     /// <summary>Writes one entry, cut to what the Activity page keeps, without ever throwing.</summary>

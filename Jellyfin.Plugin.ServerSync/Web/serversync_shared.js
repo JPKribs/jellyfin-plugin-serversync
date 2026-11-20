@@ -2,6 +2,9 @@
 // Wraps the Base shared bundle for the Server Sync pages. It re-exports Base's table and dialog builders
 // and adds createServerSyncShared(view), the helper bag with the Server Sync helpers the pages use.
 //
+// Every page loads the plugin's strings once from TRANSLATIONS_URL. The bag's t is the handle, and a page's
+// bind and load run once it has them, so script text and the marked markup are in the viewer's language.
+//
 // The Storage tab shows while content, history, or metadata sync is on. A page cannot wait for the config
 // before it sets its tabs, so the last known answer is kept per browser under STORAGE_TAB_KEY.
 // A missing answer shows the tab. When the answer changes, the page's onTabsChanged callback runs.
@@ -24,6 +27,8 @@ import {
     confirmDialog,
     createConfigPage,
     setTabs,
+    loadTranslations,
+    createTranslations,
     SECRET_KEPT
 } from './configurationpage?name=serversync_jpkribs_shared.js';
 
@@ -32,6 +37,13 @@ import {
 export { createPaginatedTable, createSortableCardList, createChoiceGroup, createCheckboxList, createPieChart, createBarChart, createLineChart, createUsageMeter, createRepeater, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
+
+// TRANSLATIONS_URL
+// The route that gives the pages their strings in the viewer's language.
+export var TRANSLATIONS_URL = 'Sync/Translations';
+
+// The strings once a page has loaded them, so the tab names follow the viewer's language.
+var tabStrings = null;
 
 // STORAGE_TAB_KEY
 // The browser storage key that holds whether the Storage tab shows. Each page controller reads it
@@ -64,6 +76,19 @@ function writeStorageTabFlag(value) {
     }
 }
 
+// tabName
+// Names a tab in the viewer's language, or in English until the strings have loaded.
+//
+// Inputs
+// key [string]: The key of the tab's name.
+// english [string]: The name to show before the strings load.
+//
+// Output
+// [string]: The tab's name.
+function tabName(key, english) {
+    return tabStrings ? tabStrings.tr(key, english) : english;
+}
+
 // serverSyncTabs
 // Lists the dashboard tabs in order. The Storage tab shows unless the last config read said no sync type uses it.
 //
@@ -74,17 +99,18 @@ function writeStorageTabFlag(value) {
 // [object[]]: Each tab's href and name.
 export function serverSyncTabs(alwaysStorage) {
     var tabs = [
-        { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-        { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
+        { href: 'configurationpage?name=serversync_sync', name: tabName('TabSync', 'Sync') },
+        { href: 'configurationpage?name=serversync_servers', name: tabName('TabServers', 'Servers') }
     ];
-    if (alwaysStorage || readStorageTabFlag() !== '0') tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
-    tabs.push({ href: 'configurationpage?name=serversync_statistics', name: 'Statistics' });
-    tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
+    if (alwaysStorage || readStorageTabFlag() !== '0') tabs.push({ href: 'configurationpage?name=serversync_storage', name: tabName('TabStorage', 'Storage') });
+    tabs.push({ href: 'configurationpage?name=serversync_statistics', name: tabName('TabStatistics', 'Statistics') });
+    tabs.push({ href: 'configurationpage?name=serversync_settings', name: tabName('Settings', 'Settings') });
     return tabs;
 }
 
 // createServerSyncPage
 // Wires a Server Sync page through Base's page lifecycle, with the Server Sync helper bag and the shared tabs.
+// The page's bind and load wait for the strings, and the marked markup is translated before bind runs.
 //
 // Inputs
 // view [HTMLElement]: The page the dashboard passes to the controller.
@@ -102,14 +128,23 @@ export function createServerSyncPage(view, opts) {
         return index < 0 ? 0 : index;
     };
     var pass = function (fn) { return fn ? function (shared, page) { fn(bag, page); } : undefined; };
+    var bound = null;
     var page = createConfigPage(view, {
         pluginId: PLUGIN_ID,
         apiPrefix: 'Sync',
         tabsKey: 'serversync',
         get tabIndex() { return tabIndex(); },
         tabs: tabs,
-        bind: pass(opts.bind),
-        load: pass(opts.load),
+        bind: function () {
+            bound = bag.translations.then(function (t) {
+                t.apply(view);
+                if (!view.classList.contains('hide')) setTabs('serversync', tabIndex(), tabs);
+                if (opts.bind) opts.bind(bag, page);
+            });
+        },
+        load: function () {
+            bound.then(function () { if (opts.load) opts.load(bag, page); });
+        },
         onHide: pass(opts.onHide)
     });
     bag = createServerSyncShared(view, page.shared);
@@ -135,6 +170,14 @@ export function createServerSyncShared(view, bag) {
     var shared = bag || baseCreateShared(view, PLUGIN_ID, 'Sync');
 
     shared.SECRET_KEPT = SECRET_KEPT;
+
+    // The plugin's strings. t has none until translations resolves, which every page waits for.
+    shared.t = createTranslations({});
+    shared.translations = loadTranslations(TRANSLATIONS_URL).then(function (t) {
+        shared.t = t;
+        tabStrings = t;
+        return t;
+    });
 
     // Set by a page to set its tabs again when the Storage tab appears or disappears.
     shared.onTabsChanged = null;
@@ -332,10 +375,10 @@ export function createServerSyncShared(view, bag) {
     // server [object]: The configured server.
     //
     // Output
-    // [string]: The name, or "Source" when there is none.
+    // [string]: The name, or the word for Source when there is none.
     shared.serverDisplayName = function (server) {
-        if (!server) return 'Source';
-        return server.Name || server.ServerName || server.Url || 'Source';
+        if (!server) return shared.t.tr('LabelSource');
+        return server.Name || server.ServerName || server.Url || shared.t.tr('LabelSource');
     };
 
     // serverNameFor
@@ -424,17 +467,19 @@ export function createServerSyncShared(view, bag) {
     };
 
     // plural
-    // Writes a count with the right form of a noun, such as "1 item" or "3 items".
+    // Writes a text with a count in the right form, such as "1 item ignored." or "3 items ignored.".
     //
     // Inputs
-    // count [number]: How many there are.
-    // one [string]: The noun for exactly one.
-    // many [string]: The noun for any other count.
+    // count [number]: How many there are, filled in as {0}.
+    // one [string]: The key of the text for exactly one.
+    // many [string]: The key of the text for any other count.
+    // ...args [any]: More values, filled in as {1}, {2}.
     //
     // Output
-    // [string]: The count, a space, and the noun.
+    // [string]: The text in the viewer's language.
     shared.plural = function (count, one, many) {
-        return count + ' ' + (count === 1 ? one : many);
+        var args = Array.prototype.slice.call(arguments, 3);
+        return shared.t.format.apply(null, [count === 1 ? one : many, count].concat(args));
     };
 
     // syncStatus
@@ -451,13 +496,13 @@ export function createServerSyncShared(view, bag) {
     // Reads this server's name, once, and keeps it in localServerName.
     //
     // Output
-    // [Promise]: Resolves with the name, or "Local" when it could not be read.
+    // [Promise]: Resolves with the name, or the word for Local when it could not be read.
     shared.fetchLocalServerName = function () {
         return ApiClient.getPublicSystemInfo().then(function (info) {
-            shared.localServerName = info.ServerName || 'Local';
+            shared.localServerName = info.ServerName || shared.t.tr('ServerLocal');
             return shared.localServerName;
         }).catch(function () {
-            shared.localServerName = 'Local';
+            shared.localServerName = shared.t.tr('ServerLocal');
             return shared.localServerName;
         });
     };
@@ -483,10 +528,10 @@ export function createServerSyncShared(view, bag) {
                 banner.setAttribute('role', 'alert');
                 host.insertBefore(banner, host.firstChild);
             }
-            banner.textContent = health.Message || 'Server Sync cannot run on this database.';
+            banner.textContent = health.Message || shared.t.tr('ErrorDatabaseHeld');
         }).catch(function () { });
     };
-    shared.showHealth();
+    shared.translations.then(shared.showHealth);
 
     return shared;
 }

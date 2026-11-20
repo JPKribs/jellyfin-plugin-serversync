@@ -100,8 +100,8 @@ export default function (view) {
             idKey: 'Id',
             value: selectedIds || [],
             searchKeys: ['Name', 'ServerName'],
-            placeholder: 'Search Users',
-            emptyMessage: 'No source users available. Add a server and connect to it to load users.',
+            placeholder: ServerSyncShared.t.tr('PlaceholderSearchUsers'),
+            emptyMessage: ServerSyncShared.t.tr('EmptySourceUsers'),
             renderRow: function (user) {
                 return {
                     label: user.Name || '',
@@ -142,7 +142,7 @@ export default function (view) {
                 return server.IsEnabled !== false && pulls && (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
             }).map(function (server) {
                 return '<div class="serversync-form-row" data-server-key="' + escapeHtml(server.Key) + '">' +
-                    '<span class="serversync-form-label">From ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="serversync-form-hint">Links this server takes from it at once</span></span>' +
+                    '<span class="serversync-form-label"><span>' + escapeHtml(ServerSyncShared.t.format('LabelLinksFromServer', ServerSyncShared.serverDisplayName(server))) + '</span><span class="serversync-form-hint">' + escapeHtml(ServerSyncShared.t.tr('HintLinksTakenAtOnce')) + '</span></span>' +
                     '<span class="serversync-form-cell"><input is="emby-input" type="number" min="0" max="1000" class="serversync-form-input serversync-link-take" value="' + escapeHtml(String(server.LinkTakeMaxStreams || 0)) + '" /></span>' +
                 '</div>';
             }).join('');
@@ -206,9 +206,9 @@ export default function (view) {
         if (rows) {
             rows.innerHTML = linkingServers(config).map(function (server) {
                 return '<div class="serversync-form-row" data-server-key="' + escapeHtml(server.Key) + '">' +
-                    '<span class="serversync-form-label">Streams to ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="serversync-form-hint">Each stream and cache download it gets</span></span>' +
-                    '<span class="serversync-form-cell"><input is="emby-input" type="number" min="0" max="100000" class="serversync-form-input serversync-stream-speed" value="' + escapeHtml(String(server.LinkStreamSpeedMbps || 0)) + '" /><span class="serversync-unit">Mbps</span></span>' +
-                    '<span class="serversync-form-cell serversync-schedule-cell"><input is="emby-input" type="number" min="0" max="100000" class="serversync-form-input serversync-stream-scheduled-speed" value="' + escapeHtml(String(server.LinkScheduledStreamSpeedMbps || 0)) + '" /><span class="serversync-unit">Mbps</span></span>' +
+                    '<span class="serversync-form-label"><span>' + escapeHtml(ServerSyncShared.t.format('LabelStreamsToServer', ServerSyncShared.serverDisplayName(server))) + '</span><span class="serversync-form-hint">' + escapeHtml(ServerSyncShared.t.tr('HintEachStreamAndCache')) + '</span></span>' +
+                    '<span class="serversync-form-cell"><input is="emby-input" type="number" min="0" max="100000" class="serversync-form-input serversync-stream-speed" value="' + escapeHtml(String(server.LinkStreamSpeedMbps || 0)) + '" /><span class="serversync-unit">' + escapeHtml(ServerSyncShared.t.tr('UnitMbps')) + '</span></span>' +
+                    '<span class="serversync-form-cell serversync-schedule-cell"><input is="emby-input" type="number" min="0" max="100000" class="serversync-form-input serversync-stream-scheduled-speed" value="' + escapeHtml(String(server.LinkScheduledStreamSpeedMbps || 0)) + '" /><span class="serversync-unit">' + escapeHtml(ServerSyncShared.t.tr('UnitMbps')) + '</span></span>' +
                 '</div>';
             }).join('');
         }
@@ -250,7 +250,7 @@ export default function (view) {
                     server.LinkScheduledStreamSpeedMbps = speed.scheduled;
                 }
             });
-        }, 'saveBandwidthStatus', 'Bandwidth saved.', 'Could not save the bandwidth.');
+        }, 'saveBandwidthStatus', ServerSyncShared.t.tr('ToastBandwidthSaved'), ServerSyncShared.t.tr('ErrorSaveBandwidth'));
     }
 
     // What the link cache holds now, shown under its settings.
@@ -259,11 +259,12 @@ export default function (view) {
         if (!status) return;
         apiRequest('LinkCache', 'GET').then(function (cache) {
             if (!cache || !cache.Enabled) {
-                status.textContent = 'The cache is off.';
+                status.textContent = ServerSyncShared.t.tr('StatusLinkCacheOff');
                 return;
             }
-            status.textContent = ServerSyncShared.plural(cache.Files, 'file', 'files') + ', ' + cache.UsedFormatted + ' of ' + cache.LimitFormatted + ' used'
-                + (cache.Waiting ? ', ' + cache.Waiting + ' waiting to be cached' : '') + '. Kept at ' + cache.Location + '.';
+            status.textContent = cache.Waiting
+                ? ServerSyncShared.plural(cache.Files, 'StatusLinkCacheWaitingOne', 'StatusLinkCacheWaitingMany', cache.UsedFormatted, cache.LimitFormatted, cache.Location, cache.Waiting)
+                : ServerSyncShared.plural(cache.Files, 'StatusLinkCacheOne', 'StatusLinkCacheMany', cache.UsedFormatted, cache.LimitFormatted, cache.Location);
         }).catch(function () {
             status.textContent = '';
         });
@@ -272,9 +273,10 @@ export default function (view) {
     // clearLinkCache
     // Asks first, then deletes every file in the link cache.
     function clearLinkCache() {
-        confirmDialog('Delete every cached file? Links keep playing from their sources.', {
-            title: 'Delete Cached Files',
-            confirmText: 'Delete',
+        confirmDialog(ServerSyncShared.t.tr('ConfirmDeleteCachedFiles'), {
+            title: ServerSyncShared.t.tr('ButtonDeleteCachedFiles'),
+            confirmText: ServerSyncShared.t.tr('Delete'),
+            cancelText: ServerSyncShared.t.tr('ButtonCancel'),
             destructive: true
         }).then(function (confirmed) {
             if (!confirmed) return;
@@ -331,7 +333,7 @@ export default function (view) {
             config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
             config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
             config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
-        }, 'saveContentStatus', 'Content settings saved.', 'Could not save the content settings.').then(loadLinkCacheStatus);
+        }, 'saveContentStatus', ServerSyncShared.t.tr('ToastContentSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveContentSettings')).then(loadLinkCacheStatus);
     }
 
     function loadHistorySettings(config) {
@@ -351,7 +353,7 @@ export default function (view) {
             config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
             config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
             config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
-        }, 'saveHistoryStatus', 'History settings saved.', 'Could not save the history settings.');
+        }, 'saveHistoryStatus', ServerSyncShared.t.tr('ToastHistorySettingsSaved'), ServerSyncShared.t.tr('ErrorSaveHistorySettings'));
     }
 
     // A choice is saved by name and may be read back by name or by number.
@@ -399,7 +401,7 @@ export default function (view) {
             config.MetadataSyncConsolidateOutros = getChecked('chkMetadataSyncConsolidateOutros');
             config.MetadataSyncConsolidateOtherSegments = getChecked('chkMetadataSyncConsolidateOtherSegments');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
-        }, 'saveMetadataStatus', 'Metadata settings saved.', 'Could not save the metadata settings.');
+        }, 'saveMetadataStatus', ServerSyncShared.t.tr('ToastMetadataSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveMetadataSettings'));
     }
 
     function loadPeopleSettings(config) {
@@ -415,7 +417,7 @@ export default function (view) {
             config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
             config.PeopleSyncProvider = getChecked('chkPeopleSyncProvider');
             config.PeopleSyncPrecedence = getValue('selPeopleSyncPrecedence') || 'Newest';
-        }, 'savePeopleStatus', 'People settings saved.', 'Could not save the people settings.');
+        }, 'savePeopleStatus', ServerSyncShared.t.tr('ToastPeopleSettingsSaved'), ServerSyncShared.t.tr('ErrorSavePeopleSettings'));
     }
 
     function loadUserSyncSettings(config) {
@@ -435,7 +437,7 @@ export default function (view) {
             config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
             config.UserSyncPrecedence = getValue('selUserSyncPrecedence') || 'Newest';
             config.UserSyncConflict = getValue('selUserSyncConflict') || 'Newest';
-        }, 'saveUserSyncStatus', 'User settings saved.', 'Could not save the user settings.');
+        }, 'saveUserSyncStatus', ServerSyncShared.t.tr('ToastUserSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveUserSettings'));
     }
 
     function hasUserMapping(config) {
@@ -471,7 +473,7 @@ export default function (view) {
             config.PlaylistSyncShares = getChecked('chkPlaylistSyncShares');
             config.PlaylistSyncPrecedence = getValue('selPlaylistSyncPrecedence') || 'Newest';
             config.PlaylistRemovedAction = getValue('selPlaylistRemovedAction') || 'Delete';
-        }, 'savePlaylistStatus', 'Playlist settings saved.', 'Could not save the playlist settings.');
+        }, 'savePlaylistStatus', ServerSyncShared.t.tr('ToastPlaylistSettingsSaved'), ServerSyncShared.t.tr('ErrorSavePlaylistSettings'));
     }
 
     function loadProcessingSettings(config) {
@@ -505,7 +507,7 @@ export default function (view) {
             config.FullScanIntervalHours = Math.min(720, Math.max(0, getIntValue('txtFullScanIntervalHours', 24)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
             config.MaxRetryCount = Math.min(10, Math.max(1, getIntValue('txtMaxRetryCount', 3)));
-        }, 'saveProcessingStatus', 'Processing settings saved.', 'Could not save the processing settings.');
+        }, 'saveProcessingStatus', ServerSyncShared.t.tr('ToastProcessingSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveProcessingSettings'));
     }
 
     var grantUsers = [];
@@ -531,7 +533,7 @@ export default function (view) {
     // Output
     // [object[]]: The choices as { value, label }.
     function grantChoices(grants) {
-        var choices = [{ value: '', label: 'Select a user' }, { value: 'apikey', label: 'API Keys' }];
+        var choices = [{ value: '', label: ServerSyncShared.t.tr('OptionSelectUser') }, { value: 'apikey', label: ServerSyncShared.t.tr('HeaderApiKeys') }];
         var known = { apikey: true };
         grantUsers.forEach(function (u) {
             known[u.Id] = true;
@@ -581,13 +583,13 @@ export default function (view) {
             var choices = grantChoices(grants);
             var handle = serverSyncModule.createRepeater({
                 fields: [
-                    { key: 'UserId', label: 'User', type: 'select', options: choices, width: '1fr' },
-                    { key: 'Locations', label: 'Locations', type: 'text', placeholder: 'Default', width: '2fr' }
+                    { key: 'UserId', label: ServerSyncShared.t.tr('HeaderUser'), type: 'select', options: choices, width: '1fr' },
+                    { key: 'Locations', label: ServerSyncShared.t.tr('LabelLocations'), type: 'text', placeholder: ServerSyncShared.t.tr('Default'), width: '2fr' }
                 ],
                 value: grants.map(function (g) { return { UserId: g.UserId, Locations: g.Locations }; }),
-                addText: 'Add User',
-                rowName: 'User',
-                emptyText: 'No user is listed.'
+                addText: ServerSyncShared.t.tr('ButtonAddUser'),
+                rowName: ServerSyncShared.t.tr('HeaderUser'),
+                emptyText: ServerSyncShared.t.tr('EmptyWhitelistUsers')
             });
             grantRepeater = { handle: handle, choices: choices };
             container.appendChild(handle.element);
@@ -600,7 +602,7 @@ export default function (view) {
         var grants = collectGrants();
         saveSection(function (config) {
             config.PeerCallerGrants = grants;
-        }, 'saveCallerAccessStatus', 'Whitelist saved.', 'Could not save the whitelist.');
+        }, 'saveCallerAccessStatus', ServerSyncShared.t.tr('ToastWhitelistSaved'), ServerSyncShared.t.tr('ErrorSaveWhitelist'));
     }
 
     function loadConfig() {
@@ -626,7 +628,7 @@ export default function (view) {
             loadCallerAccessSettings(config);
             fetchWatchedFilterUsers();
         }).catch(function() {
-            ServerSyncShared.setStatus('settingsStatus', 'Could not load the settings. Reload the page.', true, { timeout: 0 });
+            ServerSyncShared.setStatus('settingsStatus', ServerSyncShared.t.tr('ErrorLoadSettings'), true, { timeout: 0 });
         });
     }
 
@@ -643,7 +645,8 @@ export default function (view) {
         return confirmDialog(paragraphs.map(function (p) { return '<p>' + escapeHtml(p) + '</p>'; }).join(''), {
             html: true,
             title: title,
-            confirmText: 'Reset',
+            confirmText: ServerSyncShared.t.tr('Reset'),
+            cancelText: ServerSyncShared.t.tr('ButtonCancel'),
             destructive: true
         });
     }
@@ -653,19 +656,18 @@ export default function (view) {
     //
     // Inputs
     // table [string]: The route name of the table.
-    // tableName [string]: What the table is called in the question and the result, such as "content sync".
-    function resetTable(table, tableName) {
-        confirmReset('Reset Table', [
-            'Reset the ' + tableName + ' table?',
-            'This forgets all of its tracking data, and the next scan starts over. It cannot be undone.'
-        ]).then(function (confirmed) {
+    // question [string]: The question the dialog asks, naming the table.
+    // done [string]: What the status says when the reset worked.
+    // failed [string]: What the status says when it did not.
+    function resetTable(table, question, done, failed) {
+        confirmReset(ServerSyncShared.t.tr('TitleResetTable'), [question, ServerSyncShared.t.tr('ConfirmResetTableCost')]).then(function (confirmed) {
             if (!confirmed) return;
 
             ServerSyncShared.apiRequest('Reset/' + table, 'POST').then(function() {
-                ServerSyncShared.setStatus('resetStatus', tableName.charAt(0).toUpperCase() + tableName.slice(1) + ' table reset.', false);
+                ServerSyncShared.setStatus('resetStatus', done, false);
             }).catch(function(err) {
                 console.error('Reset ' + table + ' error:', err);
-                ServerSyncShared.setStatus('resetStatus', 'Could not reset the ' + tableName + ' table.', true, { timeout: 10000 });
+                ServerSyncShared.setStatus('resetStatus', failed, true, { timeout: 10000 });
             });
         });
     }
@@ -673,17 +675,17 @@ export default function (view) {
     // resetEntireDatabase
     // Asks first, then forgets the tracking of every sync table. Media is untouched.
     function resetEntireDatabase() {
-        confirmReset('Reset Database', [
-            'Reset the entire sync database?',
-            'This forgets all tracking data for every sync type, and everything starts over. It cannot be undone.'
+        confirmReset(ServerSyncShared.t.tr('TitleResetDatabase'), [
+            ServerSyncShared.t.tr('ConfirmResetDatabase'),
+            ServerSyncShared.t.tr('ConfirmResetDatabaseCost')
         ]).then(function (confirmed) {
             if (!confirmed) return;
 
             ServerSyncShared.apiRequest('Reset/All', 'POST').then(function() {
-                ServerSyncShared.setStatus('resetStatus', 'Database reset.', false);
+                ServerSyncShared.setStatus('resetStatus', ServerSyncShared.t.tr('ToastDatabaseReset'), false);
             }).catch(function(err) {
                 console.error('Reset All error:', err);
-                ServerSyncShared.setStatus('resetStatus', 'Could not reset the database.', true, { timeout: 10000 });
+                ServerSyncShared.setStatus('resetStatus', ServerSyncShared.t.tr('ErrorResetDatabase'), true, { timeout: 10000 });
             });
         });
     }
@@ -705,12 +707,12 @@ export default function (view) {
         bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
         bindClick('btnSavePlaylistSettings', savePlaylistSettings);
 
-        bindClick('btnResetContentTable', function() { resetTable('Content', 'content sync'); });
-        bindClick('btnResetHistoryTable', function() { resetTable('History', 'history sync'); });
-        bindClick('btnResetMetadataTable', function() { resetTable('Metadata', 'metadata sync'); });
-        bindClick('btnResetPeopleTable', function() { resetTable('People', 'people sync'); });
-        bindClick('btnResetPlaylistTable', function() { resetTable('Playlists', 'playlist sync'); });
-        bindClick('btnResetUserTable', function() { resetTable('Users', 'user sync'); });
+        bindClick('btnResetContentTable', function() { resetTable('Content', ServerSyncShared.t.tr('ConfirmResetContentTable'), ServerSyncShared.t.tr('ToastContentTableReset'), ServerSyncShared.t.tr('ErrorResetContentTable')); });
+        bindClick('btnResetHistoryTable', function() { resetTable('History', ServerSyncShared.t.tr('ConfirmResetHistoryTable'), ServerSyncShared.t.tr('ToastHistoryTableReset'), ServerSyncShared.t.tr('ErrorResetHistoryTable')); });
+        bindClick('btnResetMetadataTable', function() { resetTable('Metadata', ServerSyncShared.t.tr('ConfirmResetMetadataTable'), ServerSyncShared.t.tr('ToastMetadataTableReset'), ServerSyncShared.t.tr('ErrorResetMetadataTable')); });
+        bindClick('btnResetPeopleTable', function() { resetTable('People', ServerSyncShared.t.tr('ConfirmResetPeopleTable'), ServerSyncShared.t.tr('ToastPeopleTableReset'), ServerSyncShared.t.tr('ErrorResetPeopleTable')); });
+        bindClick('btnResetPlaylistTable', function() { resetTable('Playlists', ServerSyncShared.t.tr('ConfirmResetPlaylistTable'), ServerSyncShared.t.tr('ToastPlaylistTableReset'), ServerSyncShared.t.tr('ErrorResetPlaylistTable')); });
+        bindClick('btnResetUserTable', function() { resetTable('Users', ServerSyncShared.t.tr('ConfirmResetUserTable'), ServerSyncShared.t.tr('ToastUserTableReset'), ServerSyncShared.t.tr('ErrorResetUserTable')); });
         bindClick('btnResetEntireDatabase', resetEntireDatabase);
     }
 }

@@ -22,6 +22,15 @@ export function createContentSyncTableModule(ctx, kit) {
     var renderRowInfo = kit.renderRowInfo;
     var setHealthLastSync = kit.setHealthLastSync;
     var setHealthCount = kit.setHealthCount;
+    var t = ServerSyncShared.t;
+
+    // PENDING_KEYS
+    // The key of each pending status's name, by the pending type the server sends.
+    var PENDING_KEYS = { Download: 'StatusPendingDownload', Replacement: 'StatusPendingReplacement', Deletion: 'StatusPendingDeletion' };
+
+    // STATUS_KEYS
+    // The key of each status's name, by the status the server sends.
+    var STATUS_KEYS = { Synced: 'StatusSynced', Queued: 'StatusQueued', Errored: 'StatusErrored', Ignored: 'StatusIgnored', Pending: 'StatusPending', Deleting: 'StatusDeleting' };
 
     var SyncTableModule = createSyncTableModule({
         name: '',
@@ -38,36 +47,48 @@ export function createContentSyncTableModule(ctx, kit) {
             { id: 'Delete', method: 'modalDelete' }
         ],
         bulkButtons: [
-            { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
-            { id: 'MarkSynced', title: 'Mark Synced', icon: 'check_circle', method: 'bulkMarkSynced' },
-            { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'base-button primary', method: 'bulkQueue' },
-            { id: 'MakeCopy', title: 'Keep a Copy', icon: 'push_pin', method: 'bulkMakeCopy' },
-            { id: 'Delete', title: 'Delete Local File', icon: 'delete', className: 'base-button destructive', method: 'bulkDelete' }
+            { id: 'Ignore', title: t.tr('ButtonIgnore'), icon: 'block', method: 'bulkIgnore' },
+            { id: 'MarkSynced', title: t.tr('ButtonMarkSynced'), icon: 'check_circle', method: 'bulkMarkSynced' },
+            { id: 'Queue', title: t.tr('ButtonQueue'), icon: 'playlist_add', className: 'base-button primary', method: 'bulkQueue' },
+            { id: 'MakeCopy', title: t.tr('ButtonKeepCopy'), icon: 'push_pin', method: 'bulkMakeCopy' },
+            { id: 'Delete', title: t.tr('ButtonDeleteLocalFile'), icon: 'delete', className: 'base-button destructive', method: 'bulkDelete' }
         ],
         idKey: 'SourceItemId',
         tasks: {
             refresh: { key: 'ServerSyncUpdateTables' },
             sync: { key: 'ServerSyncDownloadContent' }
         },
-        taskNoun: '',
-        singularNoun: 'Item',
-        nounOne: 'item',
-        nounMany: 'items',
-        failNoun: 'items',
-        emptyMessage: 'No content items found. Run a refresh to scan for content.',
+        messages: {
+            startRefreshFailed: 'MessageStartRefreshFailed',
+            startSyncFailed: 'MessageStartSyncFailed',
+            ignoredOne: 'ToastItemsIgnoredOne',
+            ignoredMany: 'ToastItemsIgnoredMany',
+            queuedOne: 'ToastItemsQueuedOne',
+            queuedMany: 'ToastItemsQueuedMany',
+            ignoreFailed: 'ErrorIgnoreItems',
+            queueFailed: 'ErrorQueueItems',
+            retryNone: 'MessageNoErroredItems',
+            retriedOne: 'MessageErroredItemsRetriedOne',
+            retriedMany: 'MessageErroredItemsRetriedMany',
+            retriedUnknown: 'MessageErroredItemsRetried',
+            retryFailed: 'ErrorRetryItems',
+            statusUpdated: 'ToastItemStatusUpdated',
+            statusFailed: 'ErrorItemStatusUpdate'
+        },
+        emptyMessage: t.tr('EmptyContentItems'),
         filters: {
             options: [
-                { value: 'Synced', label: 'Synced' },
-                { value: 'Linked', label: 'Linked' },
-                { value: 'Queued', label: 'Queued' },
-                { value: 'Errored', label: 'Errored' },
-                { value: 'Ignored', label: 'Ignored' },
-                { value: 'Pending', label: 'Pending' },
-                { value: 'Cached', label: 'Cached' },
-                { value: 'Pending:Download', label: 'Pending Download', id: 'optPendingDownload', hidden: true },
-                { value: 'Pending:Replacement', label: 'Pending Replacement', id: 'optPendingReplacement', hidden: true },
-                { value: 'Pending:Deletion', label: 'Pending Deletion', id: 'optPendingDeletion', hidden: true },
-                { value: 'Deleting', label: 'Deleting', id: 'optDeleting', hidden: true }
+                { value: 'Synced', label: t.tr('StatusSynced') },
+                { value: 'Linked', label: t.tr('StatusLinked') },
+                { value: 'Queued', label: t.tr('StatusQueued') },
+                { value: 'Errored', label: t.tr('StatusErrored') },
+                { value: 'Ignored', label: t.tr('StatusIgnored') },
+                { value: 'Pending', label: t.tr('StatusPending') },
+                { value: 'Cached', label: t.tr('StatusCached') },
+                { value: 'Pending:Download', label: t.tr('StatusPendingDownload'), id: 'optPendingDownload', hidden: true },
+                { value: 'Pending:Replacement', label: t.tr('StatusPendingReplacement'), id: 'optPendingReplacement', hidden: true },
+                { value: 'Pending:Deletion', label: t.tr('StatusPendingDeletion'), id: 'optPendingDeletion', hidden: true },
+                { value: 'Deleting', label: t.tr('StatusDeleting'), id: 'optDeleting', hidden: true }
             ],
             buildParams: function(filterValue) {
                 if (filterValue === 'Cached') {
@@ -97,30 +118,30 @@ export function createContentSyncTableModule(ctx, kit) {
             return [
                 {
                     key: 'name',
-                    label: 'Item',
+                    label: t.tr('ColumnItem'),
                     type: 'custom',
                     className: 'base-table-cell-with-thumb',
                     image: function(item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey); },
                     render: function(item) {
                         var sourcePath = item.SourcePath || '';
-                        var libraries = (item.SourceLibraryName || 'Unknown') + ' → ' + (item.LocalLibraryName || 'Unknown');
+                        var libraries = t.format('MappingArrow', item.SourceLibraryName || t.tr('Unknown'), item.LocalLibraryName || t.tr('Unknown'));
                         return renderRowInfo(ServerSyncShared.getFileName(sourcePath), libraries, item, item.Status, sourcePath);
                     }
                 },
                 {
                     key: 'details',
-                    label: 'Details',
+                    label: t.tr('ColumnDetails'),
                     type: 'custom',
                     className: 'serversync-details-cell',
                     render: function(item) {
                         if (item.Status === 'Synced') {
-                            return '<span class="base-badge gray">No Changes</span>';
+                            return '<span class="base-badge gray">' + ServerSyncShared.escapeHtml(t.tr('BadgeNoChanges')) + '</span>';
                         }
                         var size = item.SourceSizeFormatted || '';
                         return size ? '<span class="base-badge purple">' + ServerSyncShared.escapeHtml(size) + '</span>' : '';
                     }
                 },
-                { key: 'Status', label: 'Status', type: 'status' }
+                { key: 'Status', label: t.tr('HeaderStatus'), type: 'status' }
             ];
         },
         loadHealth: function() {
@@ -137,7 +158,7 @@ export function createContentSyncTableModule(ctx, kit) {
                     pendingCountEl.textContent = ServerSyncShared.formatSize(pendingSizeData.TotalPendingBytes);
                     pendingCountEl.className = pendingSizeData.TotalPendingBytes > 0 ? 'serversync-health-value warning' : 'serversync-health-value';
                 } else {
-                    pendingCountEl.textContent = '0 B';
+                    pendingCountEl.textContent = ServerSyncShared.formatSize(0);
                     pendingCountEl.className = 'serversync-health-value';
                 }
             });
@@ -161,11 +182,11 @@ export function createContentSyncTableModule(ctx, kit) {
                     };
 
                     show('pendingCount', 'statusGroupPending', totalPending,
-                        'Pending: ' + totalPending + ' (Download: ' + pendingDownload + ', Replacement: ' + pendingReplacement + ', Deletion: ' + pendingDeletion + ')');
-                    show('pendingDownloadCount', 'statusGroupPendingDownload', pendingDownload, 'Pending Download: ' + pendingDownload);
-                    show('pendingReplacementCount', 'statusGroupPendingReplacement', pendingReplacement, 'Pending Replacement: ' + pendingReplacement);
-                    show('pendingDeletionCount', 'statusGroupPendingDeletion', pendingDeletion, 'Pending Deletion: ' + pendingDeletion);
-                    show('deletingCount', 'statusGroupDeleting', status.Deleting || 0, 'Deleting: ' + (status.Deleting || 0));
+                        t.format('TitlePendingBreakdown', totalPending, pendingDownload, pendingReplacement, pendingDeletion));
+                    show('pendingDownloadCount', 'statusGroupPendingDownload', pendingDownload, t.format('StatusCountTitle', t.tr('StatusPendingDownload'), pendingDownload));
+                    show('pendingReplacementCount', 'statusGroupPendingReplacement', pendingReplacement, t.format('StatusCountTitle', t.tr('StatusPendingReplacement'), pendingReplacement));
+                    show('pendingDeletionCount', 'statusGroupPendingDeletion', pendingDeletion, t.format('StatusCountTitle', t.tr('StatusPendingDeletion'), pendingDeletion));
+                    show('deletingCount', 'statusGroupDeleting', status.Deleting || 0, t.format('StatusCountTitle', t.tr('StatusDeleting'), status.Deleting || 0));
                 }).catch(function() {
                     // The status endpoint is not available yet.
                 });
@@ -174,18 +195,18 @@ export function createContentSyncTableModule(ctx, kit) {
             retryErrors: function() {
                 var self = this;
                 ServerSyncShared.apiRequest('RetryErroredItems', 'POST', {}).then(function() {
-                    ServerSyncShared.syncStatus('Errored items queued for retry.', false);
+                    ServerSyncShared.syncStatus(t.tr('MessageErroredItemsRetried'), false);
                     self.loadStatus();
                     self.loadItems();
                 }).catch(function() {
-                    ServerSyncShared.syncStatus('Could not retry the errored items.', true);
+                    ServerSyncShared.syncStatus(t.tr('ErrorRetryItems'), true);
                 });
             },
 
             bulkIgnore: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                this.postSelection('IgnoreItems', { SourceItemIds: ids }, ServerSyncShared.plural(ids.length, 'item', 'items') + ' ignored.', 'Could not ignore the items.');
+                this.postSelection('IgnoreItems', { SourceItemIds: ids }, ServerSyncShared.plural(ids.length, 'ToastItemsIgnoredOne', 'ToastItemsIgnoredMany'), t.tr('ErrorIgnoreItems'));
             },
 
             // Pending deletions cannot be queued, so they are left out.
@@ -199,11 +220,11 @@ export function createContentSyncTableModule(ctx, kit) {
                     return !(item && item.Status === 'Pending' && item.PendingType === 'Deletion');
                 });
                 if (queueable.length === 0) {
-                    ServerSyncShared.syncStatus('No items to queue. Items pending deletion cannot be queued.', false);
+                    ServerSyncShared.syncStatus(t.tr('MessageNothingToQueue'), false);
                     return;
                 }
 
-                this.postSelection('QueueItems', { SourceItemIds: queueable }, ServerSyncShared.plural(queueable.length, 'item', 'items') + ' queued.', 'Could not queue the items.');
+                this.postSelection('QueueItems', { SourceItemIds: queueable }, ServerSyncShared.plural(queueable.length, 'ToastItemsQueuedOne', 'ToastItemsQueuedMany'), t.tr('ErrorQueueItems'));
             },
 
             // The server checks the local files exist before marking.
@@ -211,19 +232,19 @@ export function createContentSyncTableModule(ctx, kit) {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
                 this.postSelection('MarkSynced', { SourceItemIds: ids }, function(result) {
-                    var msg = ServerSyncShared.plural((result && result.Synced) || 0, 'item', 'items') + ' marked as synced';
+                    var msg = ServerSyncShared.plural((result && result.Synced) || 0, 'MessageMarkedSyncedOne', 'MessageMarkedSyncedMany');
                     if (result && result.NotFound > 0) {
-                        msg += ', ' + ServerSyncShared.plural(result.NotFound, 'local file', 'local files') + ' not found';
+                        msg = ServerSyncShared.plural(result.NotFound, 'MessageLocalFilesMissingOne', 'MessageLocalFilesMissingMany', msg);
                     }
-                    return msg + '.';
-                }, 'Could not mark the items as synced.');
+                    return t.format('MessageSentence', msg);
+                }, t.tr('ErrorMarkItemsSynced'));
             },
 
             // Only links can become copies. The server skips anything else, and moves cached files into place now.
             bulkMakeCopy: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                this.postSelection('PromoteItems', { SourceItemIds: ids }, this.keepMessage, 'Could not keep the local copies.');
+                this.postSelection('PromoteItems', { SourceItemIds: ids }, this.keepMessage, t.tr('ErrorKeepCopies'));
             },
 
             modalKeep: function() {
@@ -233,7 +254,7 @@ export function createContentSyncTableModule(ctx, kit) {
                     self.closeModal();
                     ServerSyncShared.syncStatus(self.keepMessage(result), false);
                 }).catch(function() {
-                    ServerSyncShared.syncStatus('Could not keep a local copy.', true);
+                    ServerSyncShared.syncStatus(t.tr('ErrorKeepCopy'), true);
                 });
             },
 
@@ -241,46 +262,46 @@ export function createContentSyncTableModule(ctx, kit) {
                 var promoted = (result && result.Promoted) || 0;
                 var fromCache = (result && result.FromCache) || 0;
                 var msg = fromCache > 0
-                    ? ServerSyncShared.plural(fromCache, 'cached link is', 'cached links are') + ' being moved into the library now'
-                    : ServerSyncShared.plural(promoted, 'link', 'links') + ' will be copied on the next sync';
+                    ? ServerSyncShared.plural(fromCache, 'MessageCachedLinksMovingOne', 'MessageCachedLinksMovingMany')
+                    : ServerSyncShared.plural(promoted, 'MessageLinksCopyNextOne', 'MessageLinksCopyNextMany');
                 if (fromCache > 0 && promoted > fromCache) {
-                    msg += ', and ' + (promoted - fromCache) + ' will be downloaded';
+                    msg = t.format('MessageAlsoDownloaded', promoted - fromCache, msg);
                 }
                 if (result && result.Skipped > 0) {
-                    msg += ', ' + ServerSyncShared.plural(result.Skipped, 'item was not a link', 'items were not links');
+                    msg = ServerSyncShared.plural(result.Skipped, 'MessageNotLinksOne', 'MessageNotLinksMany', msg);
                 }
-                return msg + '.';
+                return t.format('MessageSentence', msg);
             },
 
             bulkDelete: function() {
                 var self = this;
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                confirmDialog('Delete ' + ServerSyncShared.plural(ids.length, 'item', 'items') + ' from this server? This cannot be undone.', {
-                    title: 'Delete Items',
-                    confirmText: 'Delete',
+                confirmDialog(ServerSyncShared.plural(ids.length, 'ConfirmDeleteItemsOne', 'ConfirmDeleteItemsMany'), {
+                    title: t.tr('HeaderDeleteItems'),
+                    confirmText: t.tr('Delete'),
+                    cancelText: t.tr('ButtonCancel'),
                     destructive: true
                 }).then(function(confirmed) {
                     if (!confirmed) return;
                     self.postSelection('DeleteLocalItems', { SourceItemIds: ids }, function(result) {
-                        return result && result.Deleted > 0 ? 'Deleted ' + ServerSyncShared.plural(result.Deleted, 'item', 'items') + '.' : null;
-                    }, 'Could not delete the items.');
+                        return result && result.Deleted > 0 ? ServerSyncShared.plural(result.Deleted, 'MessageItemsDeletedOne', 'MessageItemsDeletedMany') : null;
+                    }, t.tr('ErrorDeleteItems'));
                 });
             },
 
             getDisplayStatus: function(item) {
                 var linked = item.StorageMode === 'Link' || item.StorageMode === 'Promoting';
                 if (item.Status === 'Synced') {
-                    if (!linked) return 'Synced';
-                    return item.StorageMode === 'Promoting' ? 'Linked (Copy Next)' : item.Cached ? 'Linked (Cached)' : 'Linked';
+                    if (!linked) return t.tr('StatusSynced');
+                    return item.StorageMode === 'Promoting' ? t.tr('StatusLinkedCopyNext') : item.Cached ? t.tr('StatusLinkedCached') : t.tr('StatusLinked');
                 }
-                var suffix = item.StorageMode === 'Link' ? (item.Cached ? ' (Link, Cached)' : ' (Link)')
-                    : item.StorageMode === 'Promoting' ? ' (Link to Copy)'
-                    : item.StorageMode === 'Unkeeping' ? ' (Copy to Link)' : '';
-                if (item.Status === 'Pending' && item.PendingType) {
-                    return 'Pending ' + item.PendingType + suffix;
-                }
-                return item.Status + suffix;
+                var name = item.Status === 'Pending' && PENDING_KEYS[item.PendingType] ? t.tr(PENDING_KEYS[item.PendingType])
+                    : STATUS_KEYS[item.Status] ? t.tr(STATUS_KEYS[item.Status]) : item.Status;
+                if (item.StorageMode === 'Link') return item.Cached ? t.format('StatusWithLinkCached', name) : t.format('StatusWithLink', name);
+                if (item.StorageMode === 'Promoting') return t.format('StatusWithLinkToCopy', name);
+                if (item.StorageMode === 'Unkeeping') return t.format('StatusWithCopyToLink', name);
+                return name;
             },
 
             getStatusClass: function(item) {
@@ -302,7 +323,7 @@ export function createContentSyncTableModule(ctx, kit) {
 
                 self.currentModalItem = item;
 
-                view.querySelector('#modalTitle').textContent = ServerSyncShared.getFileName(item.SourcePath) || item.ItemName || 'Unknown';
+                view.querySelector('#modalTitle').textContent = ServerSyncShared.getFileName(item.SourcePath) || item.ItemName || t.tr('Unknown');
 
                 var statusBadge = view.querySelector('#modalStatusBadge');
                 var displayStatus = self.getDisplayStatus(item);
@@ -311,8 +332,8 @@ export function createContentSyncTableModule(ctx, kit) {
                 statusBadge.className = 'base-table-status-badge ' + statusClass;
 
                 var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
-                var localServerName = ServerSyncShared.localServerName || 'Local';
-                view.querySelector('#modalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
+                var localServerName = ServerSyncShared.localServerName || t.tr('ServerLocal');
+                view.querySelector('#modalServerMapping').textContent = t.format('MappingArrow', sourceServerName, localServerName);
 
                 if (item.LastSyncTime) {
                     var lastSync = new Date(item.LastSyncTime);
@@ -321,9 +342,9 @@ export function createContentSyncTableModule(ctx, kit) {
                     view.querySelector('#modalLastSync').textContent = '-';
                 }
 
-                var sourceLibrary = item.SourceLibraryName || 'Unknown';
-                var localLibrary = item.LocalLibraryName || 'Unknown';
-                view.querySelector('#modalLibraryMapping').textContent = sourceLibrary + ' \u2192 ' + localLibrary;
+                var sourceLibrary = item.SourceLibraryName || t.tr('Unknown');
+                var localLibrary = item.LocalLibraryName || t.tr('Unknown');
+                view.querySelector('#modalLibraryMapping').textContent = t.format('MappingArrow', sourceLibrary, localLibrary);
 
                 var errorSection = view.querySelector('#modalErrorSection');
                 if (item.Status === 'Errored' && item.ErrorMessage) {
@@ -335,7 +356,7 @@ export function createContentSyncTableModule(ctx, kit) {
 
                 var retrySection = view.querySelector('#modalRetrySection');
                 if (item.RetryCount > 0) {
-                    view.querySelector('#modalRetryCount').textContent = item.RetryCount + ' attempt' + (item.RetryCount > 1 ? 's' : '');
+                    view.querySelector('#modalRetryCount').textContent = ServerSyncShared.plural(item.RetryCount, 'AttemptCountOne', 'AttemptCountMany');
                     retrySection.classList.remove('hidden');
                 } else {
                     retrySection.classList.add('hidden');
@@ -363,7 +384,7 @@ export function createContentSyncTableModule(ctx, kit) {
                     companionSection.classList.add('hidden');
                 }
 
-                view.querySelector('#modalSourcePath').textContent = item.SourcePath || 'N/A';
+                view.querySelector('#modalSourcePath').textContent = item.SourcePath || t.tr('LabelNotAvailable');
                 view.querySelector('#modalSourceSize').textContent = ServerSyncShared.formatSize(item.SourceSize);
 
                 var localPathEl = view.querySelector('#modalLocalPath');
@@ -380,12 +401,12 @@ export function createContentSyncTableModule(ctx, kit) {
                         localSizeEl.textContent = ServerSyncShared.formatSize(item.LocalSize || item.SourceSize);
                         localSizeRowEl.classList.remove('hidden');
                     } else {
-                        localPathNoteEl.textContent = 'The file will be synced to this location.';
+                        localPathNoteEl.textContent = t.tr('HelpLocalPathPending');
                         localPathNoteEl.classList.remove('hidden');
                         localSizeRowEl.classList.add('hidden');
                     }
                 } else {
-                    localPathEl.textContent = 'N/A';
+                    localPathEl.textContent = t.tr('LabelNotAvailable');
                     localPathNoteEl.classList.add('hidden');
                     localSizeRowEl.classList.add('hidden');
                 }
@@ -398,7 +419,7 @@ export function createContentSyncTableModule(ctx, kit) {
                 var isSynced = item.Status === 'Synced';
                 var isQueuedOrErrored = item.Status === 'Queued' || item.Status === 'Errored';
 
-                btnQueue.querySelector('span').textContent = isSynced ? 'Resync' : 'Queue';
+                btnQueue.querySelector('span').textContent = isSynced ? t.tr('ButtonResync') : t.tr('ButtonQueue');
 
                 btnMarkSynced.classList.toggle('hidden', !isQueuedOrErrored);
 
@@ -435,12 +456,12 @@ export function createContentSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('MarkSynced', 'POST', { SourceItemIds: [this.currentModalItem.SourceItemId] }).then(function(result) {
                     self.closeModal();
                     if (result && result.Synced > 0) {
-                        ServerSyncShared.syncStatus('Item marked as synced.', false);
+                        ServerSyncShared.syncStatus(t.tr('MessageItemMarkedSynced'), false);
                     } else {
-                        ServerSyncShared.syncStatus('Local file not found, so it cannot be marked as synced.', true);
+                        ServerSyncShared.syncStatus(t.tr('ErrorLocalFileMissing'), true);
                     }
                 }).catch(function() {
-                    ServerSyncShared.syncStatus('Could not mark the item as synced.', true);
+                    ServerSyncShared.syncStatus(t.tr('ErrorMarkItemSynced'), true);
                 });
             },
 
@@ -450,17 +471,18 @@ export function createContentSyncTableModule(ctx, kit) {
 
                 var item = this.currentModalItem;
                 var fileName = ServerSyncShared.getFileName(item.LocalPath || item.SourcePath);
-                confirmDialog('Delete "' + fileName + '" from this server? This cannot be undone.', {
-                    title: 'Delete File',
-                    confirmText: 'Delete',
+                confirmDialog(t.format('ConfirmDeleteFile', fileName), {
+                    title: t.tr('TitleDeleteFile'),
+                    confirmText: t.tr('Delete'),
+                    cancelText: t.tr('ButtonCancel'),
                     destructive: true
                 }).then(function(confirmed) {
                     if (!confirmed) return;
                     return ServerSyncShared.apiRequest('DeleteLocalItems', 'POST', { SourceItemIds: [item.SourceItemId] }).then(function() {
                         self.closeModal();
-                        ServerSyncShared.syncStatus('Item deleted.', false);
+                        ServerSyncShared.syncStatus(t.tr('MessageItemDeleted'), false);
                     }).catch(function() {
-                        ServerSyncShared.syncStatus('Could not delete the item.', true);
+                        ServerSyncShared.syncStatus(t.tr('ErrorDeleteItem'), true);
                     });
                 });
             },

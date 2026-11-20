@@ -37,6 +37,11 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     public string? HeldReason { get; }
 
     /// <summary>
+    /// Gets the schema version of the database Server Sync is held for, or <c>null</c> when it is not held.
+    /// </summary>
+    public int? HeldVersion { get; }
+
+    /// <summary>
     /// Gets a value indicating whether Server Sync is held for a database an older release wrote. While it is, nothing of the plugin runs.
     /// </summary>
     public static bool Held => Instance?.HeldReason is not null;
@@ -57,6 +62,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         // The hold comes first, since a failed settings read saves defaults over the file.
         HeldReason = HoldIfOlderDatabase(applicationPaths.DataPath, ConfigurationFilePath, logger);
+        HeldVersion = HeldReason is null ? null : SyncSchema.StoredVersion(applicationPaths.DataPath);
 
         _secrets = new Lazy<SecretProtector>(() => StableSecretProtection.CreateProtector(applicationPaths, SecretsName, logger));
 

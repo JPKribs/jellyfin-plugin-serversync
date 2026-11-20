@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
@@ -45,7 +46,7 @@ public partial class ConfigurationController
             return Ok(new ConnectionTestResult
             {
                 Success = false,
-                Message = "Enter the API Key."
+                Message = Text(TranslationKeys.ErrorEnterApiKey)
             });
         }
 
@@ -72,10 +73,10 @@ public partial class ConfigurationController
 
         using (client)
         {
-            var tested = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var tested = await client.TestConnectionAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
             if (tested.Success)
             {
-                (tested.SyncAccess, tested.SyncAccessMessage) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
+                (tested.SyncAccess, tested.SyncAccessMessage) = await client.CheckSyncAccessAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
             }
 
             return Ok(tested);
@@ -107,7 +108,7 @@ public partial class ConfigurationController
             return Ok(new AuthenticateResponse
             {
                 Success = false,
-                Message = "Enter the username."
+                Message = Text(TranslationKeys.ErrorEnterUsername)
             });
         }
 
@@ -116,7 +117,7 @@ public partial class ConfigurationController
             return Ok(new AuthenticateResponse
             {
                 Success = false,
-                Message = "Enter the password."
+                Message = Text(TranslationKeys.ErrorEnterPassword)
             });
         }
 
@@ -128,11 +129,12 @@ public partial class ConfigurationController
             _configManager.LocalServerName,
             _configManager.PluginVersion,
             request.AllowPrivateNetwork,
+            RequestLanguage.Of(Request),
             cancellationToken).ConfigureAwait(false);
 
         if (!result.Success)
         {
-            result.Message ??= "Authentication failed";
+            result.Message ??= Text(TranslationKeys.ErrorAuthenticationFailed);
             return Ok(result);
         }
 
@@ -155,14 +157,14 @@ public partial class ConfigurationController
 
         using (client)
         {
-            var connectionTest = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var connectionTest = await client.TestConnectionAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
 
             result.ServerName = connectionTest.ServerName;
             result.ServerId = connectionTest.ServerId;
-            result.Message = "Signed in.";
+            result.Message = Text(TranslationKeys.MessageSignedIn);
             if (connectionTest.Success)
             {
-                (result.SyncAccess, result.SyncAccessMessage) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
+                (result.SyncAccess, result.SyncAccessMessage) = await client.CheckSyncAccessAsync(RequestLanguage.Of(Request), cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -190,7 +192,7 @@ public partial class ConfigurationController
 
         if (string.IsNullOrWhiteSpace(request.ApiKey))
         {
-            return BadRequest("Enter the API Key.");
+            return BadRequest(Text(TranslationKeys.ErrorEnterApiKey));
         }
 
         try
@@ -222,7 +224,7 @@ public partial class ConfigurationController
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Failed to get libraries from source server");
-            return BadRequest("Could not connect to the server. See the server log.");
+            return BadRequest(Text(TranslationKeys.ErrorConnectSeeLog));
         }
     }
 
@@ -247,7 +249,7 @@ public partial class ConfigurationController
 
         if (string.IsNullOrWhiteSpace(request.ApiKey))
         {
-            return BadRequest("Enter the API Key.");
+            return BadRequest(Text(TranslationKeys.ErrorEnterApiKey));
         }
 
         try
@@ -278,7 +280,7 @@ public partial class ConfigurationController
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Failed to get users from source server");
-            return BadRequest("Could not connect to the server. See the server log.");
+            return BadRequest(Text(TranslationKeys.ErrorConnectSeeLog));
         }
     }
 
@@ -313,7 +315,7 @@ public partial class ConfigurationController
     {
         if (!collections && !playlists && string.IsNullOrWhiteSpace(libraryId))
         {
-            return BadRequest("Select a library.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectLibrary));
         }
 
         startIndex = Math.Max(0, startIndex);
@@ -331,12 +333,12 @@ public partial class ConfigurationController
         var server = _configManager.Configuration.ResolveServer(serverKey);
         if (server is null || !server.IsConfigured)
         {
-            return BadRequest("The server is not configured.");
+            return BadRequest(Text(TranslationKeys.ErrorServerNotConfigured));
         }
 
         if (!collections && !playlists && !Guid.TryParse(libraryId, out _))
         {
-            return BadRequest("The library ID is not valid.");
+            return BadRequest(Text(TranslationKeys.ErrorLibraryIdInvalid));
         }
 
         try
@@ -386,7 +388,7 @@ public partial class ConfigurationController
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to get source files for library {LibraryId}", SanitizeForLog(libraryId));
-            return BadRequest("Could not load the items from the server.");
+            return BadRequest(Text(TranslationKeys.ErrorLoadServerItems));
         }
     }
 
@@ -394,7 +396,7 @@ public partial class ConfigurationController
     /// Checks a Server URL with the SSRF guard the client factory enforces and returns it normalized, keeping any sub path a reverse proxy serves Jellyfin at.
     /// A name is resolved here, so a refused name is reported when the entry is saved.
     /// </summary>
-    private static async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
+    private async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
         var ssrfError = await ConfigurationUtilities.ValidateServerUrlForSsrfAsync(url, allowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (ssrfError != null)
@@ -428,7 +430,7 @@ public partial class ConfigurationController
         {
             IsValid = true,
             NormalizedUrl = normalizedUrl,
-            Message = isLocalhost ? "This URL uses localhost. Make sure that is intended." : null
+            Message = isLocalhost ? Text(TranslationKeys.WarningLocalhostUrl) : null
         };
     }
 }

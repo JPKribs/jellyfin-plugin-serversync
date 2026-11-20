@@ -4,7 +4,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPage, loadScript, settle } from './support.mjs';
+import { installPage, loadScript, settle, strings } from './support.mjs';
+
+// The strings handle the chart builders name their series with, in US English.
+var t = { tr: function (key) { return strings[key] || key; } };
 
 globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
@@ -108,18 +111,18 @@ test('showing the page again redraws it once, and hiding it clears the charts', 
 
 test('scanChartData makes one label for each scan and the New, Updated, and Removed series', async function () {
     var mod = (await openPage()).mod;
-    var data = mod.scanChartData([run(1, 2, 3), run(4, 0, 0)]);
+    var data = mod.scanChartData([run(1, 2, 3), run(4, 0, 0)], t);
     assert.equal(data.labels.length, 2);
     assert.deepEqual(data.series.map(function (s) { return [s.name, s.values]; }), [['New', [1, 4]], ['Updated', [2, 0]], ['Removed', [3, 0]]]);
-    assert.deepEqual(mod.scanChartData(null).labels, []);
+    assert.deepEqual(mod.scanChartData(null, t).labels, []);
 });
 
 test('streamChartData makes one line for each server, with a point for every day', async function () {
     var mod = (await openPage()).mod;
-    var data = mod.streamChartData({ Days: ['2026-04-01', '2026-04-02'], Servers: [{ Key: 'den', Name: 'Den', Streams: [5] }, { Key: 'attic', Streams: [0, 3] }] });
+    var data = mod.streamChartData({ Days: ['2026-04-01', '2026-04-02'], Servers: [{ Key: 'den', Name: 'Den', Streams: [5] }, { Key: 'attic', Streams: [0, 3] }] }, t);
     assert.equal(data.labels.length, 2);
     assert.deepEqual(data.series.map(function (s) { return [s.name, s.values]; }), [['Den', [5, 0]], ['attic', [0, 3]]]);
-    assert.deepEqual(mod.streamChartData(null), { labels: [], series: [] });
+    assert.deepEqual(mod.streamChartData(null, t), { labels: [], series: [] });
 });
 
 test('runLabel writes the time for a scan today and the day for an older one', async function () {

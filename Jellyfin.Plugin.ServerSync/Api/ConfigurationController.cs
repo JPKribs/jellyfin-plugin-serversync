@@ -134,7 +134,7 @@ public partial class ConfigurationController : ControllerBase
             Updated = updated,
             Requested = requested,
             Failed = notFoundIds
-                .Select(id => new BulkOperationFailure { Id = id, Reason = "Item not found in sync table (already removed?)" })
+                .Select(id => new BulkOperationFailure { Id = id, Reason = Text(TranslationKeys.ErrorRowNotFound) })
                 .ToList()
         };
     }
@@ -149,7 +149,7 @@ public partial class ConfigurationController : ControllerBase
     {
         if (!Enum.TryParse<SyncStatus>(status, ignoreCase: true, out var fromStatus) || !Enum.IsDefined(fromStatus))
         {
-            return BadRequest("The status is not valid.");
+            return BadRequest(Text(TranslationKeys.ErrorStatusInvalid));
         }
 
         try
@@ -162,7 +162,7 @@ public partial class ConfigurationController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "{Operation}: failed to queue rows that were {Status}", operation, fromStatus);
-            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
+            return StatusCode(500, new { Error = Text(TranslationKeys.ErrorQueueItemsSeeLog) });
         }
     }
 
@@ -196,8 +196,22 @@ public partial class ConfigurationController : ControllerBase
     public ActionResult GetHealth()
     {
         var held = Plugin.Instance?.HeldReason;
-        return Ok(new { Ready = held is null, Message = held });
+        var version = Plugin.Instance?.HeldVersion;
+        return Ok(new { Ready = held is null, Message = version is { } found ? SchemaTooOldException.Describe(found, RequestLanguage.Of(Request)) : held });
     }
+
+    /// <summary>
+    /// Gives the pages their strings in a language, the declared Jellyfin strings and the plugin's own. The strings
+    /// are not secret, so the route allows anonymous callers.
+    /// </summary>
+    /// <param name="language">The language, such as de or pt-BR. Left out, it gives US English.</param>
+    /// <returns>The strings by key, or 304 when the page already has them.</returns>
+    [HttpGet("Translations")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    public IActionResult Translations([FromQuery] string? language)
+        => BaseTranslations.Serve(language, Request, Response);
 
     /// <summary>
     /// The scheduled tasks the Sync tab may start, by key.
@@ -226,11 +240,11 @@ public partial class ConfigurationController : ControllerBase
             : null;
         if (task == null)
         {
-            return NotFound("Task not found.");
+            return NotFound(Text(TranslationKeys.ErrorTaskNotFound));
         }
 
         _taskManager.Execute(task, new TaskOptions());
-        return Ok(new { Message = "Task started." });
+        return Ok(new { Message = Text(TranslationKeys.MessageTaskStarted) });
     }
 
     /// <summary>
@@ -261,22 +275,27 @@ public partial class ConfigurationController : ControllerBase
         };
         if (reset is null)
         {
-            return NotFound("Unknown table.");
+            return NotFound(Text(TranslationKeys.ErrorUnknownTable));
         }
 
         try
         {
             var deleted = reset();
             _logger.LogInformation("Sync reset of {Table} finished, {Count} rows deleted", SanitizeForLog(table), deleted);
-            return Ok(new { Success = true, Message = "Table reset." });
+            return Ok(new { Success = true, Message = Text(TranslationKeys.MessageTableReset) });
         }
         // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to reset {Table}", SanitizeForLog(table));
-            return StatusCode(500, new { Success = false, Error = "Could not reset the table. See the server log." });
+            return StatusCode(500, new { Success = false, Error = Text(TranslationKeys.ErrorResetTableSeeLog) });
         }
     }
+
+    /// <summary>
+    /// Gets a string in the language the page asked in, with its placeholders filled.
+    /// </summary>
+    private string Text(string key, params object?[] args) => BaseTranslations.Format(key, RequestLanguage.Of(Request), args);
 
     /// <summary>
     /// Makes text from a request safe to log.

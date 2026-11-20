@@ -128,7 +128,21 @@ export default function (view) {
     var cards = null;
 
     function serverTitle(server) {
-        return server.Name || server.ServerName || server.Url || 'New Server';
+        return server.Name || server.ServerName || server.Url || ServerSyncShared.t.tr('ServerNewName');
+    }
+
+    // modeName
+    // Names a server's mode in the viewer's language.
+    //
+    // Inputs
+    // mode [string]: Pull, Push, or Sync.
+    //
+    // Output
+    // [string]: The mode's name.
+    function modeName(mode) {
+        if (mode === 'Push') return ServerSyncShared.t.tr('ModePush');
+        if (mode === 'Sync') return ServerSyncShared.t.tr('TabSync');
+        return ServerSyncShared.t.tr('ModePull');
     }
 
     function modeBadgeClass(mode) {
@@ -137,14 +151,21 @@ export default function (view) {
 
     function cardSpec(server) {
         var health = serverHealth[server.Key] || (server.Url && server.ApiKey ? 'unknown' : 'none');
-        var badges = [{ label: server.Mode || 'Pull', cls: modeBadgeClass(server.Mode || 'Pull') }];
-        if (server.IsEnabled === false) badges.push({ label: 'Disabled', cls: 'gray' });
+        var badges = [{ label: modeName(server.Mode || 'Pull'), cls: modeBadgeClass(server.Mode || 'Pull') }];
+        if (server.IsEnabled === false) badges.push({ label: ServerSyncShared.t.tr('Disabled'), cls: 'gray' });
+        var dotTitles = {
+            ok: ServerSyncShared.t.tr('HealthReachable'),
+            bad: ServerSyncShared.t.tr('HealthNotReachable'),
+            checking: ServerSyncShared.t.tr('StatusChecking'),
+            unknown: ServerSyncShared.t.tr('HealthNotChecked'),
+            none: ServerSyncShared.t.tr('HealthNotConfigured')
+        };
         return {
             title: serverTitle(server),
-            subtitle: server.Url || 'No URL yet',
+            subtitle: server.Url || ServerSyncShared.t.tr('ServerNoUrl'),
             badges: badges,
             dot: health,
-            dotTitle: { ok: 'Reachable', bad: 'Not reachable', checking: 'Checking', unknown: 'Not checked yet', none: 'Not configured yet' }[health],
+            dotTitle: dotTitles[health],
             disabled: server.IsEnabled === false
         };
     }
@@ -165,7 +186,7 @@ export default function (view) {
             },
             onMove: function () {
                 selectedIndex = cards.getSelected();
-                saveServers('Server order saved.', 'Could not save the server order.', null, 'serverListStatus');
+                saveServers(ServerSyncShared.t.tr('ToastServerOrderSaved'), ServerSyncShared.t.tr('ErrorServerOrderSave'), null, 'serverListStatus');
             }
         });
         return cards;
@@ -244,7 +265,7 @@ export default function (view) {
         }).catch(function () { /* the map keeps its fallback */ });
     }
 
-    // The name in the middle of the map. A name too long for the circle is shown as "Server", and
+    // The name in the middle of the map. A name too long for the circle is shown as the word for Server, and
     // the full name stays in the circle's tooltip.
     var SELF_NAME_CHARS = 12;
 
@@ -266,8 +287,8 @@ export default function (view) {
         });
         var lanes = POOL_LANES.filter(function (lane) { return members[lane.key] && members[lane.key].length; });
 
-        var hereName = (localServerName || 'This Server').trim();
-        if (hereName.length > SELF_NAME_CHARS) hereName = 'Server';
+        var hereName = (localServerName || ServerSyncShared.t.tr('PoolThisServer')).trim();
+        if (hereName.length > SELF_NAME_CHARS) hereName = ServerSyncShared.t.tr('TabServer');
         var cardW = Math.max(92, hereName.length * 7.4 + 32);
         var cardH = 46;
         var parts = ['<defs><marker id="poolArrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>'];
@@ -282,11 +303,12 @@ export default function (view) {
         var pill = function (server, x, y, w) {
             var name = serverTitle(server);
             if (name.length > 18) name = name.substring(0, 17) + '\u2026';
-            pills.push('<g><title>' + escapeHtml(serverTitle(server) + ', ' + modeOf(server)) + '</title>' +
+            var title = ServerSyncShared.t.format('ListSeparator', serverTitle(server), modeName(modeOf(server)));
+            pills.push('<g><title>' + escapeHtml(title) + '</title>' +
                 '<rect x="' + fixed(x) + '" y="' + fixed(y) + '" width="' + fixed(w) + '" height="' + POOL_PILL_H + '" rx="6" class="serversync-pool-pill" />' +
                 '<circle cx="' + fixed(x + 14) + '" cy="' + fixed(y + POOL_PILL_H / 2) + '" r="4" class="serversync-pool-dot ' + POOL_DOT_CLASSES[poolState(server)] + '" />' +
                 '<text class="serversync-pool-name" x="' + fixed(x + 25) + '" y="' + fixed(y + POOL_PILL_H / 2) + '" dominant-baseline="central">' + escapeHtml(name) + '</text></g>');
-            labels.push(serverTitle(server) + ' ' + modeOf(server));
+            labels.push(title);
             bounds.push([x, y], [x + w, y + POOL_PILL_H]);
         };
 
@@ -365,7 +387,7 @@ export default function (view) {
         });
 
         parts = parts.concat(pills);
-        parts.push('<rect x="' + fixed(-cardW / 2) + '" y="' + fixed(-cardH / 2) + '" width="' + fixed(cardW) + '" height="' + cardH + '" rx="8" class="serversync-pool-card"><title>' + escapeHtml((localServerName || 'This server') + ', this server') + '</title></rect>');
+        parts.push('<rect x="' + fixed(-cardW / 2) + '" y="' + fixed(-cardH / 2) + '" width="' + fixed(cardW) + '" height="' + cardH + '" rx="8" class="serversync-pool-card"><title>' + escapeHtml(ServerSyncShared.t.format('PoolSelfTitle', localServerName || ServerSyncShared.t.tr('PoolThisServer'))) + '</title></rect>');
         parts.push('<text class="serversync-pool-self" x="0" y="0" dominant-baseline="central">' + escapeHtml(hereName) + '</text>');
 
         var minX = Math.min.apply(null, bounds.map(function (b) { return b[0]; })) - 6;
@@ -376,7 +398,7 @@ export default function (view) {
         minX = -half;
         maxX = half;
         var maxY = Math.max.apply(null, bounds.map(function (b) { return b[1]; })) + 6;
-        host.setAttribute('aria-label', 'Servers this one is set up with, ' + labels.join(', '));
+        host.setAttribute('aria-label', ServerSyncShared.t.format('PoolMapLabel', labels.join(', ')));
         host.innerHTML = '<svg viewBox="' + minX.toFixed(0) + ' ' + minY.toFixed(0) + ' ' + (maxX - minX).toFixed(0) + ' ' + (maxY - minY).toFixed(0) + '" width="' + Math.round(maxX - minX) + '" xmlns="http://www.w3.org/2000/svg">' + parts.join('') + '</svg>';
     }
 
@@ -460,45 +482,55 @@ export default function (view) {
         return !!sourceUserId && normalizeId(sourceUserId) === normalizeId(server.AuthenticatedUserId);
     }
 
+    // accessRows
+    // Lists what the key can do there, one row for each module, from the access the last test or sign in found.
+    //
+    // Inputs
+    // server [object]: The open server.
+    //
+    // Output
+    // [array[]]: Each row as the key of its title, its state, and its text.
     function accessRows(server) {
+        var t = ServerSyncShared.t;
         var admin = server.AccessLevel === 'Administrator';
-        var who = server.AuthenticatedUser || 'this user';
+        var who = server.AuthenticatedUser || t.tr('AccessThisUser');
         var downloads = server.CanDownload === false
-            ? ['no', (server.AuthenticatedUser || 'This account') + ' may not download media there. Turn on Allow media downloading for that user, or use an API Key.']
-            : ['ok', 'Allowed'];
+            ? ['no', t.format('AccessDownloadsRefused', server.AuthenticatedUser || t.tr('AccessThisAccount'))]
+            : ['ok', t.tr('AccessAllowed')];
         if (admin) {
             return [
-                ['Content Listing', 'ok', 'Every library, with its folder paths'],
-                ['File Downloads', downloads[0], downloads[1]],
-                ['Metadata, People, and Collections', 'ok', 'Every item'],
-                ['Watch History', 'ok', 'Every mapped user'],
-                ['User Settings', 'ok', 'Every mapped user'],
-                ['Playlists', 'ok', 'Every playlist of a mapped user'],
-                ['Two Way History', 'ok', 'Merged history is written back there'],
-                ['Push and Sync', 'ok', 'Once that server whitelists this one']
+                ['AccessContentListing', 'ok', t.tr('AccessContentAll')],
+                ['AccessFileDownloads', downloads[0], downloads[1]],
+                ['AccessMetadata', 'ok', t.tr('PermissionEveryItem')],
+                ['AccessWatchHistory', 'ok', t.tr('AccessMappedUsers')],
+                ['AccessUserSettings', 'ok', t.tr('AccessMappedUsers')],
+                ['Playlists', 'ok', t.tr('AccessPlaylistsAll')],
+                ['AccessTwoWayHistory', 'ok', t.tr('AccessTwoWayAll')],
+                ['AccessPushAndSync', 'ok', t.tr('AccessPushAll')]
             ];
         }
         return [
-            ['Content Listing', 'limited', 'Only the libraries ' + who + ' can see. Type each source root path by hand, since folder paths are only shown to administrators'],
-            ['File Downloads', downloads[0], downloads[1]],
-            ['Metadata, People, and Collections', 'limited', 'Only items in the libraries ' + who + ' can see'],
-            ['Watch History', 'limited', 'Only the history of ' + who],
-            ['User Settings', 'limited', 'Only the settings of ' + who],
-            ['Playlists', 'limited', 'Only the playlists ' + who + ' can see, owned by that user here'],
-            ['Two Way History', 'limited', 'Only for ' + who + ', once that server whitelists ' + who],
-            ['Push and Sync', 'limited', 'Once that server whitelists ' + who]
+            ['AccessContentListing', 'limited', t.format('AccessContentLimited', who)],
+            ['AccessFileDownloads', downloads[0], downloads[1]],
+            ['AccessMetadata', 'limited', t.format('AccessMetadataLimited', who)],
+            ['AccessWatchHistory', 'limited', t.format('AccessHistoryLimited', who)],
+            ['AccessUserSettings', 'limited', t.format('AccessSettingsLimited', who)],
+            ['Playlists', 'limited', t.format('AccessPlaylistsLimited', who)],
+            ['AccessTwoWayHistory', 'limited', t.format('AccessTwoWayLimited', who)],
+            ['AccessPushAndSync', 'limited', t.format('AccessPushLimited', who)]
         ];
     }
 
-    var ACCESS_LABELS = { ok: 'Available', limited: 'Limited', no: 'Unavailable', none: 'Not Installed' };
+    // The key of each access state's badge.
+    var ACCESS_LABELS = { ok: 'LabelAvailable', limited: 'BadgeLimited', no: 'BadgeUnavailable', none: 'BadgeNotInstalled' };
     var ACCESS_BADGES = { ok: 'green', limited: 'orange', no: 'red', none: 'gray' };
 
     function syncAccessRow(server) {
         if (!server.SyncAccess) return null;
         var state = server.SyncAccess === 'Allowed' ? 'ok' : server.SyncAccess === 'NotInstalled' ? 'none' : 'no';
         var detail = server.SyncAccessMessage || '';
-        if (state === 'no') detail += '. On that server, add this one to its Servers tab or add this key\'s user to its Whitelist.';
-        return ['Sync Routes There', state, detail];
+        if (state === 'no') detail = ServerSyncShared.t.format('AccessSyncRoutesFix', detail);
+        return ['AccessSyncRoutes', state, detail];
     }
 
     // What the key can do there, learned by the last test or sign in.
@@ -511,28 +543,28 @@ export default function (view) {
             var headline = getEl('accessHeadline');
             if (headline) {
                 headline.className = 'serversync-mb-md ' + (level === 'Administrator' ? 'base-success' : 'base-warn');
-                headline.textContent = level === 'Administrator'
-                    ? 'Administrator access' + (server.AuthenticatedUser ? ' as ' + server.AuthenticatedUser : '') + '. Every module works.'
-                    : 'Standard user access as ' + (server.AuthenticatedUser || 'an unknown user') + '. Some features are off.';
+                headline.textContent = level !== 'Administrator'
+                    ? ServerSyncShared.t.format('AccessStandardAs', server.AuthenticatedUser || ServerSyncShared.t.tr('AccessUnknownUser'))
+                    : server.AuthenticatedUser ? ServerSyncShared.t.format('AccessAdminAs', server.AuthenticatedUser) : ServerSyncShared.t.tr('AccessAdmin');
             }
             var rows = getEl('accessRows');
             if (rows) {
                 var list = accessRows(server);
                 var endpoints = syncAccessRow(server);
-                var reach = !endpoints ? ['limited', 'Checking the sync routes there'] : endpoints[1] !== 'ok' ? ['no', 'Needs the sync routes there'] : null;
+                var reach = !endpoints ? ['limited', ServerSyncShared.t.tr('AccessCheckingRoutes')] : endpoints[1] !== 'ok' ? ['no', ServerSyncShared.t.tr('AccessNeedsRoutes')] : null;
                 if (reach) {
                     list = list.map(function (row) {
-                        return row[0] === 'Two Way History' || row[0] === 'Push and Sync' ? [row[0], reach[0], reach[1]] : row;
+                        return row[0] === 'AccessTwoWayHistory' || row[0] === 'AccessPushAndSync' ? [row[0], reach[0], reach[1]] : row;
                     });
                 }
                 if (endpoints) list.unshift(endpoints);
                 rows.innerHTML = list.map(function (row) {
                     return '<div class="serversync-access-row">' +
                         '<div class="serversync-access-text">' +
-                            '<div class="serversync-access-title">' + escapeHtml(row[0]) + '</div>' +
+                            '<div class="serversync-access-title">' + escapeHtml(ServerSyncShared.t.tr(row[0])) + '</div>' +
                             '<div class="serversync-access-description">' + escapeHtml(row[2]) + '</div>' +
                         '</div>' +
-                        '<span class="base-badge ' + ACCESS_BADGES[row[1]] + '">' + ACCESS_LABELS[row[1]] + '</span>' +
+                        '<span class="base-badge ' + ACCESS_BADGES[row[1]] + '">' + escapeHtml(ServerSyncShared.t.tr(ACCESS_LABELS[row[1]])) + '</span>' +
                         '</div>';
                 }).join('');
             }
@@ -550,7 +582,7 @@ export default function (view) {
         var note = getEl('usersLimited');
         if (note) {
             note.textContent = limited
-                ? 'Standard user key. Only ' + (server.AuthenticatedUser || 'that user') + ' can be mapped.'
+                ? ServerSyncShared.t.format('WarnStandardUserKey', server.AuthenticatedUser || ServerSyncShared.t.tr('AccessThatUser'))
                 : '';
         }
         setVisible('usersLimited', limited);
@@ -560,8 +592,9 @@ export default function (view) {
     function reflectSignedIn(server) {
         var signedIn = !!(server && server.AuthenticatedUser);
         setVisible('authSignedIn', signedIn);
-        var userEl = getEl('authSignedInUser');
-        if (userEl) userEl.textContent = signedIn ? server.AuthenticatedUser : '';
+        var note = getEl('authSignedIn');
+        // The user's name is set in bold, so the sentence is escaped first and the name put in after.
+        if (note) note.innerHTML = signedIn ? escapeHtml(ServerSyncShared.t.tr('MessageSignedInAs')).replace('{0}', '<strong>' + escapeHtml(server.AuthenticatedUser) + '</strong>') : '';
     }
 
     // A token the page never saw round trips as the sentinel. Anything stored comes back encrypted.
@@ -620,8 +653,8 @@ export default function (view) {
         var note = getEl('savedSecretNote');
         if (note) {
             note.textContent = !moved ? '' : getAuthMethod() === 'user'
-                ? 'The saved sign in only works with ' + storedUrlFor(server.Key) + '. Sign in again for the new URL.'
-                : 'The saved API Key is only sent to ' + storedUrlFor(server.Key) + '. Enter the key again for the new URL.';
+                ? ServerSyncShared.t.format('WarnSignInUrlChanged', storedUrlFor(server.Key))
+                : ServerSyncShared.t.format('WarnApiKeyUrlChanged', storedUrlFor(server.Key));
         }
         setVisible('savedSecretNote', moved);
     }
@@ -650,7 +683,7 @@ export default function (view) {
         var rows = (result && result.Details) || [];
         if (!rows.length) {
             setVisible('peerCheckResult', false);
-            ServerSyncShared.setStatus('peerCheckStatus', (result && result.Message) || 'No answer.', severity !== 'ok', { timeout: 0 });
+            ServerSyncShared.setStatus('peerCheckStatus', (result && result.Message) || ServerSyncShared.t.tr('ErrorNoAnswer'), severity !== 'ok', { timeout: 0 });
             return;
         }
         ServerSyncShared.setStatus('peerCheckStatus', '', false);
@@ -680,10 +713,10 @@ export default function (view) {
         var server = collectServerEditor();
         if (!server) return;
         if (!server.Url || !server.ApiKey) {
-            ServerSyncShared.setStatus('peerCheckStatus', 'Enter the Server URL and API Key.', true);
+            ServerSyncShared.setStatus('peerCheckStatus', ServerSyncShared.t.tr('ErrorEnterUrlAndKey'), true);
             return;
         }
-        ServerSyncShared.setStatus('peerCheckStatus', 'Checking…', false, { timeout: 0 });
+        ServerSyncShared.setStatus('peerCheckStatus', ServerSyncShared.t.tr('StatusCheckingWork'), false, { timeout: 0 });
         setVisible('peerCheckResult', false);
         var key = server.Key;
         var request = requestFor(server);
@@ -707,7 +740,7 @@ export default function (view) {
             if (result && result.Reachable) renderServerList();
         }).catch(function () {
             if (!stillSelected(key)) return;
-            ServerSyncShared.setStatus('peerCheckStatus', 'Could not check the link. See the server log.', true);
+            ServerSyncShared.setStatus('peerCheckStatus', ServerSyncShared.t.tr('ErrorCheckLink'), true);
         });
     }
 
@@ -740,8 +773,8 @@ export default function (view) {
 
         var nameEl = getEl('txtSourceServerName');
         var idEl = getEl('txtSourceServerId');
-        if (nameEl) nameEl.textContent = server.ServerName || 'Unknown';
-        if (idEl) idEl.textContent = server.ServerId || 'Unknown';
+        if (nameEl) nameEl.textContent = server.ServerName || ServerSyncShared.t.tr('Unknown');
+        if (idEl) idEl.textContent = server.ServerId || ServerSyncShared.t.tr('Unknown');
         setVisible('serverInfoContainer', !!(server.ServerName || server.ServerId));
 
         var authUserEl = getEl('txtAuthenticatedUser');
@@ -779,8 +812,8 @@ export default function (view) {
     // shown before, or from before a reconnect, can never be edited and then silently dropped.
     function loadMappings(key) {
         setMappingsLoaded(false);
-        clearMappingContainer('libraryMappingsContainer', 'Loading library mappings…');
-        clearMappingContainer('userMappingsContainer', 'Loading user mappings…');
+        clearMappingContainer('libraryMappingsContainer', ServerSyncShared.t.tr('StatusLoadingLibraryMappings'));
+        clearMappingContainer('userMappingsContainer', ServerSyncShared.t.tr('StatusLoadingUserMappings'));
         var server = serverByKey(key);
         if (!server) return Promise.resolve();
         return Promise.all([fetchSourceLibraries(server), fetchSourceUsers(server)]).then(function () {
@@ -923,10 +956,16 @@ export default function (view) {
     function deleteServer() {
         var server = selectedServer();
         if (!server) return;
-        var label = server.Name || server.ServerName || server.Url || 'this server';
-        var question = '<p>' + escapeHtml('Remove ' + label + '?') + '</p>' +
-            '<p>Its mappings and the sync rows tracked from it are removed with it. Files already downloaded stay where they are.</p>';
-        confirmDialog(question, { html: true, title: 'Remove Server', confirmText: 'Remove', destructive: true }).then(function (confirmed) {
+        var label = server.Name || server.ServerName || server.Url || ServerSyncShared.t.tr('ServerThisServer');
+        var question = '<p>' + escapeHtml(ServerSyncShared.t.format('ConfirmRemoveServer', label)) + '</p>' +
+            '<p>' + escapeHtml(ServerSyncShared.t.tr('ConfirmRemoveServerDetail')) + '</p>';
+        confirmDialog(question, {
+            html: true,
+            title: ServerSyncShared.t.tr('ButtonRemoveServer'),
+            confirmText: ServerSyncShared.t.tr('ButtonRemove'),
+            cancelText: ServerSyncShared.t.tr('ButtonCancel'),
+            destructive: true
+        }).then(function (confirmed) {
             // A save landing while the dialog is open replaces the entries with fresh copies, so the
             // entry removed is found again by its key.
             var removedIndex = servers.findIndex(function (s) { return s === server || (server.Key && s.Key === server.Key); });
@@ -939,7 +978,7 @@ export default function (view) {
             // The list on the page changes only once the save lands. Removing it first would leave the page
             // showing a list the server never kept, and the rows would be forgotten for a server still in use.
             var remaining = servers.filter(function (s, i) { return i !== removedIndex; });
-            saveServers('Server removed.', 'Could not remove the server.', remaining, 'serverListStatus').then(function (saved) {
+            saveServers(ServerSyncShared.t.tr('ToastServerRemoved'), ServerSyncShared.t.tr('ErrorServerRemove'), remaining, 'serverListStatus').then(function (saved) {
                 if (!saved) {
                     return;
                 }
@@ -977,7 +1016,7 @@ export default function (view) {
         return saveSection(function (config) {
             keepStoredStorageFields(config.Servers, snapshot);
             config.Servers = snapshot;
-        }, statusId || 'saveServerStatus', successMessage || 'Servers saved.', failureMessage || 'Could not save the servers.').then(function (saved) {
+        }, statusId || 'saveServerStatus', successMessage || ServerSyncShared.t.tr('ToastServersSaved'), failureMessage || ServerSyncShared.t.tr('ErrorServersSave')).then(function (saved) {
             // The saved list becomes the page's list. Its entries are fresh copies, which is why answers
             // that arrive later look their server up again with serverByKey.
             if (saved && currentConfig && currentConfig.Servers) {
@@ -996,12 +1035,12 @@ export default function (view) {
         if (!server) return;
         ServerSyncShared.setStatus('saveServerStatus', '', false);
         if (urlWasCleared(storedUrlFor(server.Key), server.Url)) {
-            ServerSyncShared.setStatus('saveServerStatus', 'Enter the Server URL. Nothing was saved.', true, { timeout: 0 });
+            ServerSyncShared.setStatus('saveServerStatus', ServerSyncShared.t.tr('ErrorEnterUrlNotSaved'), true, { timeout: 0 });
             return;
         }
         var links = (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
         if ((modeOf(server) === 'Pull' && !links) || !server.Url || !server.ApiKey) {
-            saveServers('Server saved.', 'Could not save the server.');
+            saveServers(ServerSyncShared.t.tr('ToastServerSaved'), ServerSyncShared.t.tr('ErrorServerSave'));
             return;
         }
 
@@ -1010,19 +1049,19 @@ export default function (view) {
         apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
             if (result && result.Reachable && !result.HasPlugin) {
                 peerPlugin[server.Key] = 'no';
-                ServerSyncShared.setStatus('saveServerStatus', serverTitle(server) + ' does not run Server Sync, so it can only be a Pull server with libraries kept as copies. Install Server Sync there, or set this server to Pull and its libraries to Copy. Nothing was saved.', true, { timeout: 0 });
+                ServerSyncShared.setStatus('saveServerStatus', ServerSyncShared.t.format('ErrorPeerNoPlugin', serverTitle(server)), true, { timeout: 0 });
                 return;
             }
             // Its Server Sync and this one cannot talk until one is updated, which leaves it where a
             // server without Server Sync is: nothing sent to it would be taken, and no link would play.
             if (result && result.Reachable && result.Incompatible) {
-                ServerSyncShared.setStatus('saveServerStatus', (result.Message || (serverTitle(server) + ' runs a Server Sync this one cannot talk to.')) + ' Until then it can only be a Pull server with libraries kept as copies. Nothing was saved.', true, { timeout: 0 });
+                ServerSyncShared.setStatus('saveServerStatus', ServerSyncShared.t.format('ErrorPeerIncompatible', result.Message || ServerSyncShared.t.format('ErrorPeerIncompatibleReason', serverTitle(server))), true, { timeout: 0 });
                 return;
             }
 
-            saveServers(result && result.Reachable ? 'Server saved.' : 'Server saved. It could not be reached to confirm it runs Server Sync, so nothing is sent to it until it answers.', 'Could not save the server.');
+            saveServers(result && result.Reachable ? ServerSyncShared.t.tr('ToastServerSaved') : ServerSyncShared.t.tr('ToastServerSavedUnreachable'), ServerSyncShared.t.tr('ErrorServerSave'));
         }).catch(function () {
-            saveServers('Server saved.', 'Could not save the server.');
+            saveServers(ServerSyncShared.t.tr('ToastServerSaved'), ServerSyncShared.t.tr('ErrorServerSave'));
         });
     }
 
@@ -1031,11 +1070,11 @@ export default function (view) {
         if (!server) return;
 
         if (!server.Url || !server.ApiKey) {
-            ServerSyncShared.setStatus('connectionStatus', 'Enter the Server URL and API Key.', true);
+            ServerSyncShared.setStatus('connectionStatus', ServerSyncShared.t.tr('ErrorEnterUrlAndKey'), true);
             return;
         }
 
-        ServerSyncShared.setStatus('connectionStatus', 'Testing…', false, { timeout: 0 });
+        ServerSyncShared.setStatus('connectionStatus', ServerSyncShared.t.tr('StatusTesting'), false, { timeout: 0 });
 
         var key = server.Key;
         apiRequest('TestConnection', 'POST', requestFor(server)).then(function(response) {
@@ -1049,7 +1088,7 @@ export default function (view) {
                 // The editor is read back into the entry that holds this key now. A save while the test
                 // ran replaced the entry it started with, and the operator may have edited fields since.
                 var current = collectServerEditor();
-                ServerSyncShared.setStatus('connectionStatus', 'Connected to ' + (response.ServerName || 'the server') + '.', false);
+                ServerSyncShared.setStatus('connectionStatus', ServerSyncShared.t.format('ToastConnectedTo', response.ServerName || ServerSyncShared.t.tr('ServerTheServer')), false);
                 current.ServerName = response.ServerName || '';
                 current.ServerId = response.ServerId || '';
                 if (response.IsAdministrator === true) current.AccessLevel = 'Administrator';
@@ -1064,8 +1103,8 @@ export default function (view) {
                 reflectAccess(current);
                 var nameEl = getEl('txtSourceServerName');
                 var idEl = getEl('txtSourceServerId');
-                if (nameEl) nameEl.textContent = current.ServerName || 'Unknown';
-                if (idEl) idEl.textContent = current.ServerId || 'Unknown';
+                if (nameEl) nameEl.textContent = current.ServerName || ServerSyncShared.t.tr('Unknown');
+                if (idEl) idEl.textContent = current.ServerId || ServerSyncShared.t.tr('Unknown');
                 setVisible('serverInfoContainer', true);
                 serverHealth[key] = 'ok';
                 renderServerList();
@@ -1073,7 +1112,7 @@ export default function (view) {
                 setMappingSectionsVisible(true);
                 loadMappings(key);
             } else {
-                ServerSyncShared.setStatus('connectionStatus', (response && response.Message) || 'Could not connect.', true, { timeout: 10000 });
+                ServerSyncShared.setStatus('connectionStatus', (response && response.Message) || ServerSyncShared.t.tr('ErrorConnect'), true, { timeout: 10000 });
                 serverHealth[key] = 'bad';
                 renderServerList();
             }
@@ -1083,7 +1122,7 @@ export default function (view) {
                 updateHealthDots();
                 return;
             }
-            ServerSyncShared.setStatus('connectionStatus', 'Could not connect.', true);
+            ServerSyncShared.setStatus('connectionStatus', ServerSyncShared.t.tr('ErrorConnect'), true);
             renderServerList();
         });
     }
@@ -1098,16 +1137,16 @@ export default function (view) {
         var password = passwordEl ? passwordEl.value : '';
 
         if (!server.Url) {
-            ServerSyncShared.setStatus('tokenGeneratorStatus', 'Enter the Server URL.', true);
+            ServerSyncShared.setStatus('tokenGeneratorStatus', ServerSyncShared.t.tr('ErrorEnterUrl'), true);
             return;
         }
 
         if (!username || !password) {
-            ServerSyncShared.setStatus('tokenGeneratorStatus', 'Enter the username and password.', true);
+            ServerSyncShared.setStatus('tokenGeneratorStatus', ServerSyncShared.t.tr('ErrorEnterCredentials'), true);
             return;
         }
 
-        ServerSyncShared.setStatus('tokenGeneratorStatus', 'Authenticating…', false, { timeout: 0 });
+        ServerSyncShared.setStatus('tokenGeneratorStatus', ServerSyncShared.t.tr('StatusAuthenticating'), false, { timeout: 0 });
 
         var key = server.Key;
         apiRequest('Authenticate', 'POST', {
@@ -1119,7 +1158,7 @@ export default function (view) {
             if (!response || !response.Success) {
                 // The status line belongs to whichever server is open, so a failure for one the operator
                 // has left is not written over the other server's editor.
-                if (stillSelected(key)) ServerSyncShared.setStatus('tokenGeneratorStatus', (response && response.Message) || 'Could not sign in.', true, { timeout: 10000 });
+                if (stillSelected(key)) ServerSyncShared.setStatus('tokenGeneratorStatus', (response && response.Message) || ServerSyncShared.t.tr('ErrorSignIn'), true, { timeout: 10000 });
                 return;
             }
 
@@ -1129,7 +1168,7 @@ export default function (view) {
             // still open, the editor is read back first so edits made meanwhile are saved with the token.
             var current = selected ? collectServerEditor() : serverByKey(key);
             if (!current) {
-                ServerSyncShared.setStatus('serverListStatus', 'Signed in, but the server was removed meanwhile, so the token was not kept.', true, { timeout: 10000 });
+                ServerSyncShared.setStatus('serverListStatus', ServerSyncShared.t.tr('ErrorSignedInServerRemoved'), true, { timeout: 10000 });
                 return;
             }
 
@@ -1147,7 +1186,7 @@ export default function (view) {
             if (!selected) {
                 // The operator moved to another server meanwhile. The key still belongs to this one, so it
                 // is stored on it and saved, without touching the editor that now shows the other.
-                saveServers('Token generated and saved.', 'Token generated, but saving failed.', null, 'serverListStatus');
+                saveServers(ServerSyncShared.t.tr('ToastTokenSaved'), ServerSyncShared.t.tr('ErrorTokenSave'), null, 'serverListStatus');
                 return;
             }
 
@@ -1164,13 +1203,13 @@ export default function (view) {
 
             var nameEl = getEl('txtSourceServerName');
             var idEl = getEl('txtSourceServerId');
-            if (nameEl) nameEl.textContent = current.ServerName || 'Unknown';
-            if (idEl) idEl.textContent = current.ServerId || 'Unknown';
+            if (nameEl) nameEl.textContent = current.ServerName || ServerSyncShared.t.tr('Unknown');
+            if (idEl) idEl.textContent = current.ServerId || ServerSyncShared.t.tr('Unknown');
             setVisible('serverInfoContainer', true);
 
             // The success line shows only once the save landed, since a token the server never stored
             // would be lost on the next page load.
-            saveServers('Token generated and saved.', 'Token generated, but saving failed.', null, 'tokenGeneratorStatus').then(function(ok) {
+            saveServers(ServerSyncShared.t.tr('ToastTokenSaved'), ServerSyncShared.t.tr('ErrorTokenSave'), null, 'tokenGeneratorStatus').then(function(ok) {
                 if (!stillSelected(key) || !ok) return;
                 serverHealth[key] = 'ok';
                 renderServerList();
@@ -1179,7 +1218,7 @@ export default function (view) {
             });
         }).catch(function(error) {
             console.error('Token generation error:', error);
-            if (stillSelected(key)) ServerSyncShared.setStatus('tokenGeneratorStatus', 'Could not sign in.', true);
+            if (stillSelected(key)) ServerSyncShared.setStatus('tokenGeneratorStatus', ServerSyncShared.t.tr('ErrorSignIn'), true);
         });
     }
 
@@ -1225,7 +1264,7 @@ export default function (view) {
     function updateLibrarySelects() {
         view.querySelectorAll('.serversync-source-library-select').forEach(function(select) {
             var savedValue = select.dataset.savedValue || select.value;
-            select.innerHTML = '<option value="">Select a source library</option>';
+            select.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectSourceLibrary')) + '</option>';
             sourceLibraries.forEach(function(lib) {
                 var option = document.createElement('option');
                 option.value = lib.Id;
@@ -1237,7 +1276,7 @@ export default function (view) {
         });
         view.querySelectorAll('.serversync-local-library-select').forEach(function(select) {
             var savedValue = select.dataset.savedValue || select.value;
-            select.innerHTML = '<option value="">Select a local library</option>';
+            select.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectLocalLibrary')) + '</option>';
             localLibraries.forEach(function(lib) {
                 var option = document.createElement('option');
                 option.value = lib.Id;
@@ -1304,17 +1343,17 @@ export default function (view) {
         div.className = 'serversync-mapping serversync-library-mapping';
         div.innerHTML =
             '<div class="serversync-mapping-header">' +
-                '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-mapping-enabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
-                '<button is="emby-button" type="button" class="serversync-remove-mapping raised base-button destructive small"><span>Remove</span></button>' +
+                '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-mapping-enabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span class="checkboxLabel">' + escapeHtml(ServerSyncShared.t.tr('OptionEnabled')) + '</span></label>' +
+                '<button is="emby-button" type="button" class="serversync-remove-mapping raised base-button destructive small"><span>' + escapeHtml(ServerSyncShared.t.tr('ButtonRemove')) + '</span></button>' +
             '</div>' +
             '<div class="serversync-mapping-grid">' +
                 '<div class="serversync-mapping-column">' +
-                    '<div class="selectContainer"><label>Source Library</label><select is="emby-select" class="serversync-source-library-select"></select></div>' +
-                    '<div class="inputContainer"><label>Source Root Path</label><input is="emby-input" type="text" class="serversync-source-root-path" value="' + escapeHtml(mapping.SourceRootPath || '') + '" /></div>' +
+                    '<div class="selectContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelSourceLibrary')) + '</label><select is="emby-select" class="serversync-source-library-select"></select></div>' +
+                    '<div class="inputContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelSourceRootPath')) + '</label><input is="emby-input" type="text" class="serversync-source-root-path" value="' + escapeHtml(mapping.SourceRootPath || '') + '" /></div>' +
                 '</div>' +
                 '<div class="serversync-mapping-column">' +
-                    '<div class="selectContainer"><label>Local Library</label><select is="emby-select" class="serversync-local-library-select"></select></div>' +
-                    '<div class="inputContainer"><label>Local Root Path</label><input is="emby-input" type="text" class="serversync-local-root-path" value="' + escapeHtml(mapping.LocalRootPath || '') + '" /></div>' +
+                    '<div class="selectContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelLocalLibrary')) + '</label><select is="emby-select" class="serversync-local-library-select"></select></div>' +
+                    '<div class="inputContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelLocalRootPath')) + '</label><input is="emby-input" type="text" class="serversync-local-root-path" value="' + escapeHtml(mapping.LocalRootPath || '') + '" /></div>' +
                 '</div>' +
             '</div>';
 
@@ -1326,7 +1365,7 @@ export default function (view) {
         var sourceSelect = div.querySelector('.serversync-source-library-select');
         if (mapping.SourceLibraryId) sourceSelect.dataset.savedValue = mapping.SourceLibraryId;
         if (mapping.SourceLibraryName) sourceSelect.dataset.savedName = mapping.SourceLibraryName;
-        sourceSelect.innerHTML = '<option value="">Select a source library</option>';
+        sourceSelect.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectSourceLibrary')) + '</option>';
         sourceLibraries.forEach(function(lib) {
             var option = document.createElement('option');
             option.value = lib.Id;
@@ -1346,7 +1385,7 @@ export default function (view) {
         var localSelect = div.querySelector('.serversync-local-library-select');
         if (mapping.LocalLibraryId) localSelect.dataset.savedValue = mapping.LocalLibraryId;
         if (mapping.LocalLibraryName) localSelect.dataset.savedName = mapping.LocalLibraryName;
-        localSelect.innerHTML = '<option value="">Select a local library</option>';
+        localSelect.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectLocalLibrary')) + '</option>';
         localLibraries.forEach(function(lib) {
             var option = document.createElement('option');
             option.value = lib.Id;
@@ -1472,8 +1511,8 @@ export default function (view) {
             });
         }
         note.textContent = state === 'no'
-            ? 'That server does not run Server Sync, so it cannot link to files here until it is installed there.'
-            : state === 'unreachable' ? 'That server could not be reached to check that it runs Server Sync, which linking needs.' : '';
+            ? ServerSyncShared.t.tr('WarnLinkingNoPlugin')
+            : state === 'unreachable' ? ServerSyncShared.t.tr('WarnLinkingUnreachable') : '';
         setVisible('linkingNeedsPlugin', on && (state === 'no' || state === 'unreachable'));
     }
 
@@ -1499,7 +1538,7 @@ export default function (view) {
         var select = getEl('selLinkFallbackUser');
         if (!select) return;
         var savedValue = value !== undefined ? value : select.value;
-        select.innerHTML = '<option value="">Refuse Stream</option>';
+        select.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionRefuseStream')) + '</option>';
         localUsers.forEach(function(user) {
             var option = document.createElement('option');
             option.value = user.Id;
@@ -1520,7 +1559,7 @@ export default function (view) {
         });
         view.querySelectorAll('.serversync-local-user-select').forEach(function(select) {
             var savedValue = select.dataset.savedValue || select.value;
-            select.innerHTML = '<option value="">Select a local user</option>';
+            select.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectLocalUser')) + '</option>';
             localUsers.forEach(function(user) {
                 var option = document.createElement('option');
                 option.value = user.Id;
@@ -1533,12 +1572,12 @@ export default function (view) {
 
     function fillSourceUserOptions(select) {
         var server = selectedServer();
-        select.innerHTML = '<option value="">Select a source user</option>';
+        select.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectSourceUser')) + '</option>';
         sourceUsers.forEach(function(user) {
             var option = document.createElement('option');
             option.value = user.Id;
             var allowed = maySyncUser(server, user.Id);
-            option.textContent = allowed ? user.Name : user.Name + ' (needs administrator)';
+            option.textContent = allowed ? user.Name : ServerSyncShared.t.format('OptionUserNeedsAdmin', user.Name);
             option.disabled = !allowed;
             select.appendChild(option);
         });
@@ -1554,7 +1593,7 @@ export default function (view) {
         if (!warning) {
             warning = document.createElement('div');
             warning.className = 'serversync-user-mapping-limit base-warn hidden';
-            warning.textContent = 'Skipped. A standard user key only syncs its own user.';
+            warning.textContent = ServerSyncShared.t.tr('WarnUserSkipped');
             row.appendChild(warning);
         }
         warning.classList.toggle('hidden', !blocked);
@@ -1576,18 +1615,18 @@ export default function (view) {
         div.className = 'serversync-mapping serversync-user-mapping';
         div.innerHTML =
             '<div class="serversync-mapping-header">' +
-                '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-user-mapping-enabled" ' + (mapping.IsEnabled !== false ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
-                '<button is="emby-button" type="button" class="serversync-remove-user-mapping raised base-button destructive small"><span>Remove</span></button>' +
+                '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-user-mapping-enabled" ' + (mapping.IsEnabled !== false ? 'checked' : '') + ' /><span class="checkboxLabel">' + escapeHtml(ServerSyncShared.t.tr('OptionEnabled')) + '</span></label>' +
+                '<button is="emby-button" type="button" class="serversync-remove-user-mapping raised base-button destructive small"><span>' + escapeHtml(ServerSyncShared.t.tr('ButtonRemove')) + '</span></button>' +
             '</div>' +
             '<div class="serversync-mapping-grid">' +
-                '<div class="serversync-mapping-column"><div class="selectContainer"><label>Source User</label><select is="emby-select" class="serversync-source-user-select"></select></div></div>' +
-                '<div class="serversync-mapping-column"><div class="selectContainer"><label>Local User</label><select is="emby-select" class="serversync-local-user-select"></select></div></div>' +
+                '<div class="serversync-mapping-column"><div class="selectContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelSourceUser')) + '</label><select is="emby-select" class="serversync-source-user-select"></select></div></div>' +
+                '<div class="serversync-mapping-column"><div class="selectContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelLocalUser')) + '</label><select is="emby-select" class="serversync-local-user-select"></select></div></div>' +
             '</div>' +
             '<div class="serversync-mapping-grid serversync-user-link-caps' + (getChecked('chkAllowLinking') ? '' : ' hidden') + '">' +
-                '<div class="serversync-mapping-column"><div class="inputContainer"><label>Link Streams At Once</label><input is="emby-input" type="number" min="0" max="1000" class="serversync-user-link-max-streams" placeholder="Default" value="' + (mapping.LinkMaxStreams == null ? '' : escapeHtml(String(mapping.LinkMaxStreams))) + '" />' +
-                    '<div class="fieldDescription">Sets the most streams the local user may hold at once for that server\'s links. Empty or 0 uses the server\'s limit.</div></div></div>' +
-                '<div class="serversync-mapping-column"><div class="inputContainer"><label>Link Speed (Mbps)</label><input is="emby-input" type="number" min="0" max="100000" class="serversync-user-link-speed" placeholder="Default" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : escapeHtml(String(mapping.LinkStreamSpeedMbps))) + '" />' +
-                    '<div class="fieldDescription">Sets the fastest each stream and cache download for this user is sent, never above the server\'s speed. Empty or 0 uses the server\'s speed.</div></div></div>' +
+                '<div class="serversync-mapping-column"><div class="inputContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelLinkStreamsAtOnce')) + '</label><input is="emby-input" type="number" min="0" max="1000" class="serversync-user-link-max-streams" placeholder="' + escapeHtml(ServerSyncShared.t.tr('Default')) + '" value="' + (mapping.LinkMaxStreams == null ? '' : escapeHtml(String(mapping.LinkMaxStreams))) + '" />' +
+                    '<div class="fieldDescription">' + escapeHtml(ServerSyncShared.t.tr('HelpUserLinkMaxStreams')) + '</div></div></div>' +
+                '<div class="serversync-mapping-column"><div class="inputContainer"><label>' + escapeHtml(ServerSyncShared.t.tr('LabelLinkSpeed')) + '</label><input is="emby-input" type="number" min="0" max="100000" class="serversync-user-link-speed" placeholder="' + escapeHtml(ServerSyncShared.t.tr('Default')) + '" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : escapeHtml(String(mapping.LinkStreamSpeedMbps))) + '" />' +
+                    '<div class="fieldDescription">' + escapeHtml(ServerSyncShared.t.tr('HelpUserLinkSpeed')) + '</div></div></div>' +
             '</div>';
 
         container.appendChild(div);
@@ -1603,7 +1642,7 @@ export default function (view) {
         var localSelect = div.querySelector('.serversync-local-user-select');
         if (mapping.LocalUserId) localSelect.dataset.savedValue = mapping.LocalUserId;
         if (mapping.LocalUserName) localSelect.dataset.savedName = mapping.LocalUserName;
-        localSelect.innerHTML = '<option value="">Select a local user</option>';
+        localSelect.innerHTML = '<option value="">' + escapeHtml(ServerSyncShared.t.tr('OptionSelectLocalUser')) + '</option>';
         localUsers.forEach(function(user) {
             var option = document.createElement('option');
             option.value = user.Id;
@@ -1650,7 +1689,7 @@ export default function (view) {
                 checkPoolPlugins();
             });
         }).catch(function() {
-            ServerSyncShared.setStatus('serverListStatus', 'Could not load the servers. Reload the page.', true, { timeout: 0 });
+            ServerSyncShared.setStatus('serverListStatus', ServerSyncShared.t.tr('ErrorServersLoad'), true, { timeout: 0 });
         });
     }
 

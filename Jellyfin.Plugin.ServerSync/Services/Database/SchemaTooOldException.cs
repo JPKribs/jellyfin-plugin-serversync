@@ -1,4 +1,5 @@
 using System;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
@@ -12,10 +13,19 @@ public sealed class SchemaTooOldException : InvalidOperationException
     /// </summary>
     /// <param name="foundVersion">The schema version the database holds.</param>
     public SchemaTooOldException(int foundVersion)
-        : base($"The Server Sync database is schema v{foundVersion}, written by a release before {SyncSchema.OldestUpgradableRelease}, and this release reads v{SyncSchema.CurrentSchemaVersion}. It was left untouched. Install Server Sync {SyncSchema.OldestUpgradableRelease}, start Jellyfin once and leave it running for a day, then update again.")
+        : base(Describe(foundVersion, null))
     {
         FoundVersion = foundVersion;
     }
+
+    /// <summary>
+    /// Says why a database of this schema version is held and what to install, in a language.
+    /// </summary>
+    /// <param name="foundVersion">The schema version the database holds.</param>
+    /// <param name="language">The language, or <c>null</c> for US English, as the log reads it.</param>
+    /// <returns>The reason.</returns>
+    public static string Describe(int foundVersion, string? language)
+        => BaseTranslations.Format(TranslationKeys.ErrorSchemaTooOld, language, foundVersion, SyncSchema.OldestUpgradableRelease, SyncSchema.CurrentSchemaVersion);
 
     /// <summary>Gets the schema version the database holds.</summary>
     public int FoundVersion { get; }

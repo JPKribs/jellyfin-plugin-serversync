@@ -38,6 +38,19 @@ export function createUserSyncTableModule(ctx, kit) {
     var setHealthCount = kit.setHealthCount;
     var parseJsonSafe = kit.parseJsonSafe;
     var showObjectVersion = kit.showObjectVersion;
+    var t = ServerSyncShared.t;
+
+    // statusText
+    // Names a row status in the viewer's language, or Unknown when there is none.
+    //
+    // Inputs
+    // status [string]: The status the server sent, such as Synced.
+    //
+    // Output
+    // [string]: The status to show.
+    function statusText(status) {
+        return status ? kit.statusName(status) : t.tr('Unknown');
+    }
 
     // A user row is keyed by its source and local user, joined by a bar.
     function userMappingsFromKeys(keys) {
@@ -63,46 +76,56 @@ export function createUserSyncTableModule(ctx, kit) {
             refresh: { key: 'ServerSyncRefreshUserTable' },
             sync: { key: 'ServerSyncMissingUserData' }
         },
-        taskNoun: 'user',
-        singularNoun: 'User',
-        nounOne: 'user',
-        nounMany: 'users',
-        retryOne: 'user item',
-        retryMany: 'user items',
-        failNoun: 'users',
-        searchPlaceholder: 'Search users',
-        emptyMessage: 'No user sync items found. Run a refresh to scan for user data.',
+        messages: {
+            startRefreshFailed: 'ErrorStartUserRefresh',
+            startSyncFailed: 'ErrorStartUserSync',
+            ignoredOne: 'ToastUsersIgnoredOne',
+            ignoredMany: 'ToastUsersIgnoredMany',
+            queuedOne: 'ToastUsersQueuedOne',
+            queuedMany: 'ToastUsersQueuedMany',
+            ignoreFailed: 'ErrorIgnoreUsers',
+            queueFailed: 'ErrorQueueUsers',
+            retryNone: 'ToastNoErroredUserItems',
+            retriedOne: 'ToastErroredUserItemsRetriedOne',
+            retriedMany: 'ToastErroredUserItemsRetriedMany',
+            retriedUnknown: 'ToastErroredUserItemsRetried',
+            retryFailed: 'ErrorRetryUserItems',
+            statusUpdated: 'ToastUserStatusUpdated',
+            statusFailed: 'ErrorUserStatusUpdate'
+        },
+        searchPlaceholder: t.tr('PlaceholderSearchUsers'),
+        emptyMessage: t.tr('EmptyUserItems'),
         columns: function(self) {
             return [
                 {
                     key: 'user',
-                    label: 'User',
+                    label: t.tr('HeaderUser'),
                     type: 'custom',
                     className: 'base-table-cell-with-thumb',
                     image: function(item) { return ServerSyncShared.proxyImage(item.SourceUserId, true, item.ServerKey); },
                     imageShape: 'round',
                     render: function(item) {
-                        var users = (item.SourceUserName || 'Unknown') + ' → ' + (item.LocalUserName || 'Unknown');
-                        var servers = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey) + ' → ' + (ServerSyncShared.localServerName || 'Unknown');
+                        var users = (item.SourceUserName || t.tr('Unknown')) + ' → ' + (item.LocalUserName || t.tr('Unknown'));
+                        var servers = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey) + ' → ' + (ServerSyncShared.localServerName || t.tr('Unknown'));
                         return renderRowInfo(users, servers, item, item.OverallStatus, '');
                     }
                 },
                 {
                     key: 'changes',
-                    label: 'Changes',
+                    label: t.tr('ColumnChanges'),
                     type: 'custom',
                     className: 'serversync-details-cell',
                     render: function(item) {
                         // Only categories enabled in the config count.
                         var config = self.currentConfig || {};
                         var changes = [];
-                        if (config.UserSyncPolicy !== false && item.PolicyHasChanges) changes.push('Policy');
-                        if (config.UserSyncConfiguration !== false && item.ConfigurationHasChanges) changes.push('Configuration');
-                        if (config.UserSyncProfileImage !== false && item.ProfileImageHasChanges) changes.push('Image');
+                        if (config.UserSyncPolicy !== false && item.PolicyHasChanges) changes.push(t.tr('ChangePolicy'));
+                        if (config.UserSyncConfiguration !== false && item.ConfigurationHasChanges) changes.push(t.tr('ChangeConfiguration'));
+                        if (config.UserSyncProfileImage !== false && item.ProfileImageHasChanges) changes.push(t.tr('Image'));
                         return renderChangeBadges(changes);
                     }
                 },
-                { key: 'OverallStatus', label: 'Status', type: 'status' }
+                { key: 'OverallStatus', label: t.tr('HeaderStatus'), type: 'status' }
             ];
         },
         loadHealth: function() {
@@ -136,28 +159,28 @@ export function createUserSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('UserSyncUsers/' + encodeURIComponent(sourceUserId) + '/' + encodeURIComponent(localUserId)).then(function(detail) {
                     if (seq !== self._detailSeq) return;
                     if (!detail) {
-                        ServerSyncShared.syncStatus('User not found.', true);
+                        ServerSyncShared.syncStatus(t.tr('ErrorUserNotFound'), true);
                         return;
                     }
 
                     self.currentModalItem = detail;
 
                     view.querySelector('#userSyncModalTitle').textContent =
-                        (detail.SourceUserName || 'Unknown') + ' \u2192 ' + (detail.LocalUserName || 'Unknown');
+                        (detail.SourceUserName || t.tr('Unknown')) + ' \u2192 ' + (detail.LocalUserName || t.tr('Unknown'));
 
                     var statusBadge = view.querySelector('#userSyncModalStatusBadge');
-                    statusBadge.textContent = detail.OverallStatus || 'Unknown';
+                    statusBadge.textContent = statusText(detail.OverallStatus);
                     statusBadge.className = 'base-table-status-badge ' + (detail.OverallStatus || 'unknown');
 
                     var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail.ServerKey);
-                    var localServerName = ServerSyncShared.localServerName || 'Local';
+                    var localServerName = ServerSyncShared.localServerName || t.tr('ServerLocal');
                     view.querySelector('#userSyncModalServerMapping').textContent =
                         sourceServerName + ' \u2192 ' + localServerName;
 
                     view.querySelector('#userSyncModalInfoGrid').classList.remove('hidden');
                     view.querySelector('#userSyncModalLastSync').textContent = hasSynced(detail.LastSyncTime)
                         ? ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime))
-                        : 'Never';
+                        : t.tr('Never');
                     showObjectVersion('userSyncModalVersion', { kind: 'Users', localUserId: detail.LocalUserId });
 
                     var errorSection = view.querySelector('#userSyncModalErrorSection');
@@ -168,9 +191,9 @@ export function createUserSyncTableModule(ctx, kit) {
                         errorSection.classList.add('hidden');
                     }
 
-                    view.querySelector('#userSyncModalSourceUser').textContent = detail.SourceUserName || 'Unknown';
+                    view.querySelector('#userSyncModalSourceUser').textContent = detail.SourceUserName || t.tr('Unknown');
                     view.querySelector('#userSyncModalSourceUserId').textContent = detail.SourceUserId || '';
-                    view.querySelector('#userSyncModalLocalUser').textContent = detail.LocalUserName || 'Unknown';
+                    view.querySelector('#userSyncModalLocalUser').textContent = detail.LocalUserName || t.tr('Unknown');
                     view.querySelector('#userSyncModalLocalUserId').textContent = detail.LocalUserId || '';
 
                     view.querySelector('#userSyncModalSourceHeader').textContent = sourceServerName;
@@ -183,28 +206,28 @@ export function createUserSyncTableModule(ctx, kit) {
 
                     if (detail.PolicyEnabled) {
                         if (detail.PolicyItem) {
-                            tbody.appendChild(self._createSectionHeader('Policy'));
+                            tbody.appendChild(self._createSectionHeader(t.tr('ChangePolicy')));
                             self._addPropertyRows(tbody, detail.PolicyItem);
                         } else {
-                            tbody.appendChild(self._createDisabledRow('Policy', 'Not available'));
+                            tbody.appendChild(self._createDisabledRow(t.tr('ChangePolicy')));
                         }
                     }
 
                     if (detail.ConfigurationEnabled) {
                         if (detail.ConfigurationItem) {
-                            tbody.appendChild(self._createSectionHeader('Configuration'));
+                            tbody.appendChild(self._createSectionHeader(t.tr('ChangeConfiguration')));
                             self._addPropertyRows(tbody, detail.ConfigurationItem);
                         } else {
-                            tbody.appendChild(self._createDisabledRow('Configuration', 'Not available'));
+                            tbody.appendChild(self._createDisabledRow(t.tr('ChangeConfiguration')));
                         }
                     }
 
                     if (detail.ProfileImageEnabled) {
                         if (detail.ProfileImageItem) {
-                            tbody.appendChild(self._createSectionHeader('Profile Image'));
+                            tbody.appendChild(self._createSectionHeader(t.tr('HeaderProfileImage')));
                             self._addProfileImageRow(tbody, detail.ProfileImageItem);
                         } else {
-                            tbody.appendChild(self._createDisabledRow('Profile Image', 'Not available'));
+                            tbody.appendChild(self._createDisabledRow(t.tr('HeaderProfileImage')));
                         }
                     }
 
@@ -212,7 +235,7 @@ export function createUserSyncTableModule(ctx, kit) {
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load user detail:', err);
-                    ServerSyncShared.syncStatus('Could not load the user details.', true);
+                    ServerSyncShared.syncStatus(t.tr('ErrorUserDetailsLoad'), true);
                 });
             },
 
@@ -226,12 +249,12 @@ export function createUserSyncTableModule(ctx, kit) {
                 return row;
             },
 
-            _createDisabledRow: function(category, message) {
+            _createDisabledRow: function(category) {
                 var row = document.createElement('tr');
                 row.className = 'serversync-modal-disabled-row';
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
-                cell.innerHTML = '<span class="serversync-muted">' + ServerSyncShared.escapeHtml(category) + ': ' + ServerSyncShared.escapeHtml(message) + '</span>';
+                cell.innerHTML = '<span class="serversync-muted">' + ServerSyncShared.escapeHtml(t.format('RowCategoryNotAvailable', category)) + '</span>';
                 row.appendChild(cell);
                 return row;
             },
@@ -251,7 +274,7 @@ export function createUserSyncTableModule(ctx, kit) {
 
                     var propCell = document.createElement('td');
                     propCell.className = 'serversync-compare-table-property';
-                    propCell.textContent = item.PropertyCategory || 'Value';
+                    propCell.textContent = item.PropertyCategory || t.tr('LabelValue');
 
                     var sourceCell = document.createElement('td');
                     sourceCell.className = 'serversync-compare-table-value';
@@ -323,10 +346,10 @@ export function createUserSyncTableModule(ctx, kit) {
 
                 var propCell = document.createElement('td');
                 propCell.className = 'serversync-compare-table-property';
-                propCell.textContent = 'Profile Image';
+                propCell.textContent = t.tr('HeaderProfileImage');
 
-                var sourceDisplay = item.SourceImageSizeFormatted || (item.SourceImageSize > 0 ? item.SourceImageSize + ' bytes' : 'None');
-                var localDisplay = item.LocalImageSizeFormatted || (item.LocalImageSize > 0 ? item.LocalImageSize + ' bytes' : 'None');
+                var sourceDisplay = item.SourceImageSizeFormatted || (item.SourceImageSize > 0 ? t.format('ImageSizeBytes', item.SourceImageSize) : t.tr('None'));
+                var localDisplay = item.LocalImageSizeFormatted || (item.LocalImageSize > 0 ? t.format('ImageSizeBytes', item.LocalImageSize) : t.tr('None'));
 
                 var sourceCell = document.createElement('td');
                 sourceCell.className = 'serversync-compare-table-value';
@@ -354,12 +377,12 @@ export function createUserSyncTableModule(ctx, kit) {
                 var html = '';
                 var badge = function(label, item) {
                     var changed = !!item && item.HasChanges === true;
-                    html += ServerSyncShared.badge(changed ? 'orange' : 'green', label + ': ' + (changed ? 'Changes' : 'Synced'));
+                    html += ServerSyncShared.badge(changed ? 'orange' : 'green', t.format(changed ? 'BadgeCategoryChanges' : 'BadgeCategorySynced', label));
                 };
 
-                if (config.UserSyncConfiguration !== false) badge('Configuration', detail.ConfigurationItem);
-                if (config.UserSyncPolicy !== false) badge('Policy', detail.PolicyItem);
-                if (config.UserSyncProfileImage !== false) badge('Image', detail.ProfileImageItem);
+                if (config.UserSyncConfiguration !== false) badge(t.tr('ChangeConfiguration'), detail.ConfigurationItem);
+                if (config.UserSyncPolicy !== false) badge(t.tr('ChangePolicy'), detail.PolicyItem);
+                if (config.UserSyncProfileImage !== false) badge(t.tr('Image'), detail.ProfileImageItem);
 
                 container.innerHTML = html;
             },
@@ -369,7 +392,7 @@ export function createUserSyncTableModule(ctx, kit) {
                     return '-';
                 }
                 if (typeof value === 'boolean') {
-                    return value ? 'Yes' : 'No';
+                    return value ? t.tr('Yes') : t.tr('No');
                 }
                 if (Array.isArray(value)) {
                     return value.length > 0 ? value.join(', ') : '-';

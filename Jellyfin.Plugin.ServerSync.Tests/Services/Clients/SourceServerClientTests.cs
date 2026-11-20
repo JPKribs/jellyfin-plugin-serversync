@@ -346,7 +346,7 @@ public sealed class SourceServerClientTests
         await cancelled.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => SourceServerClient.AuthenticateAsync(factory, ClientStubServer.Url, "u", "p", "this", "1.0", true, cancelled.Token));
+            () => SourceServerClient.AuthenticateAsync(factory, ClientStubServer.Url, "u", "p", "this", "1.0", true, cancellationToken: cancelled.Token));
     }
 
     /// <summary>

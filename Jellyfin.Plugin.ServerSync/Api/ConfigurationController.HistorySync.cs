@@ -134,7 +134,7 @@ public partial class ConfigurationController
         var hasItems = request?.Items is { Count: > 0 };
         if (request is null || (!hasIds && !hasItems))
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         if (hasIds)
@@ -148,7 +148,7 @@ public partial class ConfigurationController
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to {Verb} history items by IDs", verb);
-                return StatusCode(500, new { Error = $"Could not {verb} the items. See the server log." });
+                return StatusCode(500, new { Error = Text(verb == "queue" ? TranslationKeys.ErrorQueueItemsSeeLog : TranslationKeys.ErrorIgnoreItemsSeeLog) });
             }
         }
 

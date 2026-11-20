@@ -18,11 +18,31 @@ export function createQueueModule(ctx) {
     var view = ctx.view;
     var ServerSyncShared = ctx.shared;
     var confirmDialog = ctx.confirmDialog;
+    // The page's strings, read through the bag so the loaded handle is always the one used.
+    var t = {
+        tr: function(key) { return ServerSyncShared.t.tr(key); },
+        format: function() { return ServerSyncShared.t.format.apply(null, arguments); }
+    };
 
     var DISCARD_BUTTON = function(lane, id) {
+        var label = ServerSyncShared.escapeHtml(t.tr('ButtonDiscard'));
         return '<button type="button" class="base-row-btn serversync-queue-discard" data-lane="' + lane + '" data-discard="' + ServerSyncShared.escapeHtml(String(id)) +
-            '" title="Discard" aria-label="Discard"><span aria-hidden="true">&times;</span></button>';
+            '" title="' + label + '" aria-label="' + label + '"><span aria-hidden="true">&times;</span></button>';
     };
+
+    // keyed
+    // Reads the string a map of keys names for a kind, or the fallback when the map has none.
+    //
+    // Inputs
+    // keys [object]: String keys by kind.
+    // kind [any]: The kind to name.
+    // fallback [string]: The text when the map has no key for the kind.
+    //
+    // Output
+    // [string]: The text in the viewer's language.
+    function keyed(keys, kind, fallback) {
+        return keys[kind] ? t.tr(keys[kind]) : fallback;
+    }
 
     // Both hint queues and every peer's delivery state, read from
     // Sync/Hints. Rows are few and short lived, so a plain table that
@@ -53,14 +73,15 @@ export function createQueueModule(ctx) {
                 this._bound = true;
                 view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(true); });
                 view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
-                view.querySelector('#btnQueueRetryFailed').addEventListener('click', function() { self.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'failed change tried again', 'failed changes tried again'); });
+                view.querySelector('#btnQueueRetryFailed').addEventListener('click', function() { self.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'ToastFailedRetriedOne', 'ToastFailedRetriedMany'); });
                 view.querySelector('#btnQueueDismissFailed').addEventListener('click', function() {
-                    confirmDialog('Discard every failed change, sent and received? The scheduled tasks still carry them.', {
-                        title: 'Dismiss Failed Changes',
-                        confirmText: 'Dismiss',
+                    confirmDialog(t.tr('ConfirmDismissFailed'), {
+                        title: t.tr('TitleDismissFailed'),
+                        confirmText: t.tr('ButtonDismiss'),
+                        cancelText: t.tr('ButtonCancel'),
                         destructive: true
                     }).then(function(confirmed) {
-                        if (confirmed) self.failedAction('Hints/Failed', 'DELETE', 'Removed', 'failed change dismissed', 'failed changes dismissed');
+                        if (confirmed) self.failedAction('Hints/Failed', 'DELETE', 'Removed', 'ToastFailedDismissedOne', 'ToastFailedDismissedMany');
                     });
                 });
                 view.querySelector('#btnQueueUnmatchedDismiss').addEventListener('click', function() { self.dismissUnmatched(); });
@@ -163,25 +184,25 @@ export function createQueueModule(ctx) {
             ServerSyncShared.apiRequest('Hints/Run', 'POST').then(function() {
                 return self.load(true);
             }).then(function() {
-                ServerSyncShared.syncStatus('Delivered and applied what was due.', false);
+                ServerSyncShared.syncStatus(t.tr('ToastQueueRan'), false);
             }).catch(function() {
-                ServerSyncShared.syncStatus('Could not run the queue. See the server log.', true);
+                ServerSyncShared.syncStatus(t.tr('ErrorQueueRun'), true);
             }).then(function() {
                 btn.disabled = false;
             });
         },
 
-        // Every failed row at once: sent again, or discarded.
+        // Every failed row at once: sent again, or discarded. doneOne and doneMany are the keys of the result.
         failedAction: function(route, method, countKey, doneOne, doneMany) {
             var self = this;
             var buttons = [view.querySelector('#btnQueueRetryFailed'), view.querySelector('#btnQueueDismissFailed')];
             buttons.forEach(function(b) { b.disabled = true; });
             ServerSyncShared.apiRequest(route, method).then(function(result) {
                 return self.load(true).then(function() {
-                    ServerSyncShared.syncStatus(ServerSyncShared.plural((result && result[countKey]) || 0, doneOne, doneMany) + '.', false);
+                    ServerSyncShared.syncStatus(ServerSyncShared.plural((result && result[countKey]) || 0, doneOne, doneMany), false);
                 });
             }).catch(function() {
-                ServerSyncShared.syncStatus('Could not finish that. See the server log.', true);
+                ServerSyncShared.syncStatus(t.tr('ErrorQueueFailedAction'), true);
             }).then(function() {
                 buttons.forEach(function(b) { b.disabled = false; });
             });
@@ -194,7 +215,7 @@ export function createQueueModule(ctx) {
             ServerSyncShared.apiRequest('Hints/Unmatched', 'DELETE').then(function() {
                 return self.load(true);
             }).catch(function() {
-                ServerSyncShared.syncStatus('Could not dismiss the warning.', true);
+                ServerSyncShared.syncStatus(t.tr('ErrorDismissWarning'), true);
             }).then(function() {
                 btn.disabled = false;
             });
@@ -220,11 +241,11 @@ export function createQueueModule(ctx) {
             var peerRow = view.querySelector('#queuePeerRow');
             peerRow.innerHTML = peers.map(function(p) {
                 var paused = p.PausedUntil && new Date(p.PausedUntil) > new Date();
-                var state = paused ? 'Paused until ' + QueueModule._time(p.PausedUntil)
-                    : p.LastAttempt ? 'Delivered ' + QueueModule._ago(p.LastAttempt) : 'Nothing sent yet';
-                var sends = p.Sends === null || p.Sends === undefined ? 'Sends everything until the server says what it applies'
-                    : p.Sends.length === 0 ? 'Sends nothing: every module is off there'
-                    : 'Sends ' + p.Sends.map(QueueModule._kindLabel).join(', ');
+                var state = paused ? t.format('QueuePeerPaused', QueueModule._time(p.PausedUntil))
+                    : p.LastAttempt ? t.format('QueuePeerDelivered', QueueModule._ago(p.LastAttempt)) : t.tr('QueuePeerNothingSent');
+                var sends = p.Sends === null || p.Sends === undefined ? t.tr('QueuePeerSendsAll')
+                    : p.Sends.length === 0 ? t.tr('QueuePeerSendsNone')
+                    : t.format('QueuePeerSends', p.Sends.map(QueueModule._kindLabel).join(', '));
                 return '<div class="serversync-health-card serversync-queue-peer-card">' +
                     '<span class="serversync-health-label">' + ServerSyncShared.escapeHtml(p.Name || p.Key) + '</span>' +
                     '<span class="serversync-health-value' + (paused ? ' serversync-paused' : '') + '">' + ServerSyncShared.escapeHtml(state) + '</span>' +
@@ -239,8 +260,9 @@ export function createQueueModule(ctx) {
             var unmatched = data.Unmatched || 0;
             unmatchedEl.classList.toggle('hidden', unmatched === 0);
             if (unmatched > 0) {
-                unmatchedEl.querySelector('#queueUnmatchedText').textContent = unmatched + ' local change' + (unmatched === 1 ? '' : 's') + ' matched no library or user mapping on any Push or Sync server, so nothing was sent for ' + (unmatched === 1 ? 'it' : 'them') +
-                    (data.LastUnmatched ? '. Last: ' + data.LastUnmatched : '') + '. Saving the Libraries or Users step of those servers checks ' + (unmatched === 1 ? 'it' : 'them') + ' again.';
+                unmatchedEl.querySelector('#queueUnmatchedText').textContent = data.LastUnmatched
+                    ? ServerSyncShared.plural(unmatched, 'QueueUnmatchedLastOne', 'QueueUnmatchedLastMany', data.LastUnmatched)
+                    : ServerSyncShared.plural(unmatched, 'QueueUnmatchedOne', 'QueueUnmatchedMany');
             }
 
             // Peer filters follow the peers that exist.
@@ -297,7 +319,7 @@ export function createQueueModule(ctx) {
             var shown = rows.slice(0, self._maxRows);
             list.innerHTML = shown.map(function(r) { return QueueModule._row(r); }).join('') +
                 (rows.length > shown.length
-                    ? '<div class="serversync-queue-more">Showing the latest ' + shown.length + ' of ' + rows.length + '. Filter by state or server to see others.</div>'
+                    ? '<div class="serversync-queue-more">' + ServerSyncShared.escapeHtml(t.format('QueueShowingLatest', shown.length, rows.length)) + '</div>'
                     : '');
             view.querySelector('#queueEmpty').classList.toggle('hidden', rows.length > 0);
             list.classList.toggle('hidden', rows.length === 0);
@@ -339,30 +361,30 @@ export function createQueueModule(ctx) {
                 var avatar = r.userId ? '<img class="serversync-queue-avatar" src="' + esc(ApiClient.getUserImageUrl(r.userId, { type: 'Primary', height: 32 })) + '" alt="" />' : '<i class="serversync-queue-avatar"></i>';
                 who = '<span class="serversync-queue-who">' + avatar + esc(r.userName) + '</span>';
             }
-            var where = r.dir === 'in' ? 'from ' + esc(r.peerName || 'a server') : (r.peerName ? 'to ' + esc(r.peerName) : '');
+            var where = r.dir === 'in' ? esc(t.format('QueueFrom', r.peerName || t.tr('QueueSomeServer'))) : (r.peerName ? esc(t.format('QueueTo', r.peerName)) : '');
             var sub = who + '<span>' + esc(r.what) + (where ? ' · ' + where : '') + '</span>';
             var badges = '<span class="base-badge ' + QueueModule._kindColor(r.kind) + '">' + esc(QueueModule._kindLabelTitle(r.kind)) + '</span>' +
-                (r.recorded === false ? '<span class="base-badge gray">Provider</span>' : '');
+                (r.recorded === false ? '<span class="base-badge gray">' + esc(t.tr('BadgeProvider')) + '</span>' : '');
 
             var chip, meta = '', err = false, act = '';
             if (r.state === 'Gathering') {
-                chip = '<span class="serversync-queue-chip serversync-gathering" data-due="' + esc(r.dueAt || '') + '" data-edited="' + esc(r.at || '') + '"><i class="serversync-queue-ring"></i><span class="serversync-queue-chip-text">Gathering · ' + QueueModule._countdown(r.dueAt) + '</span></span>';
-                meta = 'edited ' + QueueModule._ago(r.at);
+                chip = '<span class="serversync-queue-chip serversync-gathering" data-due="' + esc(r.dueAt || '') + '" data-edited="' + esc(r.at || '') + '"><i class="serversync-queue-ring"></i><span class="serversync-queue-chip-text">' + esc(t.format('QueueChipGathering', QueueModule._countdown(r.dueAt))) + '</span></span>';
+                meta = t.format('QueueMetaEdited', QueueModule._ago(r.at));
             } else if (r.state === 'Pending') {
-                chip = '<span class="serversync-queue-chip serversync-pending">Pending' + (r.attempts > 0 ? ' · retry ' + QueueModule._time(r.nextAttempt) : ' · ' + esc(r.peerName)) + '</span>';
-                if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = 'waiting for delivery'; }
+                chip = '<span class="serversync-queue-chip serversync-pending">' + esc(r.attempts > 0 ? t.format('QueueChipPendingRetry', QueueModule._time(r.nextAttempt)) : t.format('QueueChipPending', r.peerName)) + '</span>';
+                if (r.attempts > 0) { meta = t.format('QueueMetaAttempt', r.lastError || t.tr('QueueMetaRetrying'), r.attempts); err = true; } else { meta = t.tr('QueueMetaWaiting'); }
                 act = DISCARD_BUTTON('Outbound', r.id);
             } else if (r.state === 'Sent') {
-                chip = '<span class="serversync-queue-chip serversync-sent">Sent · waiting for ' + esc(r.peerName) + '</span>';
-                meta = 'accepted ' + QueueModule._ago(r.sentAt);
+                chip = '<span class="serversync-queue-chip serversync-sent">' + esc(t.format('QueueChipSent', r.peerName)) + '</span>';
+                meta = t.format('QueueMetaAccepted', QueueModule._ago(r.sentAt));
                 act = DISCARD_BUTTON('Outbound', r.id);
             } else if (r.state === 'Failed') {
-                chip = '<span class="serversync-queue-chip serversync-failed">Failed · ' + esc(r.peerName) + '</span>';
-                meta = r.lastError || 'rejected'; err = true;
+                chip = '<span class="serversync-queue-chip serversync-failed">' + esc(t.format('QueueChipFailed', r.peerName)) + '</span>';
+                meta = r.lastError || t.tr('QueueMetaRejected'); err = true;
                 act = DISCARD_BUTTON('Outbound', r.id);
             } else {
-                chip = '<span class="serversync-queue-chip serversync-received">Received · ' + (r.parked ? 'waiting for the item' : r.attempts > 0 ? 'retrying' : 'applying next pass') + '</span>';
-                if (r.parked) { meta = r.lastError || 'waiting for the item to arrive here'; } else if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = QueueModule._ago(r.receivedAt); }
+                chip = '<span class="serversync-queue-chip serversync-received">' + esc(t.tr(r.parked ? 'QueueChipReceivedParked' : r.attempts > 0 ? 'QueueChipReceivedRetrying' : 'QueueChipReceivedNext')) + '</span>';
+                if (r.parked) { meta = r.lastError || t.tr('QueueMetaParked'); } else if (r.attempts > 0) { meta = t.format('QueueMetaAttempt', r.lastError || t.tr('QueueMetaRetrying'), r.attempts); err = true; } else { meta = QueueModule._ago(r.receivedAt); }
                 act = DISCARD_BUTTON('Inbound', r.id);
             }
 
@@ -386,7 +408,7 @@ export function createQueueModule(ctx) {
                 var edited = chip.getAttribute('data-edited');
                 if (!due) return;
                 var text = chip.querySelector('.serversync-queue-chip-text');
-                if (text) text.textContent = 'Gathering · ' + QueueModule._countdown(due);
+                if (text) text.textContent = t.format('QueueChipGathering', QueueModule._countdown(due));
                 var ring = chip.querySelector('.serversync-queue-ring');
                 if (ring && edited) {
                     var total = new Date(due) - new Date(edited);
@@ -399,8 +421,8 @@ export function createQueueModule(ctx) {
         _countdown: function(iso) {
             if (!iso) return '';
             var s = Math.round((new Date(iso) - Date.now()) / 1000);
-            if (s <= 0) return 'sending now';
-            return s < 120 ? 'sends in ' + s + 's' : 'sends in ' + Math.round(s / 60) + 'm';
+            if (s <= 0) return t.tr('QueueSendingNow');
+            return s < 120 ? t.format('QueueSendsInSeconds', s) : t.format('QueueSendsInMinutes', Math.round(s / 60));
         },
 
         _origin: function(serverId) {
@@ -409,16 +431,17 @@ export function createQueueModule(ctx) {
         },
 
         _what: function(kind) {
-            return { 0: 'watch history', 1: 'metadata', 2: 'biography and images', 3: 'new file', 4: 'user settings', 5: 'playlist',
-                History: 'watch history', Metadata: 'metadata', People: 'biography and images', Content: 'new file', Users: 'user settings', Playlists: 'playlist' }[kind] || String(kind);
+            return keyed({ 0: 'KindWhatHistory', 1: 'KindWhatMetadata', 2: 'KindWhatPeople', 3: 'KindWhatContent', 4: 'KindWhatUsers', 5: 'KindWhatPlaylists',
+                History: 'KindWhatHistory', Metadata: 'KindWhatMetadata', People: 'KindWhatPeople', Content: 'KindWhatContent', Users: 'KindWhatUsers', Playlists: 'KindWhatPlaylists' }, kind, String(kind));
         },
 
         _kindLabel: function(kind) {
-            return { History: 'watch history', Metadata: 'metadata', People: 'people', Content: 'files', Users: 'user settings', Playlists: 'playlists' }[kind] || String(kind).toLowerCase();
+            return keyed({ History: 'KindWhatHistory', Metadata: 'KindWhatMetadata', People: 'KindPeopleLower', Content: 'KindFilesLower', Users: 'KindWhatUsers', Playlists: 'KindPlaylistsLower' }, kind, String(kind).toLowerCase());
         },
 
         _kindLabelTitle: function(kind) {
-            return { 0: 'Watch history', 1: 'Metadata', 2: 'Person', 3: 'File', 4: 'User', 5: 'Playlist', History: 'Watch history', Metadata: 'Metadata', People: 'Person', Content: 'File', Users: 'User', Playlists: 'Playlist' }[kind] || String(kind);
+            return keyed({ 0: 'KindTitleHistory', 1: 'LabelMetadata', 2: 'Person', 3: 'File', 4: 'HeaderUser', 5: 'LabelPlaylist',
+                History: 'KindTitleHistory', Metadata: 'LabelMetadata', People: 'Person', Content: 'File', Users: 'HeaderUser', Playlists: 'LabelPlaylist' }, kind, String(kind));
         },
 
         _kindColor: function(kind) {
@@ -440,10 +463,10 @@ export function createQueueModule(ctx) {
         _ago: function(iso) {
             if (!iso) return '';
             var seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-            if (seconds < 60) return seconds + 's ago';
-            if (seconds < 3600) return Math.round(seconds / 60) + 'm ago';
-            if (seconds < 86400) return Math.round(seconds / 3600) + 'h ago';
-            return Math.round(seconds / 86400) + 'd ago';
+            if (seconds < 60) return t.format('AgoSeconds', seconds);
+            if (seconds < 3600) return t.format('AgoMinutes', Math.round(seconds / 60));
+            if (seconds < 86400) return t.format('AgoHours', Math.round(seconds / 3600));
+            return t.format('AgoDays', Math.round(seconds / 86400));
         },
 
         _time: function(iso) {
@@ -452,7 +475,7 @@ export function createQueueModule(ctx) {
             var diff = d.getTime() - Date.now();
             if (diff > 0 && diff < 86400000) {
                 var minutes = Math.round(diff / 60000);
-                return minutes < 1 ? 'in under a minute' : minutes < 60 ? 'in ' + minutes + 'm' : 'in ' + Math.round(minutes / 60) + 'h';
+                return minutes < 1 ? t.tr('InUnderMinute') : minutes < 60 ? t.format('InMinutes', minutes) : t.format('InHours', Math.round(minutes / 60));
             }
             return d.toLocaleString();
         },
@@ -463,10 +486,10 @@ export function createQueueModule(ctx) {
             var self = this;
             btn.disabled = true;
             ServerSyncShared.apiRequest('Hints/' + btn.getAttribute('data-lane') + '/' + btn.getAttribute('data-discard'), 'DELETE').then(function() {
-                ServerSyncShared.syncStatus('Hint discarded.', false);
+                ServerSyncShared.syncStatus(t.tr('ToastHintDiscarded'), false);
                 return self.load(true);
             }).catch(function() {
-                ServerSyncShared.syncStatus('Could not discard the hint.', true);
+                ServerSyncShared.syncStatus(t.tr('ErrorDiscardHint'), true);
                 btn.disabled = false;
             });
         }

@@ -8,9 +8,14 @@
 // ctx [object]: The page context, with the view, the shared helper bag, the paginated table and dialog builders,
 // and activePollIntervals, the list of running task pollers the page stops on viewhide.
 //
+// A module spec names its messages in spec.messages, as keys of the plugin's strings: startRefreshFailed,
+// startSyncFailed, ignoredOne, ignoredMany, queuedOne, queuedMany, ignoreFailed, queueFailed, retryNone,
+// retriedOne, retriedMany, retriedUnknown, retryFailed, statusUpdated, and statusFailed. A count fills {0},
+// and statusUpdated takes the status name as {0}. Every other text in a spec arrives translated.
+//
 // Output
 // [object]: A handle with createSyncTableModule, openSyncView, renderRowInfo, renderChangeBadges,
-// setHealthLastSync, setHealthCount, parseJsonSafe, formatImageDisplay, and showObjectVersion.
+// setHealthLastSync, setHealthCount, parseJsonSafe, formatImageDisplay, showObjectVersion, and statusName.
 export function createSyncTableKit(ctx) {
     'use strict';
 
@@ -27,10 +32,37 @@ export function createSyncTableKit(ctx) {
 
     var BASE_STATUSES = ['Synced', 'Queued', 'Errored', 'Ignored'];
 
+    // The string key of each status the kit names.
+    var STATUS_KEYS = { Synced: 'StatusSynced', Queued: 'StatusQueued', Errored: 'StatusErrored', Ignored: 'StatusIgnored', Pending: 'StatusPending' };
+
     var DEFAULT_BULK_BUTTONS = [
-        { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
-        { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'base-button primary', method: 'bulkQueue' }
+        { id: 'Ignore', title: ServerSyncShared.t.tr('ButtonIgnore'), icon: 'block', method: 'bulkIgnore' },
+        { id: 'Queue', title: ServerSyncShared.t.tr('ButtonQueue'), icon: 'playlist_add', className: 'base-button primary', method: 'bulkQueue' }
     ];
+
+    // statusName
+    // Names a status in the viewer's language.
+    //
+    // Inputs
+    // status [string]: The status as the server sends it, such as Queued.
+    //
+    // Output
+    // [string]: The name, or the status itself when it has no string.
+    function statusName(status) {
+        return STATUS_KEYS[status] ? ServerSyncShared.t.tr(STATUS_KEYS[status]) : status;
+    }
+
+    // tr
+    // Reads one of the plugin's strings.
+    //
+    // Inputs
+    // key [string]: The string's key.
+    //
+    // Output
+    // [string]: The text in the viewer's language.
+    function tr(key) {
+        return ServerSyncShared.t.tr(key);
+    }
 
     // An element id under a view's prefix. The Content view has no prefix, so its ids start lowercase.
     function prefixedId(prefix, name) {
@@ -39,7 +71,7 @@ export function createSyncTableKit(ctx) {
 
     function statusFilters(statuses) {
         return {
-            options: statuses.map(function(s) { return { value: s, label: s }; }),
+            options: statuses.map(function(s) { return { value: s, label: statusName(s) }; }),
             buildParams: function(filterValue) { return { status: filterValue }; }
         };
     }
@@ -51,7 +83,7 @@ export function createSyncTableKit(ctx) {
             el.textContent = ServerSyncShared.formatRelativeTime(new Date(time));
             el.className = 'serversync-health-value';
         } else {
-            el.textContent = 'Never';
+            el.textContent = ServerSyncShared.t.tr('Never');
             el.className = 'serversync-health-value';
         }
     }
@@ -81,7 +113,7 @@ export function createSyncTableKit(ctx) {
     // The orange badges for the categories that differ, or a gray one when none do.
     function renderChangeBadges(changes) {
         if (changes.length === 0) {
-            return '<span class="base-badge gray">No Changes</span>';
+            return '<span class="base-badge gray">' + ServerSyncShared.escapeHtml(ServerSyncShared.t.tr('BadgeNoChanges')) + '</span>';
         }
         return changes.map(function(c) { return '<span class="base-badge orange">' + c + '</span>'; }).join(' ');
     }
@@ -171,7 +203,7 @@ export function createSyncTableKit(ctx) {
 
                 container.innerHTML = bulkButtons.map(function(b) {
                     return '<button is="emby-button" type="button" id="' + ids.bulk(b.id) + '" class="raised ' + (b.className ? b.className + ' ' : '') +
-                        'serversync-bulk-icon-btn" title="' + b.title + '" aria-label="' + b.title + '" disabled><span class="material-icons" aria-hidden="true">' + b.icon + '</span></button>';
+                        'serversync-bulk-icon-btn" title="' + ServerSyncShared.escapeHtml(b.title) + '" aria-label="' + ServerSyncShared.escapeHtml(b.title) + '" disabled><span class="material-icons" aria-hidden="true">' + b.icon + '</span></button>';
                 }).join('');
                 bulkButtons.forEach(function(b) {
                     container.querySelector('#' + ids.bulk(b.id)).addEventListener('click', function() { self[b.method](); });
@@ -198,7 +230,7 @@ export function createSyncTableKit(ctx) {
                     var countEl = view.querySelector('#' + prefixedId(spec.prefix, s + 'Count'));
                     if (countEl) countEl.textContent = count;
                     var groupEl = view.querySelector('#' + prefixedId(spec.prefix, 'StatusGroup' + s));
-                    if (groupEl) groupEl.setAttribute('title', s + ': ' + count);
+                    if (groupEl) groupEl.setAttribute('title', ServerSyncShared.t.format('StatusCountTitle', statusName(s), count));
                 });
 
                 var retryBtn = view.querySelector('#' + ids.retry);
@@ -220,19 +252,19 @@ export function createSyncTableKit(ctx) {
             runTask: function(kind) {
                 var self = this;
                 var task = spec.tasks[kind];
-                var label = kind === 'refresh' ? 'Refresh' : 'Sync';
+                var label = kind === 'refresh' ? ServerSyncShared.t.tr('Refresh') : ServerSyncShared.t.tr('TabSync');
                 var btn = view.querySelector('#' + ids[kind]);
                 if (!btn || !task) return;
 
                 btn.disabled = true;
-                btn.querySelector('span').textContent = 'Starting…';
+                btn.querySelector('span').textContent = ServerSyncShared.t.tr('StatusStarting');
 
                 ServerSyncShared.apiRequest('Tasks/' + task.key + '/Run', 'POST').then(function() {
                     _activePollIntervals.push(ServerSyncShared.pollTaskProgress(btn, task.key, label, function() {
                         self.loadAll();
                     }));
                 }).catch(function() {
-                    ServerSyncShared.syncStatus('Could not start the ' + (spec.taskNoun ? spec.taskNoun + ' ' : '') + label.toLowerCase() + ' task.', true);
+                    ServerSyncShared.syncStatus(tr(kind === 'refresh' ? spec.messages.startRefreshFailed : spec.messages.startSyncFailed), true);
                     btn.querySelector('span').textContent = label;
                     btn.disabled = false;
                 });
@@ -240,7 +272,7 @@ export function createSyncTableKit(ctx) {
 
             retryErrors: function() {
                 var self = this;
-                return retryAllErrored(spec.retryEndpoint, spec.retryOne || spec.nounOne, spec.retryMany || spec.nounMany, function() {
+                return retryAllErrored(spec.retryEndpoint, spec.messages, function() {
                     return Promise.all([self.loadStatus(), self.loadItems()]);
                 });
             },
@@ -253,21 +285,21 @@ export function createSyncTableKit(ctx) {
             },
 
             bulkIgnore: function() {
-                this._bulk('Ignore', 'ignored');
+                var m = spec.messages;
+                this._bulk('Ignore', function(n) { return ServerSyncShared.plural(n, m.ignoredOne, m.ignoredMany); }, tr(m.ignoreFailed));
             },
 
             bulkQueue: function() {
-                this._bulk('Queue', 'queued');
+                var m = spec.messages;
+                this._bulk('Queue', function(n) { return ServerSyncShared.plural(n, m.queuedOne, m.queuedMany); }, tr(m.queueFailed));
             },
 
-            _bulk: function(action, done) {
+            _bulk: function(action, done, failMessage) {
                 var keys = this.table.getSelectedIds();
                 if (keys.length === 0) return;
 
                 var body = spec.selectionBody ? spec.selectionBody(keys) : { Ids: keys };
-                this.postSelection(spec.itemsEndpoint + '/' + action, body,
-                    ServerSyncShared.plural(keys.length, spec.nounOne, spec.nounMany) + ' ' + done + '.',
-                    'Could not ' + action.toLowerCase() + ' the ' + spec.failNoun + '.');
+                this.postSelection(spec.itemsEndpoint + '/' + action, body, done(keys.length), failMessage);
             },
 
             // Posts an action on the selected rows and reloads. The done message may be a function of
@@ -319,10 +351,10 @@ export function createSyncTableKit(ctx) {
                 var request = spec.statusRequest(item, status);
                 ServerSyncShared.apiRequest(request.endpoint, 'POST', request.body).then(function() {
                     self.closeModal();
-                    ServerSyncShared.syncStatus(spec.singularNoun + ' status updated to ' + status + '.', false);
+                    ServerSyncShared.syncStatus(ServerSyncShared.t.format(spec.messages.statusUpdated, statusName(status)), false);
                 }).catch(function(err) {
                     console.error('Failed to update status:', err);
-                    ServerSyncShared.syncStatus('Could not update the ' + spec.singularNoun.toLowerCase() + ' status.', true);
+                    ServerSyncShared.syncStatus(tr(spec.messages.statusFailed), true);
                 });
             }
         };
@@ -362,7 +394,7 @@ export function createSyncTableKit(ctx) {
     function formatImageDisplay(size, count) {
         if (count === 0) return '-';
         if (!size) {
-            return count === 1 ? '1 image' : count + ' images';
+            return ServerSyncShared.plural(count, 'ImageCountOne', 'ImageCountMany');
         }
         var sizeStr = ServerSyncShared.formatSize(size);
         return count > 1 ? sizeStr + ' (' + count + ')' : sizeStr;
@@ -373,19 +405,19 @@ export function createSyncTableKit(ctx) {
     // happen to be loaded. The counts and rows reload whether or not the request worked, since the table
     // should show what the server holds now, and every promise in the chain is returned so nothing fails
     // without a status.
-    function retryAllErrored(endpoint, one, many, reload) {
+    function retryAllErrored(endpoint, messages, reload) {
         return ServerSyncShared.apiRequest(endpoint, 'POST', { Ids: [], Status: 'Errored' }).then(function(result) {
             var updated = result && typeof result.Updated === 'number' ? result.Updated : null;
             if (updated === 0) {
-                ServerSyncShared.syncStatus('No errored ' + many + ' to retry.', false);
+                ServerSyncShared.syncStatus(tr(messages.retryNone), false);
             } else if (updated !== null) {
-                ServerSyncShared.syncStatus(ServerSyncShared.plural(updated, 'errored ' + one, 'errored ' + many) + ' queued for retry.', false);
+                ServerSyncShared.syncStatus(ServerSyncShared.plural(updated, messages.retriedOne, messages.retriedMany), false);
             } else {
-                ServerSyncShared.syncStatus('Errored ' + many + ' queued for retry.', false);
+                ServerSyncShared.syncStatus(tr(messages.retriedUnknown), false);
             }
         }, function(err) {
             console.error('Retry of errored rows failed:', err);
-            ServerSyncShared.syncStatus('Could not retry the errored ' + many + '.', true);
+            ServerSyncShared.syncStatus(tr(messages.retryFailed), true);
         }).then(function() {
             return reload();
         }).catch(function(err) {
@@ -413,15 +445,17 @@ export function createSyncTableKit(ctx) {
         ServerSyncShared.apiRequest('Hints/Version?' + query, 'GET').then(function (version) {
             if (_versionSeq[elementId] !== seq) return;
             if (!version || !version.Timestamp) {
-                el.textContent = 'Not recorded';
+                el.textContent = ServerSyncShared.t.tr('VersionNotRecorded');
                 return;
             }
-            var where = version.IsThisServer ? 'here' : 'on ' + (version.ServerName || version.ServerId);
-            el.textContent = ServerSyncShared.formatRelativeTime(new Date(version.Timestamp)) + ' ' + where;
+            var when = ServerSyncShared.formatRelativeTime(new Date(version.Timestamp));
+            el.textContent = version.IsThisServer
+                ? ServerSyncShared.t.format('VersionHere', when)
+                : ServerSyncShared.t.format('VersionOnServer', when, version.ServerName || version.ServerId);
             el.title = new Date(version.Timestamp).toLocaleString();
         }).catch(function () {
             if (_versionSeq[elementId] !== seq) return;
-            el.textContent = 'Not recorded';
+            el.textContent = ServerSyncShared.t.tr('VersionNotRecorded');
         });
     }
 
@@ -434,6 +468,7 @@ export function createSyncTableKit(ctx) {
         setHealthCount: setHealthCount,
         parseJsonSafe: parseJsonSafe,
         formatImageDisplay: formatImageDisplay,
-        showObjectVersion: showObjectVersion
+        showObjectVersion: showObjectVersion,
+        statusName: statusName
     };
 }

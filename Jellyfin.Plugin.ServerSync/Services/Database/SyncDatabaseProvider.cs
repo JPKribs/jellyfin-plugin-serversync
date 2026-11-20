@@ -1,4 +1,5 @@
 using System;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -71,7 +72,12 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
                     _tooOld = ex;
                     if (_services?.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
                     {
-                        _ = activity.LogAndWaitAsync("Server Sync Needs an Earlier Update First", "ServerSyncAttention", ex.Message, LogLevel.Error);
+                        var language = _services.GetService<MediaBrowser.Controller.Configuration.IServerConfigurationManager>() is { } config ? BaseTranslations.ServerLanguage(config) : null;
+                        _ = activity.LogAndWaitAsync(
+                            BaseTranslations.Get(TranslationKeys.AttentionEarlierUpdate, language),
+                            "ServerSyncAttention",
+                            SchemaTooOldException.Describe(ex.FoundVersion, language),
+                            LogLevel.Error);
                     }
 
                     throw;

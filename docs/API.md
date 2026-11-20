@@ -569,3 +569,7 @@ Whether Server Sync can run here. Every page asks, and shows `Message` at its to
 ```
 
 `Ready` is false while the database is one an older release wrote. See [Updating From an Older Release](Versioning.md#updating-from-an-older-release).
+
+### GET /Sync/Translations?language={code}
+
+The strings every page shows, in one language, as a JSON object of keys and text. It holds the Jellyfin strings the plugin declares and the plugin's own, with a missing string falling back to US English. The strings are not secret, so this route allows anonymous callers. The text other dashboard routes return reads in the language of the request's `Accept-Language` header.

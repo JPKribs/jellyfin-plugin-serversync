@@ -23,6 +23,7 @@ async function setup(ids) {
     page.dom.document.documentElement.appendChild(view);
     var sharedMod = await loadScript('serversync_shared.js');
     shared = sharedMod.createServerSyncShared(view);
+    await shared.translations;
     responses = [];
     globalThis.ApiClient.fetch = function (options) {
         page.requests.push(options);
@@ -176,13 +177,23 @@ function historySpec() {
         modalId: 'historyItemDetailModal',
         modalButtonPrefix: 'btnHistoryModal',
         tasks: { refresh: { key: 'RefreshKey' }, sync: { key: 'SyncKey' } },
-        taskNoun: 'history',
-        singularNoun: 'Item',
-        nounOne: 'item',
-        nounMany: 'items',
-        retryOne: 'history item',
-        retryMany: 'history items',
-        failNoun: 'items',
+        messages: {
+            startRefreshFailed: 'MessageStartHistoryRefreshFailed',
+            startSyncFailed: 'MessageStartHistorySyncFailed',
+            ignoredOne: 'ToastItemsIgnoredOne',
+            ignoredMany: 'ToastItemsIgnoredMany',
+            queuedOne: 'ToastItemsQueuedOne',
+            queuedMany: 'ToastItemsQueuedMany',
+            ignoreFailed: 'ErrorIgnoreItems',
+            queueFailed: 'ErrorQueueItems',
+            retryNone: 'MessageNoErroredHistoryItems',
+            retriedOne: 'MessageErroredHistoryItemsRetriedOne',
+            retriedMany: 'MessageErroredHistoryItemsRetriedMany',
+            retriedUnknown: 'MessageErroredHistoryItemsRetried',
+            retryFailed: 'ErrorRetryHistoryItems',
+            statusUpdated: 'ToastItemStatusUpdated',
+            statusFailed: 'ErrorItemStatusUpdate'
+        },
         columns: function () { return []; },
         statusRequest: function (item, status) { return { endpoint: 'HistoryItems/' + (status === 'Ignored' ? 'Ignore' : 'Queue'), body: { Ids: [item.Id] } }; }
     };

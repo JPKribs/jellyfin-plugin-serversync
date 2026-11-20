@@ -149,7 +149,7 @@ public partial class ConfigurationController
 
         if (request?.Ids == null || request.Ids.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         try
@@ -161,7 +161,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue people sync items by IDs");
-            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
+            return StatusCode(500, new { Error = Text(TranslationKeys.ErrorQueueItemsSeeLog) });
         }
     }
 
@@ -181,7 +181,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
-            return BadRequest("Select the items.");
+            return BadRequest(Text(TranslationKeys.ErrorSelectItems));
         }
 
         try
@@ -193,7 +193,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore people sync items by IDs");
-            return StatusCode(500, new { Error = "Could not ignore the items. See the server log." });
+            return StatusCode(500, new { Error = Text(TranslationKeys.ErrorIgnoreItemsSeeLog) });
         }
     }
 }

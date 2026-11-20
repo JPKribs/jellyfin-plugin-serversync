@@ -51,8 +51,17 @@ public partial class SourceServerClient
     /// Asks the peer whether its Server Sync lets this server's key use the sync routes.
     /// </summary>
     /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A result code, such as Allowed or NotInstalled, and a message that says it in US English.</returns>
+    public Task<(string Code, string Message)> CheckSyncAccessAsync(CancellationToken cancellationToken = default)
+        => CheckSyncAccessAsync(null, cancellationToken);
+
+    /// <summary>
+    /// Asks the peer whether its Server Sync lets this server's key use the sync routes, with the message in a language.
+    /// </summary>
+    /// <param name="language">The language of the message, or <c>null</c> for US English.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>A result code, such as Allowed or NotInstalled, and a message that says it.</returns>
-    public async Task<(string Code, string Message)> CheckSyncAccessAsync(CancellationToken cancellationToken = default)
+    public async Task<(string Code, string Message)> CheckSyncAccessAsync(string? language, CancellationToken cancellationToken)
     {
         int status;
         string? body;
@@ -63,22 +72,22 @@ public partial class SourceServerClient
         // Any failure to reach the peer is a result to show, not an error.
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            return ("Unknown", "Could not reach Server Sync there: " + ex.Message);
+            return ("Unknown", BaseTranslations.Format(TranslationKeys.AccessUnknown, language, ex.Message));
         }
 
         if (status is >= 200 and < 300)
         {
-            return ("Allowed", "This key may use the sync endpoints there");
+            return ("Allowed", BaseTranslations.Get(TranslationKeys.AccessKeyAllowed, language));
         }
 
         if (status == 404)
         {
-            return ("NotInstalled", "Server Sync is not installed there");
+            return ("NotInstalled", BaseTranslations.Get(TranslationKeys.AccessNotInstalled, language));
         }
 
         if (status == 426)
         {
-            return ("VersionMismatch", body ?? "Server Sync there speaks a protocol this server does not");
+            return ("VersionMismatch", body ?? BaseTranslations.Get(TranslationKeys.AccessVersionMismatch, language));
         }
 
         if (status == 403 && !string.IsNullOrWhiteSpace(body))
@@ -91,7 +100,7 @@ public partial class SourceServerClient
                     && root.TryGetProperty("Code", out var code)
                     && root.TryGetProperty("Message", out var message))
                 {
-                    return (code.GetString() ?? "Refused", message.GetString() ?? "Refused");
+                    return (code.GetString() ?? "Refused", message.GetString() ?? BaseTranslations.Get(TranslationKeys.ColumnRefused, language));
                 }
             }
             // A body that is not JSON falls through to the plain refusal.
@@ -100,7 +109,7 @@ public partial class SourceServerClient
             }
         }
 
-        return ("Refused", $"Server Sync there refused this key ({status})");
+        return ("Refused", BaseTranslations.Format(TranslationKeys.AccessRefusedStatus, language, status));
     }
 
     /// <summary>
