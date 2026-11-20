@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.19.1"
+version: "12.4.20.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step."
@@ -22,19 +22,16 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  fixed:
-  - A server that copied one segment from another server now still shares its own segments of every other type with it, instead of none at all
-  - Remove Segments No Server Has no longer wipes segments a server made itself before the servers it pulls from have copied them, which could erase a new intro in a ring of servers
-  - Replace Existing Segments works type by type, so a copied outro no longer removes an intro another provider made here
-  - Two servers holding the same edit with different values, after a provider refresh changed one, no longer trade the values around a ring forever when their scans overlap. Only the server that made the edit sets the others right
-  - A provider refresh on a server that copied a hand edit no longer spreads by scans and replaces that hand edit, even on the server that made it
-  - A value read live for a change is recorded under the origin's stamp at the read, so an older edit arriving afterwards no longer overwrites a newer one taken from a third server
+  added:
+  - Every page, message, and Activity page entry is shown in the viewer's language. Jellyfin's own words come in every language Jellyfin has, and the rest is in US English until it is translated
   changed:
-  - Each type of segment comes from the highest ranked server that has it, so intros from one server and credits from another both arrive
-  - Remove Segments No Server Has removes only the segments Server Sync copied, never ones another provider made here
+  - Labels, buttons, headings, columns, badges, and Activity page names are in sentence case, as Jellyfin writes them, such as Send changes after (seconds) and 12 items synced
+  - A message a page shows, such as a refused Server URL, is in the page's language, and an Activity page entry is in the server's display language
+  - The tables, dialogs, charts, and lists drawn by Base show their own text in the viewer's language
+  fixed:
+  - The pool card on the Servers tab read "This Server, this server" when the server had no name. It reads This server
+  - The Activity page entry for one failing item read "1 Item Keep Failing". It reads 1 item keeps failing
   developer:
-  - Each copied segment names the server it was first made on, and a server holds the types of its own segments that come back, so nothing loops back to undo the server that made it
-  - The segment table gains a HeldTypes column in schema 40
-  - VersionDecider lets only the author of an edit set right a drifted copy of it, and ItemHintHandler reads the origin's stamp before and after the item and records the newer of it and the hint's
-  - RingNetwork runs servers in rings and meshes with their real stamp stores, queues, triage, publishers, resolvers and apply guards, and RingLoopTests and RingKindsTests check over 280 cases of metadata, playlists, history and content for loops, flaps and stale overwrites
-  - SegmentPoolSimulationTests runs rings of three to five servers, meshes of three and four, and 1000 random pools of six through every setting, and checks that each settles, never takes back its own segments, and never undoes a change
+  - Uses JPKribs.Jellyfin.Base 12.4.0, then 12.4.1. BaseTranslations.RequestLanguage replaces the local RequestLanguage helper, and ActivityOutcome takes keys for its names
+  - Every string a person reads comes from Localization/en-us.json or a declared Jellyfin string, with Localization/casing.json for the words kept as written. GET /Sync/Translations answers with language, strings, and casing
+  - The source is organized into Api, Configuration, Web, Assets, Models, Services, Tasks, and Utilities, and the Docker pool and matrix live in tools/integration
