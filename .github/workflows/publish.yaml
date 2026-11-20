@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   update-manifest:
@@ -25,6 +26,24 @@ jobs:
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
         with:
           dotnet-version: 10.0.x
+
+      # A draft build that started before the release was published must finish first. It then finds the
+      # release published and leaves its assets alone, so the zip hashed below is the one that stays.
+      - name: Wait for Draft Builds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            BUSY=$(gh run list --workflow changelog.yaml --limit 50 --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$BUSY" = "0" ]; then
+              exit 0
+            fi
+            echo "Waiting for ${BUSY} draft build(s) to finish (${attempt}/60)"
+            sleep 20
+          done
+          echo "Draft builds were still running after 20 minutes; refusing to touch the manifest." >&2
+          exit 1
 
       - name: Get Release Info
         id: release_info
@@ -56,14 +75,15 @@ jobs:
           BASE_URL="https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/${TAG}"
           ASSET="jellyfin-plugin-serversync-${BUILD_VERSION}.zip"
 
+          # The manifest takes the hash of the zip servers will download, never only the .md5 beside it.
           # -f on every download: a missing asset must fail the job rather than hashing an error page.
-          echo "Trying to download checksum from: ${BASE_URL}/${ASSET}.md5"
-          CHECKSUM=$(curl -sfL "${BASE_URL}/${ASSET}.md5" | cut -d' ' -f1 || true)
-          if [ -z "$CHECKSUM" ]; then
-            echo "Checksum download failed, calculating from ZIP file..."
-            curl -sfL -o temp_plugin.zip "${BASE_URL}/${ASSET}"
-            CHECKSUM=$(md5sum temp_plugin.zip | cut -d' ' -f1)
-            rm temp_plugin.zip
+          curl -sfL -o temp_plugin.zip "${BASE_URL}/${ASSET}"
+          CHECKSUM=$(md5sum temp_plugin.zip | cut -d' ' -f1)
+          rm temp_plugin.zip
+          LISTED=$(curl -sfL "${BASE_URL}/${ASSET}.md5" | cut -d' ' -f1 | tr 'A-F' 'a-f' || true)
+          if [ -n "$LISTED" ] && [ "$LISTED" != "$CHECKSUM" ]; then
+            echo "The zip hashes to ${CHECKSUM} but its .md5 says ${LISTED}; its assets changed after it was built. Aborting." >&2
+            exit 1
           fi
 
           if ! echo "$CHECKSUM" | grep -Eq '^[0-9a-f]{32}$'; then

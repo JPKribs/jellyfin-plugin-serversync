@@ -22,6 +22,12 @@ permissions:
   contents: write
   pull-requests: write
 
+# One draft build at a time. A push and a manual start that overlap would each build their own zip,
+# and the later upload would replace the zip the release was checked and published with.
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -137,6 +143,18 @@ jobs:
           TAG="v${FINAL_VERSION}"
           ACTION="${{ steps.check_releases.outputs.action }}"
           CHANGELOG=$(cat /tmp/changelog.md)
+
+          # The release may have been published while this run built. A published release's assets are
+          # what the manifest's checksum names, so they are never replaced.
+          STATE=$(gh release view "${TAG}" --json isDraft --jq '.isDraft' 2>/dev/null || echo "missing")
+          if [ "$ACTION" = "update" ] && [ "$STATE" != "true" ]; then
+            echo "::error::${TAG} is no longer a draft, so its assets are left as they are."
+            exit 1
+          fi
+          if [ "$ACTION" != "update" ] && [ "$STATE" != "missing" ]; then
+            echo "::error::${TAG} was created while this run built, so it is left as it is."
+            exit 1
+          fi
 
           if [ "$ACTION" = "update" ]; then
             echo "Updating existing draft release ${TAG}"
