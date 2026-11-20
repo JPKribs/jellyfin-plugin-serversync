@@ -192,8 +192,9 @@ public sealed class VersionConflictResolver
     /// <param name="kind">The sync type of the object.</param>
     /// <param name="localKey">This server's key.</param>
     /// <param name="peerVersion">The stamp the peer's value carries, or null when the peer never recorded an edit for it.</param>
+    /// <param name="peerServerId">The peer's server id, so a copy it holds of another server's edit never overrides this server's, or null when it is not known.</param>
     /// <returns>Apply when the peer's value wins, Keep when this server's does.</returns>
-    public VersionDecision Decide(HintKind kind, string localKey, ObjectVersion? peerVersion)
+    public VersionDecision Decide(HintKind kind, string localKey, ObjectVersion? peerVersion, string? peerServerId = null)
     {
         var local = _versions.Get(kind, localKey);
         if (peerVersion is null)
@@ -201,6 +202,6 @@ public sealed class VersionConflictResolver
             return local is null ? VersionDecision.Apply : VersionDecision.Keep;
         }
 
-        return VersionDecider.Decide(local, peerVersion, valuesEqual: false);
+        return VersionDecider.Decide(local, peerVersion, valuesEqual: false, _applicationHost.SystemId, string.IsNullOrEmpty(peerServerId) ? null : peerServerId);
     }
 }

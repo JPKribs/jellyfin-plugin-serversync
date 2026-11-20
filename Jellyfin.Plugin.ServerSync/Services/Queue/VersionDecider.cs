@@ -15,8 +15,10 @@ public static class VersionDecider
     /// <param name="local">The stamp this server holds, or null when the object was never stamped here.</param>
     /// <param name="incoming">The stamp the peer's value carries.</param>
     /// <param name="valuesEqual">Whether the two values are already the same.</param>
+    /// <param name="thisServerId">This server's id, so an edit made here is never given up to a drifted copy of itself, or null.</param>
+    /// <param name="peerServerId">The id of the server offering the value, when it may be passing on another server's edit, or null for a hint, whose stamp is always the sender's.</param>
     /// <returns>The decision.</returns>
-    public static VersionDecision Decide(ObjectVersion? local, ObjectVersion incoming, bool valuesEqual)
+    public static VersionDecision Decide(ObjectVersion? local, ObjectVersion incoming, bool valuesEqual, string? thisServerId = null, string? peerServerId = null)
     {
         ArgumentNullException.ThrowIfNull(incoming);
 
@@ -30,10 +32,18 @@ public static class VersionDecider
             return VersionDecision.Apply;
         }
 
-        // Same edit with different values means a copy drifted, so the arrival wins.
+        // Same edit with different values means a copy drifted. Only the server that made the edit sets it right, so a drifted copy
+        // never spreads, and servers that each hold a different copy never trade them back and forth around a ring.
         if (SameVersion(local, incoming))
         {
-            return VersionDecision.Apply;
+            if (thisServerId is not null && string.Equals(local.ServerId, thisServerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return VersionDecision.Keep;
+            }
+
+            return peerServerId is null || string.Equals(incoming.ServerId, peerServerId, StringComparison.OrdinalIgnoreCase)
+                ? VersionDecision.Apply
+                : VersionDecision.Keep;
         }
 
         return IsNewer(incoming, local) ? VersionDecision.Apply : VersionDecision.Keep;

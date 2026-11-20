@@ -3,7 +3,10 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using Jellyfin.Plugin.ServerSync.Services.Database;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using MediaBrowser.Controller;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Fakes;
 
@@ -95,6 +98,14 @@ public static class QueueSamples
 
     /// <summary>The answer Jellyfin gives for a page with no items.</summary>
     public const string NoItemsJson = "{\"Items\":[],\"TotalRecordCount\":0,\"StartIndex\":0}";
+
+    /// <summary>A real stamp resolver over a test database, for handlers that read a peer's stamps.</summary>
+    /// <param name="provider">Opens the test database.</param>
+    /// <param name="config">The configuration the resolver reads the plugin version from.</param>
+    /// <param name="systemId">This server's id.</param>
+    /// <returns>The resolver.</returns>
+    public static VersionConflictResolver Resolver(ISyncDatabaseProvider provider, FakeConfigManager config, string systemId = "this-server")
+        => new(new VersionStore(provider, NullLogger<VersionStore>.Instance), Host(systemId), config, NullLogger<VersionConflictResolver>.Instance);
 
     /// <summary>Builds a stand-in for the application host that answers one server id.</summary>
     /// <param name="systemId">The id this server answers to.</param>

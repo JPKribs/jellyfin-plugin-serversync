@@ -30,7 +30,7 @@ public sealed class ItemHintHandlerTests : IDisposable
     public ItemHintHandlerTests()
     {
         var triage = new HintTriage(_config, _local, new VersionStore(_db.Provider, NullLogger<VersionStore>.Instance));
-        _handler = new ItemHintHandler(new QueueServices(), _config, triage, null!, null!, null!, NullLogger<ItemHintHandler>.Instance);
+        _handler = new ItemHintHandler(new QueueServices(), _config, triage, QueueSamples.Resolver(_db.Provider, _config), null!, null!, NullLogger<ItemHintHandler>.Instance);
     }
 
     /// <inheritdoc/>

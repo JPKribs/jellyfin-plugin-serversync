@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services.Providers;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
+using MediaBrowser.Model.MediaSegments;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
@@ -74,18 +76,67 @@ public sealed class PeerSegmentReader
             answer.RunTimeTicks = item.RunTimeTicks;
 
             // Only segments Server Sync gave the file are copies. Any others were made here, whatever the cache still holds.
+            IReadOnlyCollection<MediaSegmentDto> others = Array.Empty<MediaSegmentDto>();
+            SourceMediaSegments? row = null;
             if (segments.Count > 0)
             {
-                var others = await _segments.GetSegmentsAsync(item, null, PeerSegmentProvider.OthersOnly(options), filterByProvider: true).ConfigureAwait(false);
-                if (segments.Count > others.Count())
+                others = (await _segments.GetSegmentsAsync(item, null, PeerSegmentProvider.OthersOnly(options), filterByProvider: true).ConfigureAwait(false)).ToList();
+                if (segments.Count > others.Count)
                 {
-                    answer.OriginServerId = _store.Get(item.Id.ToString("N", CultureInfo.InvariantCulture))?.OriginServerId;
+                    row = _store.Get(item.Id.ToString("N", CultureInfo.InvariantCulture));
                 }
             }
 
-            answer.Segments.AddRange(segments.Select(s => new PeerSegment { Type = s.Type.ToString(), StartTicks = s.StartTicks, EndTicks = s.EndTicks }));
+            var tagged = TagOrigins(
+                segments.Select(s => new PeerSegment { Type = s.Type.ToString(), StartTicks = s.StartTicks, EndTicks = s.EndTicks }).ToList(),
+                others.Select(s => new PeerSegment { Type = s.Type.ToString(), StartTicks = s.StartTicks, EndTicks = s.EndTicks }).ToList(),
+                row);
+            answer.SegmentOrigins = true;
+            answer.OriginServerId = tagged.Where(s => s.OriginServerId is not null).Select(s => s.OriginServerId).FirstOrDefault();
+            answer.Segments.AddRange(tagged);
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Names the server each of a file's segments was first made on. A segment another provider gave the file was made here and names none.
+    /// A segment Server Sync gave it names the origin the local segment table kept for it, matched by type and position, then by type and start,
+    /// since Jellyfin may have cut its end to the file's runtime. Failing that it takes the row's origin, or the origin of the row's segments of its type.
+    /// </summary>
+    /// <param name="segments">Every segment Jellyfin holds for the file.</param>
+    /// <param name="others">The segments providers other than Server Sync gave the file.</param>
+    /// <param name="row">What the local segment table keeps for the file, or null.</param>
+    /// <returns>The segments, each with its origin.</returns>
+    public static List<PeerSegment> TagOrigins(IReadOnlyList<PeerSegment> segments, IReadOnlyList<PeerSegment> others, SourceMediaSegments? row)
+    {
+        ArgumentNullException.ThrowIfNull(segments);
+        ArgumentNullException.ThrowIfNull(others);
+        var unclaimed = others.ToList();
+        var kept = row?.Segments?.Where(s => s is not null).ToList() ?? new List<PeerSegment>();
+        var result = new List<PeerSegment>(segments.Count);
+        foreach (var segment in segments)
+        {
+            var tagged = new PeerSegment { Type = segment.Type, StartTicks = segment.StartTicks, EndTicks = segment.EndTicks };
+            result.Add(tagged);
+            var own = unclaimed.FindIndex(o => Same(o, segment) && o.EndTicks == segment.EndTicks);
+            if (own >= 0)
+            {
+                unclaimed.RemoveAt(own);
+                continue;
+            }
+
+            var match = kept.Find(k => Same(k, segment) && k.EndTicks == segment.EndTicks)
+                ?? kept.Find(k => Same(k, segment));
+            tagged.OriginServerId = match?.OriginServerId
+                ?? row?.OriginServerId
+                ?? kept.Where(k => string.Equals(k.Type, segment.Type, StringComparison.OrdinalIgnoreCase)).Select(k => k.OriginServerId).FirstOrDefault(o => o is not null)
+                ?? kept.Select(k => k.OriginServerId).FirstOrDefault(o => o is not null);
+        }
+
+        return result;
+
+        static bool Same(PeerSegment a, PeerSegment b)
+            => string.Equals(a.Type, b.Type, StringComparison.OrdinalIgnoreCase) && a.StartTicks == b.StartTicks;
     }
 }

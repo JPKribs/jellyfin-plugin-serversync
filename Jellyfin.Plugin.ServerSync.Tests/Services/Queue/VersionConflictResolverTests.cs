@@ -103,20 +103,25 @@ public sealed class VersionConflictResolverTests : IDisposable
     }
 
     /// <summary>
-    /// With both sides recorded the newer edit wins, and the same edit holding different values
-    /// takes the arriving copy.
-    /// True: the newest edit wins wherever it was made, and drifted copies converge.
+    /// With both sides recorded the newer edit wins. The same edit holding different values is set right only by the server that made it:
+    /// this server keeps its own edit, takes the author's copy, and keeps its own copy against a peer passing on a third server's.
+    /// True: the newest edit wins wherever it was made, and a drifted copy never spreads around a ring.
     /// False: an older edit overwrites a newer one, or two copies of one edit keep trading forever.
     /// </summary>
     [Fact]
-    public void Decide_BothRecorded_NewerWins_AndTheSameEditApplies()
+    public void Decide_BothRecorded_NewerWins_AndOnlyTheAuthorSetsTheSameEditRight()
     {
         _resolver.Record(Version(ThisServer, Later, "newer-here"));
         Assert.Equal(VersionDecision.Keep, _resolver.Decide(HintKind.Metadata, "newer-here", Version("peer", Earlier, "newer-here")));
 
         _resolver.Record(Version(ThisServer, Earlier, "newer-there"));
         Assert.Equal(VersionDecision.Apply, _resolver.Decide(HintKind.Metadata, "newer-there", Version("peer", Later, "newer-there")));
-        Assert.Equal(VersionDecision.Apply, _resolver.Decide(HintKind.Metadata, "newer-there", Version(ThisServer, Earlier, "newer-there")));
+        Assert.Equal(VersionDecision.Keep, _resolver.Decide(HintKind.Metadata, "newer-there", Version(ThisServer, Earlier, "newer-there"), "peer"));
+
+        _resolver.Record(Version("author", Earlier, "copied"));
+        Assert.Equal(VersionDecision.Apply, _resolver.Decide(HintKind.Metadata, "copied", Version("author", Earlier, "copied"), "author"));
+        Assert.Equal(VersionDecision.Apply, _resolver.Decide(HintKind.Metadata, "copied", Version("author", Earlier, "copied")));
+        Assert.Equal(VersionDecision.Keep, _resolver.Decide(HintKind.Metadata, "copied", Version("author", Earlier, "copied"), "relay"));
     }
 
     /// <summary>

@@ -103,7 +103,23 @@ public sealed class ItemHintHandler
             return HintApplyResult.Park(waitFor, "no local item at the mapped path yet. It applies when the item arrives");
         }
 
-        var dto = prefetched;
+        // An item the worker's page read without an id is gone, and the origin is not asked again.
+        if (prefetched is { Id: null })
+        {
+            return HintApplyResult.Dropped(HintCode.SourceGone, $"the item no longer exists on '{origin.DisplayName}'");
+        }
+
+        var source = Connect(origin, client);
+
+        // The origin's stamp is read before and after its item, so the value is recorded under the stamp it carries, never an older one.
+        var before = await OriginStampAsync(source, HintKind.Metadata, HintProtocol.MetadataKey(originItemId), hint.Recorded, cancellationToken).ConfigureAwait(false);
+        if (!before.Read)
+        {
+            return HintApplyResult.RetryLater($"could not read the item's version from '{origin.DisplayName}'");
+        }
+
+        // An item read in a page before a newer edit landed on the origin is read again.
+        var dto = before.Stamp is { } newer && hint.Recorded && VersionDecider.IsNewer(newer, HintProtocol.IncomingVersion(hint, HintKind.Metadata, hint.Key)) ? null : prefetched;
 
         // A row the worker's pages did not cover reads its own item.
         if (dto is null)
@@ -137,7 +153,12 @@ public sealed class ItemHintHandler
             return HintApplyResult.Dropped(HintCode.Filtered, $"'{dto.Path}' is left out by the library mapping's filter here");
         }
 
-        var source = Connect(origin, client);
+        var after = await OriginStampAsync(source, HintKind.Metadata, HintProtocol.MetadataKey(originItemId), hint.Recorded, cancellationToken).ConfigureAwait(false);
+        if (!after.Read || !SameStamp(before.Stamp, after.Stamp))
+        {
+            return HintApplyResult.RetryLater($"the item changed on '{origin.DisplayName}' while it was read");
+        }
+
         var refresh = ActivatorUtilities.CreateInstance<RefreshMetadataSyncTableTask>(_services);
         var record = await refresh.RefreshOneAsync(new MetadataWork(source, mapping, dto, RefreshMetadataSyncTableTask.IsFolderType(dto.Type)), cancellationToken).ConfigureAwait(false);
         if (record is null)
@@ -153,6 +174,7 @@ public sealed class ItemHintHandler
             HintKind.Metadata,
             HintProtocol.MetadataKey(localItemId),
             hint,
+            after.Stamp,
             origin,
             version => _publisher.PublishMetadata(localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: null, itemType: hint.ItemType),
             () => ActivatorUtilities.CreateInstance<SyncMissingMetadataTask>(_services).ApplyRowAsync(record, source, cancellationToken),
@@ -187,6 +209,14 @@ public sealed class ItemHintHandler
             return HintApplyResult.Park(waitFor, "the person does not exist on this server yet. It applies when the person arrives");
         }
 
+        var source = Connect(origin, client);
+        var peopleKey = HintProtocol.PeopleKey(hint.Key);
+        var before = await OriginStampAsync(source, HintKind.People, peopleKey, hint.Recorded, cancellationToken).ConfigureAwait(false);
+        if (!before.Read)
+        {
+            return HintApplyResult.RetryLater($"could not read the person's version from '{origin.DisplayName}'");
+        }
+
         BaseItemDto? dto;
         try
         {
@@ -202,7 +232,12 @@ public sealed class ItemHintHandler
             return HintApplyResult.Dropped(HintCode.SourceGone, $"it no longer exists on '{origin.DisplayName}'");
         }
 
-        var source = Connect(origin, client);
+        var after = await OriginStampAsync(source, HintKind.People, peopleKey, hint.Recorded, cancellationToken).ConfigureAwait(false);
+        if (!after.Read || !SameStamp(before.Stamp, after.Stamp))
+        {
+            return HintApplyResult.RetryLater($"Person {hint.Key} changed on '{origin.DisplayName}' while it was read");
+        }
+
         var refresh = ActivatorUtilities.CreateInstance<RefreshPeopleSyncTableTask>(_services);
         var record = await refresh.RefreshOneAsync(new PersonWork(source, dto), cancellationToken).ConfigureAwait(false);
         if (record is null || string.IsNullOrEmpty(record.LocalPersonId))
@@ -217,6 +252,7 @@ public sealed class ItemHintHandler
             HintKind.People,
             HintProtocol.PeopleKey(record.PersonName),
             hint,
+            after.Stamp,
             origin,
             version => _publisher.PublishPeople(record.PersonName, Guid.Parse(record.LocalPersonId), version, excludePeerKey: null),
             () => ActivatorUtilities.CreateInstance<SyncMissingPeopleTask>(_services).ApplyRowAsync(record, source, cancellationToken),
@@ -233,6 +269,7 @@ public sealed class ItemHintHandler
         HintKind kind,
         string localKey,
         InboundHint hint,
+        ObjectVersion? originNow,
         SourceServer origin,
         Action<ObjectVersion> publishLocal,
         Func<Task<bool>> apply,
@@ -240,7 +277,7 @@ public sealed class ItemHintHandler
         Func<BaseItem?> localItem)
         where TRecord : SyncRecord
     {
-        var incoming = HintProtocol.IncomingVersion(hint, kind, localKey);
+        var incoming = CurrentVersion(HintProtocol.IncomingVersion(hint, kind, localKey), originNow, hint.Recorded);
 
         if (record.Status == SyncStatus.Ignored)
         {
@@ -306,6 +343,47 @@ public sealed class ItemHintHandler
 
         _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(name), hint.Recorded ? string.Empty : " (provider work)");
         return HintApplyResult.AppliedTo(localItem());
+    }
+
+    /// <summary>
+    /// Gives the stamp a value read live from the origin carries: the hint's, or the origin's stamp at the read when that is newer,
+    /// since the origin may have taken a newer edit from a third server after it sent the hint. A newer value is never recorded under an older stamp,
+    /// so an edit made between the two cannot overwrite it.
+    /// </summary>
+    /// <param name="incoming">The hint's stamp.</param>
+    /// <param name="originNow">The origin's stamp for the object, read before and after the value, or null when it holds none or keeps no stamps.</param>
+    /// <param name="recorded">Whether the hint is a stamped edit, not provider work.</param>
+    /// <returns>The stamp to decide and record by.</returns>
+    public static ObjectVersion CurrentVersion(ObjectVersion incoming, ObjectVersion? originNow, bool recorded)
+    {
+        ArgumentNullException.ThrowIfNull(incoming);
+        return recorded && originNow is not null && VersionDecider.IsNewer(originNow, incoming)
+            ? new ObjectVersion { Kind = incoming.Kind, Key = incoming.Key, ServerId = originNow.ServerId, Timestamp = originNow.Timestamp }
+            : incoming;
+    }
+
+    /// <summary>Whether two reads of the origin's stamp agree, so its object did not change between them.</summary>
+    private static bool SameStamp(ObjectVersion? first, ObjectVersion? second)
+        => first is null ? second is null : second is not null && VersionDecider.SameVersion(first, second);
+
+    /// <summary>Reads the origin's stamp for one object, or no stamp when the origin keeps none or the hint is provider work.</summary>
+    /// <returns>Whether it could be read, and the stamp.</returns>
+    private async Task<(bool Read, ObjectVersion? Stamp)> OriginStampAsync(ScanSource source, HintKind kind, string peerKey, bool recorded, CancellationToken cancellationToken)
+    {
+        // Provider work records no stamp, so it needs none.
+        if (!recorded || await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false) != true)
+        {
+            return (true, null);
+        }
+
+        var stamps = await _resolver.PeerVersionsAsync(source, kind, new[] { peerKey }, cancellationToken).ConfigureAwait(false);
+        if (stamps is null)
+        {
+            return (false, null);
+        }
+
+        stamps.TryGetValue(peerKey, out var stamp);
+        return (true, stamp);
     }
 
     /// <summary>Stores a row marked kept in the table of its sync type.</summary>

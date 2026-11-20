@@ -22,7 +22,7 @@ public sealed class SyncSchemaTests : IDisposable
 {
     // The fingerprint of every table, column, and index at schema v39. A change to the schema changes
     // it, which is the moment to raise SyncSchema.CurrentSchemaVersion and decide what older files do.
-    private const string SchemaFingerprint = "4C54FF6448E55EC775EC3F840D553C1552E62198941258514ECB49B158D9208B";
+    private const string SchemaFingerprint = "1B614A677C453177305610F2DD276DD3CC511498547F9DA02530DA984C61C66F";
 
     private readonly string _dataPath;
     private readonly string _dbPath;
@@ -102,7 +102,7 @@ public sealed class SyncSchemaTests : IDisposable
             File.WriteAllText(dump, described);
         }
 
-        Assert.Equal(39, SyncSchema.CurrentSchemaVersion);
+        Assert.Equal(40, SyncSchema.CurrentSchemaVersion);
         Assert.Equal(SchemaFingerprint, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(described))));
     }
 

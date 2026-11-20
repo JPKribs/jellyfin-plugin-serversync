@@ -91,4 +91,20 @@ public class VersionDeciderTests
         Assert.False(VersionDecider.SameVersion(V("a", 5), V("b", 5)));
         Assert.False(VersionDecider.SameVersion(V("a", 5), V("a", 6)));
     }
+
+    /// <summary>
+    /// The same edit holding different values is set right only by its author: this server keeps its own, a peer that made the edit wins,
+    /// and a peer passing on a third server's copy does not.
+    /// True: servers holding two copies of one edit never trade them around a ring.
+    /// False: overlapping scans would rotate the copies forever, or a drifted copy would replace the author's.
+    /// </summary>
+    [Fact]
+    public void Decide_SameVersionDifferentValue_OnlyTheAuthorSetsItRight()
+    {
+        Assert.Equal(VersionDecision.Keep, VersionDecider.Decide(V("me", 5), V("me", 5), valuesEqual: false, thisServerId: "me", peerServerId: "b"));
+        Assert.Equal(VersionDecision.Apply, VersionDecider.Decide(V("a", 5), V("a", 5), valuesEqual: false, thisServerId: "me", peerServerId: "a"));
+        Assert.Equal(VersionDecision.Keep, VersionDecider.Decide(V("a", 5), V("a", 5), valuesEqual: false, thisServerId: "me", peerServerId: "b"));
+        Assert.Equal(VersionDecision.Apply, VersionDecider.Decide(V("a", 5), V("a", 5), valuesEqual: false, thisServerId: "me"));
+        Assert.Equal(VersionDecision.Adopt, VersionDecider.Decide(V("a", 5), V("a", 5), valuesEqual: true, thisServerId: "me", peerServerId: "b"));
+    }
 }

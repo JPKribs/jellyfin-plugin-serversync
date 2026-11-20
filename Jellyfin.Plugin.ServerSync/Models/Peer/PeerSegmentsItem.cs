@@ -19,8 +19,16 @@ public class PeerSegmentsItem
     /// <summary>Gets or sets how long the item's file runs, in ticks, or null when the peer does not know it.</summary>
     public long? RunTimeTicks { get; set; }
 
-    /// <summary>Gets or sets the Jellyfin id of the server the segments were first made on, or null when they were made on the peer itself.</summary>
+    /// <summary>
+    /// Gets or sets the Jellyfin id of the server the copied segments were first made on, or null when all were made on the peer itself.
+    /// A release that reads <see cref="PeerSegment.OriginServerId"/> goes by each segment's origin instead.
+    /// </summary>
     public string? OriginServerId { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether each segment names its own origin, where a segment with none was made on the peer itself.
+    /// </summary>
+    public bool SegmentOrigins { get; set; }
 
     /// <summary>Gets the segments the peer holds for the item.</summary>
     public List<PeerSegment> Segments { get; init; } = new();

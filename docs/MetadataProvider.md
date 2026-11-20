@@ -20,18 +20,18 @@ Media segments are a category of each Metadata row, like images and people. A ro
 
 ![Metadata Item](screenshots/Metadata%20Item.png)
 
-* **Refresh** reads the segments of every video and audio file it lists, 200 files to a request. A file takes the segments of the highest ranked server that holds it and has segments for it. When no server has any, the row holds none.
+* **Refresh** reads the segments of every video and audio file it lists, 200 files to a request. For each type of segment, a file takes the segments of the highest ranked server that holds it and has segments of that type, so an intro from one server and credits from another both arrive. When no server has any, the row holds none.
 * **Sync** writes a row's segments into the sync database, where they survive a restart. **Queue** and **Ignore** work on them as on any category, and the row shows **Segments: Changes** until they are written.
 * Jellyfin's **Media Segment Scan** then takes them from the sync database and asks no server.
 * Segments are used only when the source's file has the same size and runtime as the one here. A link is matched by runtime alone.
 * A segment that runs past the end of the file here is cut at the end, and one that starts there or later is left out. A segment two providers marked is kept once.
-* **Replace Existing Segments** replaces the segments another provider gave a file. While it is off, those segments stay and nothing is added beside them. When they already match, nothing changes either way.
-* **Remove Segments No Server Has** removes a file's segments when no server has any for it. While it is off, the file keeps what it has.
+* **Replace Existing Segments** replaces the segments another provider gave a file with the copied ones of the same type. While it is off, those segments stay and no copied segment of their type is added beside them. Copied segments of other types are added either way. When they already match, nothing changes.
+* **Remove Segments No Server Has** removes the segments Server Sync copied to a file when no server has any for it. While it is off, the file keeps them. Segments another provider made here are never removed, so a server's new segments are never wiped by a pool that has not copied them yet.
 * **Consolidate Duplicate Intros** shrinks intros that overlap to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. **Consolidate Duplicate Outros** does the same for outros.
 * **Consolidate Other Segments** joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45. Segments of different types are never joined.
 * Only segments that overlap are consolidated. Each setting is off by default, works on the segments copied from a server, and is applied at the next **Refresh**, which lists every item again after one changes.
 * Server Sync runs after the other providers, so its version stands. A library that sets its own provider order decides instead.
 * A server that cannot be reached, or runs a release without media segments, leaves each row's segments as they were.
-* A server shares every segment it holds, including ones Server Sync copied there, and names the server they were first made on. A server never takes back segments it made itself, so one it deleted cannot return through another server.
+* A server shares every segment it holds, including ones Server Sync copied there, and names the server each one was first made on. A server never takes back a segment it made itself. It keeps its own segments of that type instead, so a change made on one server flows out through a ring or mesh of any size, and an older copy coming back around never undoes it. Segments a server copied never stop its own segments of other types from being shared.
 * Live changes never carry media segments. A scan that lists only what changed reads the segments of those items only.
 * Turning **Enable Media Segment Provider** off leaves the segments here as they are. Turning **Server Sync** off in the library's media segment providers hides them.

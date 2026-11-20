@@ -69,7 +69,7 @@ public sealed class MediaSegmentStore : QueueStoreBase
         return Read(conn =>
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT LocalItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, FetchedAt, OriginServerId FROM SourceMediaSegments WHERE LocalItemId = @id";
+            cmd.CommandText = "SELECT LocalItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, FetchedAt, OriginServerId, HeldTypes FROM SourceMediaSegments WHERE LocalItemId = @id";
             Add(cmd, "@id", localItemId);
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
@@ -85,7 +85,8 @@ public sealed class MediaSegmentStore : QueueStoreBase
                 reader.IsDBNull(4) ? null : reader.GetInt64(4),
                 reader.IsDBNull(5) ? null : reader.GetInt64(5),
                 Unstamp(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : reader.GetString(7));
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                reader.IsDBNull(8) ? null : JsonSerializer.Deserialize<List<string>>(reader.GetString(8)));
         });
     }
 
@@ -107,11 +108,11 @@ public sealed class MediaSegmentStore : QueueStoreBase
             using var cmd = conn.CreateCommand();
             cmd.Transaction = transaction;
             cmd.CommandText = @"
-                INSERT INTO SourceMediaSegments (LocalItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, FetchedAt, OriginServerId)
-                VALUES (@local, @server, @source, @segments, @size, @runtime, @at, @origin)
+                INSERT INTO SourceMediaSegments (LocalItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, FetchedAt, OriginServerId, HeldTypes)
+                VALUES (@local, @server, @source, @segments, @size, @runtime, @at, @origin, @held)
                 ON CONFLICT(LocalItemId) DO UPDATE SET ServerKey = excluded.ServerKey, SourceItemId = excluded.SourceItemId,
                     Segments = excluded.Segments, Size = excluded.Size, RunTimeTicks = excluded.RunTimeTicks, FetchedAt = excluded.FetchedAt,
-                    OriginServerId = excluded.OriginServerId";
+                    OriginServerId = excluded.OriginServerId, HeldTypes = excluded.HeldTypes";
             foreach (var row in rows)
             {
                 cmd.Parameters.Clear();
@@ -123,6 +124,7 @@ public sealed class MediaSegmentStore : QueueStoreBase
                 Add(cmd, "@runtime", row.RunTimeTicks);
                 Add(cmd, "@at", Stamp(row.FetchedAt));
                 Add(cmd, "@origin", row.OriginServerId);
+                Add(cmd, "@held", row.HeldTypes is { Count: > 0 } held ? JsonSerializer.Serialize(held) : null);
                 cmd.ExecuteNonQuery();
             }
 

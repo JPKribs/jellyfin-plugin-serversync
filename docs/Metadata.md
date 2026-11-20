@@ -16,8 +16,8 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 * **Folder Items** also syncs metadata for container items such as series and seasons.
 * **Enable Metadata Provider** lets a library fill items from the servers this one pulls from, where Server Sync is on in its metadata or image fetchers. It is on by default and works only while **Enable Metadata Sync** is on. See [Metadata Provider](MetadataProvider.md).
 * **Enable Media Segment Provider** lets Jellyfin's media segment scan copy intros, credits, and other segments from the same file on the servers this one pulls from. It is off by default and works only while **Enable Metadata Sync** is on. See [Media Segments](MetadataProvider.md#media-segments).
-    * **Replace Existing Segments** replaces the segments another provider gave a file with the ones copied from a server. It is off by default.
-    * **Remove Segments No Server Has** removes a file's segments when no server this one pulls from has any for the same file. It is off by default.
+    * **Replace Existing Segments** replaces the segments another provider gave a file with the ones copied from a server, type by type. It is off by default.
+    * **Remove Segments No Server Has** removes the segments Server Sync copied to a file when no server this one pulls from has any for it. Segments another provider made here are never removed. It is off by default.
     * **Consolidate Duplicate Intros** shrinks intros that overlap to the part they share, so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. It is off by default.
     * **Consolidate Duplicate Outros** shrinks outros that overlap to the part they share, the same way as intros. It is off by default.
     * **Consolidate Other Segments** joins overlapping segments of the same type, other than intros and outros, into one that covers both, so 1:00 to 1:30 and 1:05 to 1:45 become 1:00 to 1:45. It is off by default.

@@ -119,39 +119,45 @@ public sealed class PeerSegmentProvider : IMediaSegmentProvider, IHasOrder
             return Array.Empty<MediaSegmentDto>();
         }
 
-        var fitted = Fit(held.Segments, request.ItemId, item.RunTimeTicks);
+        // Segments of a type this server made itself, and some server holds, are this server's to keep. The pool's of that type are not used.
+        var heldTypes = held.HeldTypes ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var fitted = Fit(held.Segments, request.ItemId, item.RunTimeTicks).Where(f => !IsHeld(f.Type, heldTypes)).ToList();
         if (_services.GetService(typeof(IMediaSegmentManager)) is not IMediaSegmentManager manager)
         {
             return fitted;
         }
 
-        var others = (await manager.GetSegmentsAsync(item, null, OthersOnly(_libraryManager.GetLibraryOptions(item)), filterByProvider: true).ConfigureAwait(false)).ToList();
+        var others = (await manager.GetSegmentsAsync(item, null, OthersOnly(_libraryManager.GetLibraryOptions(item)), filterByProvider: true).ConfigureAwait(false))
+            .Where(o => !IsHeld(o.Type, heldTypes))
+            .ToList();
         var config = _configManager.Configuration;
-        var plan = Plan(fitted, others, kept, config.MetadataSyncReplaceSegments, config.MetadataSyncRemoveSegments);
-        if (plan.RemoveOthers)
+        var plan = Plan(fitted, others, kept.Where(k => !IsHeld(k.Type, heldTypes)).ToList(), config.MetadataSyncReplaceSegments, config.MetadataSyncRemoveSegments);
+        if (plan.Remove.Count > 0)
         {
-            foreach (var segment in others)
+            foreach (var segment in plan.Remove)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await manager.DeleteSegmentAsync(segment.Id).ConfigureAwait(false);
             }
 
-            _logger.LogDebug("Removed {Count} media segments other providers gave {Path}", others.Count, item.Path);
+            _logger.LogDebug("Replaced {Count} media segments other providers gave {Path}", plan.Remove.Count, item.Path);
         }
 
         return plan.Ours;
     }
 
     /// <summary>
-    /// Decides what a file's segments become. The source's segments are added when the file has no others. Segments another provider gave it stay
-    /// unless replacing is on, and nothing is added beside them. When no server has segments for the file, its segments stay unless removing is on.
+    /// Decides what a file's segments become, type by type. The pool's segments of a type are added when no other provider gave the file that type.
+    /// Another provider's segments of a type stay, and the pool's of that type are not added, unless replacing is on and they differ.
+    /// Another provider's segments are never removed for any other reason, so a server's own segments are never wiped by a pool that has not seen them yet.
+    /// When no server has segments for the file, the segments Server Sync gave it stay unless removing is on.
     /// </summary>
     /// <param name="fitted">The source's segments, fitted to the file, empty when no server has any.</param>
     /// <param name="others">The segments other providers gave the file.</param>
     /// <param name="ours">The segments Server Sync gave the file before.</param>
     /// <param name="replace">Whether Replace Existing Segments is on.</param>
     /// <param name="remove">Whether Remove Segments No Server Has is on.</param>
-    /// <returns>Server Sync's segments for the file, and whether the other providers' are removed.</returns>
+    /// <returns>Server Sync's segments for the file, and the other providers' segments that are removed.</returns>
     public static SegmentPlan Plan(IReadOnlyList<MediaSegmentDto> fitted, IReadOnlyList<MediaSegmentDto> others, IReadOnlyList<MediaSegmentDto> ours, bool replace, bool remove)
     {
         ArgumentNullException.ThrowIfNull(fitted);
@@ -159,21 +165,32 @@ public sealed class PeerSegmentProvider : IMediaSegmentProvider, IHasOrder
         ArgumentNullException.ThrowIfNull(ours);
         if (fitted.Count == 0)
         {
-            return remove ? new SegmentPlan(Array.Empty<MediaSegmentDto>(), others.Count > 0) : new SegmentPlan(ours, false);
+            return new SegmentPlan(remove ? Array.Empty<MediaSegmentDto>() : ours, Array.Empty<MediaSegmentDto>());
         }
 
-        if (others.Count == 0)
+        var given = new List<MediaSegmentDto>();
+        var removed = new List<MediaSegmentDto>();
+        foreach (var type in fitted.GroupBy(f => f.Type))
         {
-            return new SegmentPlan(fitted, false);
+            var theirs = others.Where(o => o.Type == type.Key).ToList();
+            if (theirs.Count == 0)
+            {
+                given.AddRange(type);
+                continue;
+            }
+
+            // Another provider's segments of this type stay when they already match the pool's, or when replacing is off.
+            var pool = type.ToList();
+            if (!replace || SameSegments(theirs, pool))
+            {
+                continue;
+            }
+
+            given.AddRange(pool);
+            removed.AddRange(theirs);
         }
 
-        // Another provider's segments stay when they already match the source's, or when replacing is off.
-        if (!replace || SameSegments(others, fitted))
-        {
-            return new SegmentPlan(Array.Empty<MediaSegmentDto>(), false);
-        }
-
-        return new SegmentPlan(fitted, true);
+        return new SegmentPlan(given, removed);
     }
 
     /// <summary>
@@ -181,6 +198,18 @@ public sealed class PeerSegmentProvider : IMediaSegmentProvider, IHasOrder
     /// </summary>
     /// <param name="options">The library's settings, or null.</param>
     /// <returns>The settings to read with.</returns>
+    /// <summary>
+    /// Tells whether a segment type is held: this server made segments of it itself, so its own are kept and the pool's are not used.
+    /// </summary>
+    /// <param name="type">The segment's type.</param>
+    /// <param name="held">The held type names.</param>
+    /// <returns><c>true</c> when the type is held.</returns>
+    public static bool IsHeld(MediaSegmentType type, IReadOnlyCollection<string> held)
+    {
+        ArgumentNullException.ThrowIfNull(held);
+        return held.Any(h => string.Equals(h, type.ToString(), StringComparison.OrdinalIgnoreCase));
+    }
+
     public static LibraryOptions OthersOnly(LibraryOptions? options) => new()
     {
         DisabledMediaSegmentProviders = (options?.DisabledMediaSegmentProviders ?? Array.Empty<string>()).Append(PeerMetadataSource.ProviderName).ToArray()

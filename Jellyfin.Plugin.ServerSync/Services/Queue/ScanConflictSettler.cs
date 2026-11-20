@@ -105,7 +105,7 @@ public sealed class ScanConflictSettler
                 }
 
                 peerVersions.TryGetValue(peerKeyOf(row), out var peerVersion);
-                if (_resolver.Decide(kind, localKey, peerVersion) != VersionDecision.Keep)
+                if (_resolver.Decide(kind, localKey, peerVersion, source.Server.ServerId) != VersionDecision.Keep)
                 {
                     // The stamp read with the value is kept until the value applies.
                     if (peerVersion is null)

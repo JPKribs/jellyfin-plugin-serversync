@@ -45,22 +45,86 @@ public sealed class MediaSegmentsValueTests
     }
 
     /// <summary>
-    /// A server whose segments were first made on this server is passed over, and an origin it names is kept.
-    /// True: segments relay through servers that copied them, and never return to the server that made them.
-    /// False: an intro deleted here could come back through a server that copied it.
+    /// A server whose segments were all first made on this server is passed over, and the type they hold stays this server's below it,
+    /// while an origin a lower server names for another type is kept.
+    /// True: segments relay through servers that copied them, and never return to undo the server that made them.
+    /// False: an intro changed here could be undone by an older copy coming back around.
     /// </summary>
     [Fact]
-    public void Choose_OriginIsThisServer_IsPassedOver()
+    public void Choose_OriginIsThisServer_IsPassedOverAndHoldsItsType()
     {
         var back = Answer("a", "a-id", 1);
         back.Answer.OriginServerId = ThisServer;
-        var relayed = Answer("b", "b-id", 1);
-        relayed.Answer.OriginServerId = "first-id";
+        var sameType = Answer("b", "b-id", 1);
+        sameType.Answer.OriginServerId = "first-id";
+        var otherType = Answer("c", "c-id", 0);
+        otherType.Answer.Segments.Add(new PeerSegment { Type = "Outro", StartTicks = 50, EndTicks = 60 });
+        otherType.Answer.OriginServerId = "first-id";
 
-        var chosen = MediaSegmentsValue.Choose(new[] { back, relayed }, ThisServer);
+        Assert.Null(MediaSegmentsValue.Choose(new[] { back, sameType }, ThisServer));
+        var chosen = MediaSegmentsValue.Choose(new[] { back, sameType, otherType }, ThisServer);
 
-        Assert.Equal("b", chosen!.ServerKey);
+        Assert.Equal("c", chosen!.ServerKey);
         Assert.Equal("first-id", chosen.OriginServerId);
+        Assert.Equal("Outro", Assert.Single(chosen.Segments).Type);
+        Assert.Equal(new[] { "Intro" }, chosen.HeldTypes);
+    }
+
+    /// <summary>
+    /// A server ranked above the one holding this server's copy still wins for that type.
+    /// True: rank decides, and a copy of this server's segment sits at the rank of the server that holds it.
+    /// False: one copy anywhere in the pool would lock out every better ranked server.
+    /// </summary>
+    [Fact]
+    public void Choose_HigherServerOutranksTheCopyOfThisServers()
+    {
+        var top = Answer("a", "a-id", 1);
+        var back = Answer("b", "b-id", 1);
+        back.Answer.OriginServerId = ThisServer;
+
+        var chosen = MediaSegmentsValue.Choose(new[] { top, back }, ThisServer);
+
+        Assert.Equal("a", chosen!.ServerKey);
+        Assert.Null(chosen.HeldTypes);
+    }
+
+    /// <summary>
+    /// One segment in an answer that was made here drops only that segment and its type, and the server's own segments of other types are taken.
+    /// True: a server that copied this server's intro still gives its own outro.
+    /// False: one copied segment would hide everything else the server has.
+    /// </summary>
+    [Fact]
+    public void Choose_MixedAnswer_TakesTheSegmentsNotMadeHere()
+    {
+        var mixed = Answer("a", "a-id", 0);
+        mixed.Answer.SegmentOrigins = true;
+        mixed.Answer.OriginServerId = ThisServer;
+        mixed.Answer.Segments.Add(new PeerSegment { Type = "Intro", StartTicks = 0, EndTicks = 10, OriginServerId = ThisServer });
+        mixed.Answer.Segments.Add(new PeerSegment { Type = "Outro", StartTicks = 50, EndTicks = 60 });
+        mixed.Answer.Segments.Add(new PeerSegment { Type = "Recap", StartTicks = 20, EndTicks = 30, OriginServerId = "third-id" });
+
+        var chosen = MediaSegmentsValue.Choose(new[] { mixed }, ThisServer)!;
+
+        Assert.Equal(new[] { "Outro", "Recap" }, chosen.Segments.Select(s => s.Type).OrderBy(t => t));
+        Assert.Equal("a-id", chosen.Segments.Single(s => s.Type == "Outro").OriginServerId);
+        Assert.Equal("third-id", chosen.Segments.Single(s => s.Type == "Recap").OriginServerId);
+        Assert.Null(chosen.OriginServerId);
+        Assert.Equal(new[] { "Intro" }, chosen.HeldTypes);
+    }
+
+    /// <summary>
+    /// An older release names one origin for every segment it copied, and that origin is given to all of them.
+    /// True: a pool partly on an older release still never takes back what a server made.
+    /// False: an older peer's copies would look like its own and loop back.
+    /// </summary>
+    [Fact]
+    public void Choose_OlderPeer_GivesItsOneOriginToEverySegment()
+    {
+        var old = Answer("a", "a-id", 2);
+        old.Answer.OriginServerId = ThisServer;
+
+        Assert.Null(MediaSegmentsValue.Choose(new[] { old }, ThisServer));
+        Assert.All(MediaSegmentsValue.WithOrigins(old.Answer, "a-id"), s => Assert.Equal(ThisServer, s.OriginServerId));
     }
 
     /// <summary>

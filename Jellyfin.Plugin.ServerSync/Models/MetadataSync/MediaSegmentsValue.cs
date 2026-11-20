@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 
 namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
@@ -12,17 +13,19 @@ namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 /// </summary>
 /// <param name="ServerKey">The key of the server entry the segments were read from.</param>
 /// <param name="SourceItemId">The item's id on that server.</param>
-/// <param name="OriginServerId">The Jellyfin id of the server the segments were first made on, or null.</param>
+/// <param name="OriginServerId">The Jellyfin id of the server the segments were first made on, or null when it is not known or they came from more than one. Each segment names its own.</param>
 /// <param name="Size">The size of that server's file in bytes, or null.</param>
 /// <param name="RunTimeTicks">How long that server's file runs, in ticks, or null.</param>
 /// <param name="Segments">The segments, empty when no server has any for the file.</param>
+/// <param name="HeldTypes">The segment types this server made itself and some server holds. This server's own segments of these types are kept, and the pool's are not used.</param>
 public sealed record MediaSegmentsValue(
     string ServerKey,
     string SourceItemId,
     string? OriginServerId,
     long? Size,
     long? RunTimeTicks,
-    IReadOnlyList<PeerSegment> Segments)
+    IReadOnlyList<PeerSegment> Segments,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? HeldTypes = null)
 {
     /// <summary>Writes the value as the JSON a row stores.</summary>
     /// <returns>The JSON.</returns>
@@ -52,14 +55,14 @@ public sealed record MediaSegmentsValue(
     /// <param name="row">The row, or null.</param>
     /// <returns>The value, or null when there is no row.</returns>
     public static MediaSegmentsValue? FromRow(SourceMediaSegments? row)
-        => row is null ? null : new(row.ServerKey, row.SourceItemId, row.OriginServerId, row.Size, row.RunTimeTicks, row.Segments.ToList());
+        => row is null ? null : new(row.ServerKey, row.SourceItemId, row.OriginServerId, row.Size, row.RunTimeTicks, row.Segments.ToList(), row.HeldTypes);
 
     /// <summary>Builds the row the local segment table stores for a file.</summary>
     /// <param name="localItemId">The local item's id, without dashes.</param>
     /// <param name="at">When the row is written, in UTC.</param>
     /// <returns>The row.</returns>
     public SourceMediaSegments ToRow(string localItemId, DateTime at)
-        => new(localItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, at, OriginServerId);
+        => new(localItemId, ServerKey, SourceItemId, Segments, Size, RunTimeTicks, at, OriginServerId, HeldTypes);
 
     /// <summary>
     /// Gives the value with its overlapping segments consolidated, as the Consolidate settings ask.
@@ -75,6 +78,7 @@ public sealed record MediaSegmentsValue(
     /// Consolidates overlapping segments of the same type. Intros and outros shrink to the part every overlapping one shares,
     /// so 0:00 to 0:30 and 0:05 to 0:45 become 0:05 to 0:30. Any other type joins into one segment covering both, so 1:00 to 1:30
     /// and 1:05 to 1:45 become 1:00 to 1:45. Segments that do not overlap, or whose type is not consolidated, are kept as they are.
+    /// A consolidated segment keeps the origin of the first one it was made from, so the server that made it never takes it back.
     /// </summary>
     /// <param name="segments">The segments.</param>
     /// <param name="intros">Whether overlapping intros shrink to the part they share.</param>
@@ -105,8 +109,8 @@ public sealed record MediaSegmentsValue(
                 if (current is not null && segment.StartTicks < current.EndTicks && segment.EndTicks > current.StartTicks)
                 {
                     current = shrink
-                        ? new PeerSegment { Type = current.Type, StartTicks = Math.Max(current.StartTicks, segment.StartTicks), EndTicks = Math.Min(current.EndTicks, segment.EndTicks) }
-                        : new PeerSegment { Type = current.Type, StartTicks = current.StartTicks, EndTicks = Math.Max(current.EndTicks, segment.EndTicks) };
+                        ? new PeerSegment { Type = current.Type, StartTicks = Math.Max(current.StartTicks, segment.StartTicks), EndTicks = Math.Min(current.EndTicks, segment.EndTicks), OriginServerId = current.OriginServerId ?? segment.OriginServerId }
+                        : new PeerSegment { Type = current.Type, StartTicks = current.StartTicks, EndTicks = Math.Max(current.EndTicks, segment.EndTicks), OriginServerId = current.OriginServerId ?? segment.OriginServerId };
                     continue;
                 }
 
@@ -115,7 +119,7 @@ public sealed record MediaSegmentsValue(
                     result.Add(current);
                 }
 
-                current = new PeerSegment { Type = segment.Type, StartTicks = segment.StartTicks, EndTicks = segment.EndTicks };
+                current = new PeerSegment { Type = segment.Type, StartTicks = segment.StartTicks, EndTicks = segment.EndTicks, OriginServerId = segment.OriginServerId };
             }
 
             if (current is not null)
@@ -138,16 +142,24 @@ public sealed record MediaSegmentsValue(
         => chosen is { Segments.Count: 0 } && local is null && !remove ? null : chosen;
 
     /// <summary>
-    /// Picks what the pool holds for one file from the answers of every server holding it, in rank order. The first server with segments wins.
-    /// When none has any, the first that holds the file speaks, with no segments. A server's answer is passed over when the segments were first made on this server.
+    /// Picks what the pool holds for one file from the answers of every server holding it, in rank order, type by type.
+    /// For each type, the highest ranked server with segments of that type wins, among servers whose file matches the first one taken from.
+    /// When none has any, the first that holds the file speaks, with no segments.
+    /// A segment first made on this server is never taken back. It holds its type at the rank of the server that holds it: this server keeps
+    /// its own segments of that type, and no server at that rank or below gives segments of that type. So a change made here flows out,
+    /// and an older copy coming back around never undoes it.
     /// </summary>
     /// <param name="answers">Each holding server's key, its Jellyfin id, the item's id there, and its answer, in rank order.</param>
     /// <param name="thisServerId">This server's Jellyfin id.</param>
-    /// <returns>The value, or null when no server holds the file.</returns>
+    /// <returns>The value, or null when no server holds the file, or every segment the servers hold is of a held type and none holds the file with no segments.</returns>
     public static MediaSegmentsValue? Choose(IEnumerable<(string ServerKey, string? ServerId, string SourceItemId, PeerSegmentsItem Answer)> answers, string thisServerId)
     {
         ArgumentNullException.ThrowIfNull(answers);
-        MediaSegmentsValue? empty = null;
+        var held = new List<string>();
+        var taken = new List<PeerSegment>();
+        var takenTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        (string ServerKey, string SourceItemId, PeerSegmentsItem Answer)? lead = null;
+        (string ServerKey, string? ServerId, string SourceItemId, PeerSegmentsItem Answer)? firstEmpty = null;
         foreach (var (serverKey, serverId, sourceItemId, answer) in answers)
         {
             if (answer is not { Found: true })
@@ -155,25 +167,90 @@ public sealed record MediaSegmentsValue(
                 continue;
             }
 
-            var origin = !string.IsNullOrWhiteSpace(answer.OriginServerId) ? answer.OriginServerId
-                : !string.IsNullOrWhiteSpace(serverId) ? serverId
-                : null;
+            var segments = WithOrigins(answer, serverId);
+            foreach (var type in segments.Where(s => string.Equals(s.OriginServerId, thisServerId, StringComparison.OrdinalIgnoreCase)).Select(s => s.Type ?? string.Empty))
+            {
+                if (!takenTypes.Contains(type) && !held.Contains(type, StringComparer.OrdinalIgnoreCase))
+                {
+                    held.Add(type);
+                }
+            }
 
-            // Segments first made here came back through another server, so this server's own are kept.
-            if (string.Equals(origin, thisServerId, StringComparison.OrdinalIgnoreCase))
+            if (segments.Count == 0)
+            {
+                firstEmpty ??= (serverKey, serverId, sourceItemId, answer);
+                continue;
+            }
+
+            // Segments fit one file, so a server holding another version of it adds none.
+            if (lead is { } first && !SameFile(first.Answer, answer))
             {
                 continue;
             }
 
-            var value = new MediaSegmentsValue(serverKey, sourceItemId, origin, answer.Size, answer.RunTimeTicks, answer.Segments ?? new List<PeerSegment>());
-            if (value.Segments.Count > 0)
+            var fresh = segments
+                .Where(s => !held.Contains(s.Type ?? string.Empty, StringComparer.OrdinalIgnoreCase) && !takenTypes.Contains(s.Type ?? string.Empty))
+                .ToList();
+            if (fresh.Count == 0)
             {
-                return value;
+                continue;
             }
 
-            empty ??= value;
+            lead ??= (serverKey, sourceItemId, answer);
+            taken.AddRange(fresh);
+            foreach (var segment in fresh)
+            {
+                takenTypes.Add(segment.Type ?? string.Empty);
+            }
         }
 
-        return empty;
+        var heldTypes = held.Count > 0 ? held.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList() : null;
+        if (lead is { } winner)
+        {
+            var origins = taken.Select(s => s.OriginServerId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var ordered = taken.OrderBy(s => s.StartTicks).ThenBy(s => s.EndTicks).ToList();
+            return new MediaSegmentsValue(winner.ServerKey, winner.SourceItemId, origins.Count == 1 ? origins[0] : null, winner.Answer.Size, winner.Answer.RunTimeTicks, ordered, heldTypes);
+        }
+
+        if (firstEmpty is { } empty)
+        {
+            var origin = string.IsNullOrWhiteSpace(empty.ServerId) ? null : empty.ServerId;
+            return new MediaSegmentsValue(empty.ServerKey, empty.SourceItemId, origin, empty.Answer.Size, empty.Answer.RunTimeTicks, new List<PeerSegment>(), heldTypes);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Tells whether two servers hold the same file, by size and by runtime to within a second, where an unknown size or runtime matches.
+    /// </summary>
+    private static bool SameFile(PeerSegmentsItem first, PeerSegmentsItem second)
+        => (first.Size is not > 0 || second.Size is not > 0 || first.Size == second.Size)
+            && (first.RunTimeTicks is not > 0 || second.RunTimeTicks is not > 0 || Math.Abs(first.RunTimeTicks.Value - second.RunTimeTicks.Value) <= TimeSpan.TicksPerSecond);
+
+    /// <summary>
+    /// Gives a server's segments, each naming the server it was first made on. A segment the server made itself names the server.
+    /// An older release names one origin for all the segments it copied, and that origin is given to every segment in its answer.
+    /// </summary>
+    /// <param name="answer">The server's answer.</param>
+    /// <param name="serverId">The server's Jellyfin id, or null when it is not known.</param>
+    /// <returns>New segments, so the answer is left as it was.</returns>
+    public static List<PeerSegment> WithOrigins(PeerSegmentsItem answer, string? serverId)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+        var self = string.IsNullOrWhiteSpace(serverId) ? null : serverId;
+        var whole = string.IsNullOrWhiteSpace(answer.OriginServerId) ? self : answer.OriginServerId;
+        return (answer.Segments ?? new List<PeerSegment>())
+            .Where(s => s is not null)
+            .Select(s => new PeerSegment
+            {
+                Type = s.Type,
+                StartTicks = s.StartTicks,
+                EndTicks = s.EndTicks,
+                OriginServerId = answer.SegmentOrigins
+                    ? (string.IsNullOrWhiteSpace(s.OriginServerId) ? self : s.OriginServerId)
+                    : whole,
+            })
+            .ToList();
     }
 }

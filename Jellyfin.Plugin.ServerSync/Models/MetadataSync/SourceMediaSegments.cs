@@ -14,7 +14,8 @@ namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 /// <param name="Size">The size of the source's file in bytes, or null.</param>
 /// <param name="RunTimeTicks">How long the source's file runs, in ticks, or null.</param>
 /// <param name="FetchedAt">When the scan read them, in UTC.</param>
-/// <param name="OriginServerId">The Jellyfin id of the server the segments were first made on, or null when it is not known.</param>
+/// <param name="OriginServerId">The Jellyfin id of the server the segments were first made on, or null when it is not known or they came from more than one.</param>
+/// <param name="HeldTypes">The segment types this server made itself and some server holds, whose segments here are kept as they are, or null.</param>
 public sealed record SourceMediaSegments(
     string LocalItemId,
     string ServerKey,
@@ -23,4 +24,5 @@ public sealed record SourceMediaSegments(
     long? Size,
     long? RunTimeTicks,
     DateTime FetchedAt,
-    string? OriginServerId = null);
+    string? OriginServerId = null,
+    IReadOnlyList<string>? HeldTypes = null);

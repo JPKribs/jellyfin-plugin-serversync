@@ -198,7 +198,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
                         continue;
                     }
 
-                    if (_resolver.Decide(HintKind.Playlists, localKey, peerVersion) == VersionDecision.Keep)
+                    if (_resolver.Decide(HintKind.Playlists, localKey, peerVersion, source.Server.ServerId) == VersionDecision.Keep)
                     {
                         continue;
                     }

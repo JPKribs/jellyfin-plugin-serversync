@@ -14,7 +14,7 @@ public static class SyncSchema
     /// <summary>
     /// The schema version. Raise it when the schema changes.
     /// </summary>
-    public const int CurrentSchemaVersion = 39;
+    public const int CurrentSchemaVersion = 40;
 
     /// <summary>
     /// The oldest schema version this release brings forward itself, which is the one <see cref="OldestUpgradableRelease"/> writes.
@@ -136,6 +136,7 @@ public static class SyncSchema
         AddColumnIfMissing(connection, "MetadataSyncItems", "LocalSegmentsValue");
         AddColumnIfMissing(connection, "MetadataSyncItems", "SourceSegmentsHash");
         AddColumnIfMissing(connection, "MetadataSyncItems", "SyncedSegmentsHash");
+        AddColumnIfMissing(connection, "SourceMediaSegments", "HeldTypes");
     }
 
     /// <summary>
@@ -539,6 +540,7 @@ public static class SyncSchema
     /// <summary>
     /// Creates the table the media segment provider answers from, added in schema 38: for each local item, the segments its source holds
     /// with the size and runtime of the source's file, so they are used only for the same file, and the server they were first made on.
+    /// HeldTypes, added in schema 40, names the segment types this server made itself, whose own segments are kept.
     /// </summary>
     private static void CreateMediaSegmentTable(SqliteConnection connection)
     {
@@ -552,7 +554,8 @@ public static class SyncSchema
                 Size INTEGER,
                 RunTimeTicks INTEGER,
                 FetchedAt TEXT NOT NULL,
-                OriginServerId TEXT
+                OriginServerId TEXT,
+                HeldTypes TEXT
             );";
         cmd.ExecuteNonQuery();
     }

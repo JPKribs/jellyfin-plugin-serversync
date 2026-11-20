@@ -38,7 +38,7 @@ public sealed class InboundHintWorkerTests : IDisposable
         _inbound = new InboundHintStore(_db.Provider, NullLogger<InboundHintStore>.Instance);
         var triage = new HintTriage(_config, _local, new VersionStore(_db.Provider, NullLogger<VersionStore>.Instance));
         var history = new HistoryHintHandler(null!, null!, null!, null!, null!, null!, null!, _config, triage, null!, NullLogger<HistoryHintHandler>.Instance);
-        var items = new ItemHintHandler(new QueueServices(), _config, triage, null!, null!, null!, NullLogger<ItemHintHandler>.Instance);
+        var items = new ItemHintHandler(new QueueServices(), _config, triage, QueueSamples.Resolver(_db.Provider, _config), null!, null!, NullLogger<ItemHintHandler>.Instance);
         var content = new ContentHintHandler(new QueueServices(), _config, new ContentSyncTableManager(_db.Provider, NullLogger<ContentSyncTableManager>.Instance), null!, NullLogger<ContentHintHandler>.Instance);
         _worker = new InboundHintWorker(_inbound, _config, _factory, history, items, content, null!, _activity.Log, triage, QueueSamples.Host(Me), NullLogger<InboundHintWorker>.Instance);
     }

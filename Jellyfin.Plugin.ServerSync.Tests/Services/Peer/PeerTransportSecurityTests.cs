@@ -80,7 +80,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     {
         var config = new FakeConfigManager();
         config.Configuration.EnableMetadataSync = true;
-        var handler = new ItemHintHandler(null!, config, TriageWithLocal(config, "/media/movies/claimed.mkv"), null!, null!, null!, NullLogger<ItemHintHandler>.Instance);
+        var handler = new ItemHintHandler(null!, config, TriageWithLocal(config, "/media/movies/claimed.mkv"), QueueSamples.Resolver(new FixedProvider(_database), config), null!, null!, NullLogger<ItemHintHandler>.Instance);
         using var client = ClientAnswering("{}");
         var prefetched = new Jellyfin.Sdk.Generated.Models.BaseItemDto { Id = ItemId, Path = "/media/private/secret.mkv" };
 

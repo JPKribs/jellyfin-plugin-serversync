@@ -273,9 +273,10 @@ public sealed class PeerSegmentProviderTests : IDisposable
     }
 
     /// <summary>
-    /// With both switches on, the segments other providers gave a file are removed for the source's, or for nothing when no server has any.
-    /// True: the file keeps only the source's version, with no second intro from a local tool.
-    /// False: a local provider's intro would sit beside the source's, and players would show both.
+    /// With both switches on, the segments other providers gave a file are replaced by the source's of the same type,
+    /// and kept when no server has any, since a pool that has not seen a server's own segments yet must never wipe them.
+    /// True: the file keeps only the source's version, with no second intro from a local tool, and a ring never wipes what its maker just made.
+    /// False: a local provider's intro would sit beside the source's, or a server's new intro would be wiped before it went out.
     /// </summary>
     [Theory]
     [InlineData(true)]
@@ -298,7 +299,15 @@ public sealed class PeerSegmentProviderTests : IDisposable
         var segments = await _provider.GetMediaSegments(Request(), CancellationToken.None);
 
         Assert.Equal(sourceHasSegments ? 1 : 0, segments.Count);
-        Assert.Equal(other.Id, Assert.Single(_deleted));
+        if (sourceHasSegments)
+        {
+            Assert.Equal(other.Id, Assert.Single(_deleted));
+        }
+        else
+        {
+            Assert.Empty(_deleted);
+        }
+
         Assert.Equal(new[] { "Off", "Server Sync" }, Assert.Single(_askedWith).DisabledMediaSegmentProviders);
     }
 
@@ -359,28 +368,32 @@ public sealed class PeerSegmentProviderTests : IDisposable
     }
 
     /// <summary>
-    /// The plan for each case: the source's segments go on a file with none, stay off a file another provider covers unless replacing,
-    /// and with nothing in the pool the file keeps what it has unless removing.
-    /// True: the two switches decide exactly what changes, and nothing else does.
-    /// False: a switch would remove or replace segments while off.
+    /// The plan for each case, type by type: the pool's segments go on a file with none of their type, stay off a type another provider covers
+    /// unless replacing, never remove another provider's segments of a type the pool lacks, and with nothing in the pool the file keeps
+    /// Server Sync's segments unless removing.
+    /// True: the two switches decide exactly what changes, and a server's own segments are never wiped by a pool that has not seen them.
+    /// False: a switch would remove or replace segments while off, or a ring would wipe the segments its maker just made.
     /// </summary>
     [Theory]
-    [InlineData(true, false, false, false, 1, false)]
-    [InlineData(true, true, false, false, 0, false)]
-    [InlineData(true, true, true, false, 1, true)]
-    [InlineData(false, true, false, false, 2, false)]
-    [InlineData(false, true, false, true, 0, true)]
-    [InlineData(false, false, false, true, 0, false)]
-    public void Plan_Cases_FollowTheSwitches(bool sourceHasAny, bool othersExist, bool replace, bool remove, int ours, bool removeOthers)
+    [InlineData(true, false, false, false, false, 1, 0)]
+    [InlineData(true, true, false, false, false, 1, 0)]
+    [InlineData(true, true, false, true, false, 1, 0)]
+    [InlineData(true, true, true, false, false, 0, 0)]
+    [InlineData(true, true, true, true, false, 1, 1)]
+    [InlineData(false, true, false, false, false, 2, 0)]
+    [InlineData(false, true, false, false, true, 0, 0)]
+    [InlineData(false, true, true, true, true, 0, 0)]
+    [InlineData(false, false, false, false, true, 0, 0)]
+    public void Plan_Cases_FollowTheSwitches(bool sourceHasAny, bool othersExist, bool sameType, bool replace, bool remove, int ours, int removed)
     {
         var fitted = sourceHasAny ? new List<MediaSegmentDto> { new() { Type = MediaSegmentType.Intro, StartTicks = 1, EndTicks = 2 } } : new List<MediaSegmentDto>();
-        var others = othersExist ? new List<MediaSegmentDto> { new() { Type = MediaSegmentType.Outro, StartTicks = 5, EndTicks = 6 } } : new List<MediaSegmentDto>();
+        var others = othersExist ? new List<MediaSegmentDto> { new() { Type = sameType ? MediaSegmentType.Intro : MediaSegmentType.Outro, StartTicks = 5, EndTicks = 6 } } : new List<MediaSegmentDto>();
         var existing = new List<MediaSegmentDto> { new() { Type = MediaSegmentType.Recap, StartTicks = 1, EndTicks = 2 }, new() { Type = MediaSegmentType.Preview, StartTicks = 3, EndTicks = 4 } };
 
         var plan = PeerSegmentProvider.Plan(fitted, others, existing, replace, remove);
 
         Assert.Equal(ours, plan.Ours.Count);
-        Assert.Equal(removeOthers, plan.RemoveOthers);
+        Assert.Equal(removed, plan.Remove.Count);
     }
 
     /// <summary>
