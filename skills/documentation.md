@@ -185,23 +185,26 @@ Use `##` for README headings. Keep the README under 40 lines.
 
 ## Screenshots
 
-### What to Capture
+### How to Take Them
 
-* Capture every page and dialog a docs page describes.
+Take every screenshot with the kit in [tools/screenshots](../tools/screenshots/README.md). It serves the plugin's real pages with jellyfin-web's real styles and a stand-in server that holds a generic pool, and writes each PNG to `docs/screenshots/`. `node shots.mjs` retakes all of them, and `node shots.mjs "Queue,Queue Phone"` retakes only those.
+
+* Capture every page and dialog a docs page describes. A new one is one more entry in the `shots` list of `shots.mjs`.
 * Capture the dark theme only, which is Jellyfin's default.
-* Capture from the Docker pool so every name is generic.
-* Capture after a sync has run so lists, counts, and badges are filled.
-* Hide nothing with editing. When a value is private, change the pool data instead.
+* Keep every name generic. The pool lives in `stub.js`, and new sample data goes there.
+* Fill lists, counts, and badges so each shot shows what the text around it describes.
+* Hide nothing with editing. When a value is private, change the sample data instead.
+* Look at every PNG the kit writes before committing it.
 
 ### Sizes
 
 | Kind | Size | How |
 | :--- | :--- | :--- |
-| Dialog | 800 wide | The browser at 800 px, cropped to the dialog |
-| Full page | 1920 wide | The browser at 1920 px, cropped to the content area |
-| Phone | 375 wide at 2x | The browser's device mode at 375 px |
+| Page or section | 800 wide at 2x | The page at 800 px, cropped to the content or to the section |
+| Dialog | 800 wide at 2x | The page at 800 px, cropped to the dialog |
+| Phone | 375 wide at 2x | The page at 375 px |
 
-Save every capture as PNG. Crop out the browser frame and the Jellyfin header unless the header is the subject.
+The kit crops out the Jellyfin header.
 
 ### Names and Placement
 
@@ -222,7 +225,7 @@ Retake a screenshot in the same commit as any change that alters what it shows, 
 
 ## The Docker Pool
 
-The pool runs three Jellyfin servers with the plugin built from this checkout. Use it for screenshots, for manual checks, and for the scenarios in [testing.md](testing.md#pool-scenarios).
+The pool runs three Jellyfin servers with the plugin built from this checkout. Use it for manual checks and for the scenarios in [testing.md](testing.md#pool-scenarios).
 
 Docker and the dotnet SDK must be on the path. The scripts use only the Python standard library.
 
@@ -251,8 +254,6 @@ python3 tools/integration/run.py reset
 * Run `reset` before a full `test` run. Leftover link rows trip the prune safety limit.
 * Never sign in as admin from another script while `test` or `scenarios` runs. It revokes the harness token.
 * Never open `sync.db` with sqlite on the host while the pool is up. The container gets disk I/O errors.
-
-To take screenshots, run `up`, sign in to `local` at port 8113, and trigger the syncs you need from the **Sync** tab. Take them only while no `test` or `scenarios` run is going, since a sign in revokes the harness token.
 
 `up` on a running pool rebuilds the plugin into it. Reload the page afterward, since the dashboard caches scripts.
 
@@ -319,7 +320,7 @@ changelog:
 * [ ] Every UI label matches the page exactly and is bold.
 * [ ] Every heading is Title Case.
 * [ ] No em dashes, semicolons, or contractions.
-* [ ] Every screenshot matches the current UI and uses pool data.
+* [ ] Every screenshot matches the current UI and comes from the screenshot kit.
 * [ ] [Architecture](../docs/Architecture.md) was reviewed and matches the code.
 * [ ] Every term matches [glossary.md](glossary.md).
 * [ ] `mkdocs build --strict` passes.

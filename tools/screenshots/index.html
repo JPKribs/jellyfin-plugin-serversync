@@ -1,0 +1,32 @@
+<!doctype html><html dir="ltr" class="layout-desktop"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Server Sync docs harness</title>
+<!--STYLESHEETS-->
+<style>
+/* The dashboard header: the app bar with the drawer, back, and user buttons, and the plugin's tabs under it. */
+#jfHeader { position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: #202020; color: #fff; }
+#jfHeader .bar { display: flex; align-items: center; height: 48px; padding: 0 14px; }
+#jfHeader .bar .material-icons { font-size: 24px; margin-right: 22px; color: #fff; }
+#jfHeader .bar .grow { flex: 1; }
+#jfHeader .avatar { width: 40px; height: 40px; border-radius: 50%; background: #00a4dc; display: flex; align-items: center; justify-content: center; margin-right: 0 !important; }
+#jfHeader .avatar .material-icons { margin: 0; font-size: 28px; }
+#jfTabs { display: flex; justify-content: center; height: 47px; align-items: stretch; }
+.jfTab { display: flex; align-items: center; padding: 0 22px; font-size: 13px; color: rgba(255,255,255,.87); border-bottom: 2px solid transparent; }
+.jfTabActive { color: #00a4dc; border-bottom-color: #00a4dc; }
+#host { padding-top: 95px; }
+
+</style>
+</head><body class="force-scroll"><div id="jfHeader"><div class="bar"><span class="material-icons">menu</span><span class="material-icons">arrow_back</span><span class="grow"></span><span class="avatar"><span class="material-icons">person</span></span></div><div id="jfTabs"></div></div>
+<div class="skinBody mainAnimatedPages" id="host"></div>
+<script src="upgrade.js"></script>
+<script src="stub.js"></script>
+<script type="module">
+var page = new URLSearchParams(location.search).get('page') || 'sync';
+var html = await (await fetch('/configurationpage?name=serversync_' + page)).text();
+var host = document.getElementById('host');
+host.innerHTML = html;
+var view = host.querySelector('[data-role=page]');
+var mod = await import('/configurationpage?name=serversync_' + page + '.js');
+mod.default(view);
+view.dispatchEvent(new CustomEvent('viewshow'));
+window.__view = view;
+window.__ready = true;
+</script></body></html>
