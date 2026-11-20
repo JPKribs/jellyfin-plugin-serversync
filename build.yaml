@@ -5,16 +5,9 @@ imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/
 version: "12.4.19.1"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
-overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
+overview: "Keep several Jellyfin servers in step."
 description: >
-  Server Sync keeps a pool of Jellyfin servers in step. Each server scans the others it is told to in
-  rank order and pulls missing or updated content, metadata, people, user settings, playlists, and
-  watch history. Servers that both run the plugin also tell each other about changes as they happen, so an
-  edit or a play made on one shows up on the others within about a minute, and the scheduled scan remains
-  the safety net. Watch history merges three way against what the servers last agreed on, and other
-  values resolve on where and when they were last edited, so the newest edit wins unless Precedence is
-  set to Ranked. A library can also hold its videos as links that stream from the source instead of
-  full copies, and a link cache can keep local copies of the links that are played.
+  Server Sync keeps several Jellyfin servers in step, sharing content, metadata, people, user settings, playlists, and watch history. Servers that run the plugin share each change within about a minute.
 category: "Administration"
 owner: "JPKribs"
 artifacts:
