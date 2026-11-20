@@ -152,7 +152,7 @@ public sealed class SlowAnswerHandlerTests
 
     private static SlowAnswerHandler Chain(ClientStubServer server, TimeSpan? wait = null, string? only = null)
     {
-        var retry = new JpkRetryHandler(new JpkRetryOptions
+        var retry = new BaseRetryHandler(new BaseRetryOptions
         {
             MaxAttempts = 2,
             AttemptTimeout = TimeSpan.FromMilliseconds(50),

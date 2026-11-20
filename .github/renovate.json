@@ -20,6 +20,11 @@
             "groupSlug": "base"
         },
         {
+            "description": "Base releases are <jellyfin>.<X>, such as 12.4.0. The dated releases before them sort higher, so they are never offered",
+            "matchPackageNames": ["JPKribs.Jellyfin.Base"],
+            "allowedVersions": "<1000"
+        },
+        {
             "description": "Jellyfin ships these, so they move only with the Jellyfin version",
             "matchPackageNames": [
                 "Jellyfin.**",

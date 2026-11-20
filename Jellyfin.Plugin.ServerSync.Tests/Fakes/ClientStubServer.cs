@@ -93,7 +93,7 @@ internal sealed class ClientStubServer : HttpMessageHandler
             request.Headers.Authorization?.ToString(),
             headers,
             body,
-            request.Options.TryGetValue(JPKribs.Jellyfin.Base.JpkRetryHandler.NoRetry, out var noRetry) && noRetry);
+            request.Options.TryGetValue(JPKribs.Jellyfin.Base.BaseRetryHandler.NoRetry, out var noRetry) && noRetry);
         lock (Seen)
         {
             Seen.Add(seen);

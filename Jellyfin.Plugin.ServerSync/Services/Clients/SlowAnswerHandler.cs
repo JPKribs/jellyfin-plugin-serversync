@@ -44,7 +44,7 @@ public sealed class SlowAnswerHandler : DelegatingHandler
         // Three tries cut off at the retry's attempt limit can never succeed against a source that needs longer than that to answer.
         if (request.Options.TryGetValue(Marked, out var option) && option is SlowAnswerOption)
         {
-            request.Options.Set(JpkRetryHandler.NoRetry, true);
+            request.Options.Set(BaseRetryHandler.NoRetry, true);
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
 

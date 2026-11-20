@@ -149,7 +149,7 @@ public sealed class PluginServiceRegistratorTests
 
         var slow = order.IndexOf(typeof(SlowAnswerHandler));
         Assert.True(slow >= 0);
-        Assert.True(slow < order.IndexOf(typeof(JPKribs.Jellyfin.Base.JpkRetryHandler)));
+        Assert.True(slow < order.IndexOf(typeof(JPKribs.Jellyfin.Base.BaseRetryHandler)));
     }
 
     /// <summary>

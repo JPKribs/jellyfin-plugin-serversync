@@ -36,7 +36,7 @@ Provider      Jellyfin refresh ──▶ PeerMetadataProvider ──▶ PeerMeta
 * Each hosted service except `HiddenTaskScheduleCleaner` is wrapped in `Gate<T>`, which starts nothing while the plugin is held.
 * `Tasks/HiddenTaskScheduleCleaner` removes any schedule left on a hidden task, so only the two visible tasks run on a timer.
 * `LinkPlaybackFilter` is added as an MVC filter on Jellyfin's own routes.
-* Two named `HttpClient`s carry the SSRF guard, Base's `JpkRetryHandler`, and `RedirectRefusingHandler`. `ServerSyncSource` may reach private addresses and `ServerSyncSourcePublic` may not.
+* Two named `HttpClient`s carry the SSRF guard, Base's `BaseRetryHandler`, and `RedirectRefusingHandler`. `ServerSyncSource` may reach private addresses and `ServerSyncSourcePublic` may not.
 
 `Services/Clients/SourceServerClientFactory` builds every `SourceServerClient`. It decrypts the key, checks the URL, picks the client by **Allow Private Network Address**, and attaches pairing when the entry is saved.
 
