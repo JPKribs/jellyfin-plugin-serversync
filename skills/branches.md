@@ -16,6 +16,10 @@ No other branch lives on the remote. Work on a local branch, then merge it into 
 * **Feature.** Anything new, changed behavior, a refactor, or a Base upgrade goes to `unstable`. It ships in a feature release, which raises `F` in the version.
 * **Patch.** A fix for a released bug goes straight to `master`. It ships in a bug release, which raises `B`.
 
+## Dependencies
+
+Renovate opens its dependency pull requests against `unstable`, so a dependency raise ships with the next feature release.
+
 ## Sync
 
 `.github/workflows/sync-branches.yaml` merges `master` into `unstable` on every push to `master`. A patch and the manifest update after a release reach `unstable` with no step by hand.
