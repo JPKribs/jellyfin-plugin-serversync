@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.20.1",
+        "changelog": "\n## Fixed\n- A link whose file was replaced on its source kept playing the old version from the link cache. The cached file is dropped as soon as the source announces the change, even when the size is the same, and a cache download already running for the old file is thrown away\n- A link written again rewrote its .nfo every time. The .nfo is written only when the source's details changed\n\n## Developer\n- LinkCache.Invalidate drops a link's file and refuses a download that started before it, and LinkCache.PathFor takes the size the source reports so a cached file of another size is dropped",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.20.1/jellyfin-plugin-serversync-12.4.20.1.zip",
+        "checksum": "8abbc188208014520bc6dc686d6d8180",
+        "timestamp": "2026-11-21T01:40:07Z"
+      },
+      {
         "version": "12.4.20.0",
         "changelog": "\n## Added\n- Every page, message, and Activity page entry is shown in the viewer's language. Jellyfin's own words come in every language Jellyfin has, and the rest is in US English until it is translated\n\n## Changed\n- Labels, buttons, headings, columns, badges, and Activity page names are in sentence case, as Jellyfin writes them, such as Send changes after (seconds) and 12 items synced\n- A message a page shows, such as a refused Server URL, is in the page's language, and an Activity page entry is in the server's display language\n- The tables, dialogs, charts, and lists drawn by Base show their own text in the viewer's language\n\n## Fixed\n- The pool card on the Servers tab read \"This Server, this server\" when the server had no name. It reads This server\n- The Activity page entry for one failing item read \"1 Item Keep Failing\". It reads 1 item keeps failing\n\n## Developer\n- Uses JPKribs.Jellyfin.Base 12.4.0, then 12.4.1. BaseTranslations.RequestLanguage replaces the local RequestLanguage helper, and ActivityOutcome takes keys for its names\n- Every string a person reads comes from Localization/en-us.json or a declared Jellyfin string, with Localization/casing.json for the words kept as written. GET /Sync/Translations answers with language, strings, and casing\n- The source is organized into Api, Configuration, Web, Assets, Models, Services, Tasks, and Utilities, and the Docker pool and matrix live in tools/integration",
         "targetAbi": "12.4.0.0",
