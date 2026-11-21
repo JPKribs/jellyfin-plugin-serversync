@@ -369,13 +369,13 @@ public sealed class LinkCacheFiller : BackgroundService
         // Room is made for the size, so a file of unknown size is skipped.
         if (row.SourceSize <= 0)
         {
-            _logger.LogInformation("Did not cache {File}: its size on the source is not known", name);
+            _logger.LogDebug("Did not cache {File}: its size on the source is not known", name);
             return;
         }
 
         if (row.SourceSize > _cache.LimitBytes())
         {
-            _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
+            _logger.LogDebug("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
             return;
         }
 
@@ -395,14 +395,14 @@ public sealed class LinkCacheFiller : BackgroundService
                 cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("Did not cache {File}: '{Server}' answered {Status}", name, server.DisplayName, (int)response.StatusCode);
+                _logger.LogDebug("Did not cache {File}: '{Server}' answered {Status}", name, server.DisplayName, (int)response.StatusCode);
                 return;
             }
 
             // Room is made only once the source agrees, so a refusal costs nothing.
             if (!_cache.MakeRoom(row.SourceSize, Playing()))
             {
-                _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
+                _logger.LogDebug("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
                 return;
             }
 
@@ -424,7 +424,7 @@ public sealed class LinkCacheFiller : BackgroundService
 
             if (_cache.Complete(fill.LinkId, extension, row.SourceSize, fill.Reason, version))
             {
-                _logger.LogInformation("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(row.SourceSize), server.DisplayName);
+                _logger.LogDebug("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(row.SourceSize), server.DisplayName);
             }
             else
             {
@@ -433,7 +433,7 @@ public sealed class LinkCacheFiller : BackgroundService
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Did not cache {File}: {Reason}", name, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogDebug(ex, "Did not cache {File}", name);
         }
         finally
         {

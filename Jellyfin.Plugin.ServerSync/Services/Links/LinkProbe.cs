@@ -166,7 +166,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
 
                 if (pending.Attempts >= MaxAttempts)
                 {
-                    _logger.LogInformation("Gave up probing the link {Path} after {Attempts} tries. It is probed when someone plays it", FormatUtilities.SanitizeForLog(item.Path), pending.Attempts);
+                    _logger.LogDebug("Gave up probing the link {Path} after {Attempts} tries. It is probed when someone plays it", FormatUtilities.SanitizeForLog(item.Path), pending.Attempts);
                     _pending.TryRemove(itemId, out _);
                     continue;
                 }

@@ -457,11 +457,11 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                 _outbound.MarkSent(accepted, now);
                 if (declined.Count > 0)
                 {
-                    _logger.LogInformation("Sent {Count} hint(s) to '{Peer}'. It closed {Declined} more on receipt: {Codes}", accepted.Count, FormatUtilities.SanitizeForLog(peer.DisplayName), declined.Values.Sum(), string.Join(", ", declined.Select(d => $"{d.Key} {d.Value}")));
+                    _logger.LogDebug("Sent {Count} hint(s) to '{Peer}'. It closed {Declined} more on receipt: {Codes}", accepted.Count, FormatUtilities.SanitizeForLog(peer.DisplayName), declined.Values.Sum(), string.Join(", ", declined.Select(d => $"{d.Key} {d.Value}")));
                 }
                 else
                 {
-                    _logger.LogInformation("Sent {Count} hint(s) to '{Peer}'", accepted.Count, FormatUtilities.SanitizeForLog(peer.DisplayName));
+                    _logger.LogDebug("Sent {Count} hint(s) to '{Peer}'", accepted.Count, FormatUtilities.SanitizeForLog(peer.DisplayName));
                 }
                 break;
 
@@ -471,7 +471,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                     _outbound.MarkFailed(row, "peer rejected the request as malformed: " + Trim(body));
                 }
 
-                await _activity.RejectedBatchAsync(peer.DisplayName, due.ToList(), Trim(body)).ConfigureAwait(false);
+                await _activity.RejectedBatchAsync(peer.DisplayName, due.ToList()).ConfigureAwait(false);
 
                 _logger.LogError("'{Peer}' rejected {Count} hint(s) as malformed: {Body}", FormatUtilities.SanitizeForLog(peer.DisplayName), due.Count, FormatUtilities.SanitizeForLog(Trim(body), 300));
                 break;
@@ -491,7 +491,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                 }
 
                 state.Reason = error;
-                _logger.LogWarning("Could not deliver {Count} hint(s) to '{Peer}', will retry: {Error}", due.Count, FormatUtilities.SanitizeForLog(peer.DisplayName), FormatUtilities.SanitizeForLog(error, 300));
+                _logger.LogDebug("Could not deliver {Count} hint(s) to '{Peer}', will retry: {Error}", due.Count, FormatUtilities.SanitizeForLog(peer.DisplayName), FormatUtilities.SanitizeForLog(error, 300));
                 break;
         }
     }
@@ -536,7 +536,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         state.PausedFor = EntrySignature(peer);
         state.Reason = reason;
         _outbound.Defer(GiveUp(peer, due, config.HintRefusedMaxRetries, reason), until, reason);
-        _logger.LogError("Hints to '{Peer}' are paused until {Until:u}: {Reason}", FormatUtilities.SanitizeForLog(peer.DisplayName), until, FormatUtilities.SanitizeForLog(reason, 300));
+        _logger.LogWarning("Hints to '{Peer}' are paused until {Until:u}: {Reason}", FormatUtilities.SanitizeForLog(peer.DisplayName), until, FormatUtilities.SanitizeForLog(reason, 300));
         if (!alreadyPaused)
         {
             await _activity.PausedAsync(peer.DisplayName, reason, due.ToList(), until).ConfigureAwait(false);
@@ -587,7 +587,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             if (state.Interest is null || !string.Equals(state.Interest.Revision, interest.Revision, StringComparison.Ordinal))
             {
                 var cleared = _suppression.ClearPeer(peer.Key);
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "'{Peer}' wants {Kinds} from {Libraries} librar(ies) and {Users} user(s){Cleared}",
                     FormatUtilities.SanitizeForLog(peer.DisplayName),
                     interest.Kinds.Count == 0 ? "no hints" : string.Join(", ", interest.Kinds),
@@ -672,7 +672,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                     Reason = done?.Reason
                 };
             }).ToList());
-            _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report. Completed from its status", FormatUtilities.SanitizeForLog(peer.DisplayName), finished.Count);
+            _logger.LogDebug("'{Peer}' finished {Count} hint(s) it could not report. Completed from its status", FormatUtilities.SanitizeForLog(peer.DisplayName), finished.Count);
         }
 
         var lost = sent.Where(row => lostIds.Contains(row.HintId)).ToList();

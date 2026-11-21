@@ -198,7 +198,7 @@ public sealed class PeerMetadataSource
         var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
         if (parents.Count == 0)
         {
-            _logger.LogInformation("Server Sync has no match for {Item}: no server this one pulls from answers as Server Sync {Version}", FormatUtilities.SanitizeForLog(keys.Describe()), _parents.Version);
+            _logger.LogDebug("Server Sync has no match for {Item}: no server this one pulls from answers as Server Sync {Version}", FormatUtilities.SanitizeForLog(keys.Describe()), _parents.Version);
             return matches;
         }
 
@@ -254,7 +254,7 @@ public sealed class PeerMetadataSource
 
         if (matches.Count == 0)
         {
-            _logger.LogInformation("Server Sync has no match for {Item}: {Reasons}", FormatUtilities.SanitizeForLog(keys.Describe()), FormatUtilities.SanitizeForLog(string.Join(". ", misses), 300 * misses.Count));
+            _logger.LogDebug("Server Sync has no match for {Item}: {Reasons}", FormatUtilities.SanitizeForLog(keys.Describe()), FormatUtilities.SanitizeForLog(string.Join(". ", misses), 300 * misses.Count));
         }
 
         return matches;

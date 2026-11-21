@@ -307,7 +307,7 @@ public sealed class ItemHintHandler
         {
             record.MarkKept($"kept: the item is locked here, so a provider's work on '{origin.DisplayName}' does not replace it");
             StoreKept(record, kind);
-            _logger.LogInformation("Kept {Kind} for {Name}: the item is locked here and the change from '{Origin}' is a provider's work", kind, FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(origin.DisplayName));
+            _logger.LogDebug("Kept {Kind} for {Name}: the item is locked here and the change from '{Origin}' is a provider's work", kind, FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(origin.DisplayName));
             return HintApplyResult.Kept(HintCode.Locked, "the item is locked here");
         }
 
@@ -326,7 +326,7 @@ public sealed class ItemHintHandler
                 publishLocal(local);
             }
 
-            _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}'", kind, FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(origin.DisplayName));
+            _logger.LogDebug("Kept this server's {Kind} for {Name}, newer than '{Origin}'", kind, FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(origin.DisplayName));
             return HintApplyResult.Kept(HintCode.Superseded, "this server's edit is newer");
         }
 
@@ -341,7 +341,7 @@ public sealed class ItemHintHandler
             _resolver.Record(incoming);
         }
 
-        _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(name), hint.Recorded ? string.Empty : " (provider work)");
+        _logger.LogDebug("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(name), hint.Recorded ? string.Empty : " (provider work)");
         return HintApplyResult.AppliedTo(localItem());
     }
 

@@ -144,7 +144,7 @@ public class DownloadService
                         }
                         else
                         {
-                            _logger.LogInformation("Resuming {FileName} from {Offset} bytes", FormatUtilities.SanitizeForLog(fileName), download.Offset);
+                            _logger.LogDebug("Resuming {FileName} from {Offset} bytes", FormatUtilities.SanitizeForLog(fileName), download.Offset);
                         }
 
                         var mode = download.Offset > 0 ? FileMode.Append : FileMode.Create;
@@ -372,7 +372,7 @@ public class DownloadService
                 var companionFileName = CompanionNameFor(companion.FileName, mainStem);
                 if (companionFileName is null)
                 {
-                    _logger.LogWarning(
+                    _logger.LogDebug(
                         "Skipping companion file {FileName}: it is not a subtitle named after {Stem}",
                         FormatUtilities.SanitizeForLog(companion.FileName ?? string.Empty, 300),
                         FormatUtilities.SanitizeForLog(mainStem));

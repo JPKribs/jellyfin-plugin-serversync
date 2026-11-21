@@ -216,7 +216,7 @@ public sealed class LinkStreamer
 
                 if (end == CopyEnd.Refused)
                 {
-                    _logger.LogInformation("Stopped a read of the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(link.LinkPath), FormatUtilities.SanitizeForLog(outcome, 300));
+                    _logger.LogDebug("Stopped a read of the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(link.LinkPath), FormatUtilities.SanitizeForLog(outcome, 300));
                     context.Abort();
                     return Written;
                 }
@@ -233,7 +233,7 @@ public sealed class LinkStreamer
                     var (again, _) = await OpenAsync(route, grant, false, rest, sourcePath, clients, aborted).ConfigureAwait(false);
                     if (Continues(again, w, sent))
                     {
-                        _logger.LogInformation("'{Server}' stopped sending {Path} partway ({Reason}), so the rest was asked for again", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
+                        _logger.LogDebug("'{Server}' stopped sending {Path} partway ({Reason}), so the rest was asked for again", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
                         response = again;
                         continue;
                     }
@@ -243,7 +243,7 @@ public sealed class LinkStreamer
                     {
                         if (Continues(next.Response, w, sent))
                         {
-                            _logger.LogInformation("'{Server}' stopped sending {Path} partway ({Reason}), so another server sends the rest", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
+                            _logger.LogDebug("'{Server}' stopped sending {Path} partway ({Reason}), so another server sends the rest", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
                             (response, route) = next;
                             continue;
                         }
@@ -433,7 +433,7 @@ public sealed class LinkStreamer
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !aborted.IsCancellationRequested)
         {
             _health.Failed(server.Key);
-            _logger.LogWarning("Could not reach '{Server}' to stream {Path}: {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not reach '{Server}' to stream {Path}", server.DisplayName, FormatUtilities.SanitizeForLog(sourcePath));
             return (null, StatusCodes.Status502BadGateway);
         }
     }

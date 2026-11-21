@@ -29,12 +29,7 @@ public partial class SourceServerClient
             var client = GetApiClient();
             return await client.Users[userId].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}. Refresh will skip pruning to protect tracking rows", ex.ResponseStatusCode, userId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not Microsoft.Kiota.Abstractions.ApiException { ResponseStatusCode: >= 400 })
         {
             _logger.LogError(ex, "Failed to get user details for {UserId}", userId);
             return null;
@@ -78,7 +73,6 @@ public partial class SourceServerClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Failed to get profile image for user {UserId}", userId);
             throw new InvalidOperationException($"Failed to get profile image for user {userId}: {ex.Message}", ex);
         }
         finally
@@ -110,10 +104,9 @@ public partial class SourceServerClient
             var (hash, totalBytes) = await HashUtilities.ComputeSha256HashAsync(imageStream, cancellationToken).ConfigureAwait(false);
             return (hash, totalBytes);
         }
-        // The image opener already logs and wraps its InvalidOperationException.
+        // The image opener already wraps its failure in an InvalidOperationException.
         catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
         {
-            _logger.LogWarning(ex, "Failed to get profile image hash and size for user {UserId}", userId);
             throw new InvalidOperationException($"Failed to read profile image for user {userId}: {ex.Message}", ex);
         }
     }

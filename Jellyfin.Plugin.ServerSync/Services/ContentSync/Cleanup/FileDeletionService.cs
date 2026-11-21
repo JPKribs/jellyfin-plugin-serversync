@@ -610,7 +610,7 @@ public static class FileDeletionService
             return (0, 0);
         }
 
-        logger.LogInformation("Processing {Count} items marked for deletion", itemsToDelete.Count);
+        logger.LogDebug("Processing {Count} items marked for deletion", itemsToDelete.Count);
 
         var libraryRootLookup = config.GetAllLibraryMappings()
             .Where(m => !string.IsNullOrEmpty(m.SourceLibraryId) && !string.IsNullOrEmpty(m.LocalRootPath))
@@ -658,7 +658,7 @@ public static class FileDeletionService
                 else if (item.StorageMode.IsLink())
                 {
                     // A file a user put in the link's place is theirs, so it stays.
-                    logger.LogInformation("Left {Path} in place: the link there was replaced by a file Server Sync did not write", FormatUtilities.SanitizeForLog(localPath));
+                    logger.LogDebug("Left {Path} in place: the link there was replaced by a file Server Sync did not write", FormatUtilities.SanitizeForLog(localPath));
                     result = new DeletionResult(true);
                 }
                 else if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
@@ -675,7 +675,7 @@ public static class FileDeletionService
                 {
                     fileGone = true;
                     removedPaths?.Add(localPath);
-                    logger.LogInformation("DELETED: {FileName}", FormatUtilities.SanitizeForLog(fileName));
+                    logger.LogInformation("Deleted {FileName}", FormatUtilities.SanitizeForLog(fileName));
                 }
                 else
                 {

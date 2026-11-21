@@ -130,10 +130,10 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning("Could not copy the Server Sync settings aside: {Reason}", FormatUtilities.SanitizeForLog(ex.Message, 300));
+            logger.LogWarning(ex, "Could not copy the Server Sync settings aside");
         }
 
-        logger.LogError("{Reason} Its settings are not saved until then.", reason);
+        logger.LogError("{Reason} Its settings are not saved until then", reason);
         return reason;
     }
 
@@ -185,7 +185,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", FormatUtilities.SanitizeForLog(before), FormatUtilities.SanitizeForLog(ex.Message, 300));
+                _logger.LogWarning(ex, "Could not empty the link cache at {Root}", FormatUtilities.SanitizeForLog(before));
             }
         }
 
@@ -246,7 +246,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not empty the link cache at {Root} while uninstalling: {Reason}", FormatUtilities.SanitizeForLog(root), FormatUtilities.SanitizeForLog(ex.Message, 300));
+                _logger.LogWarning(ex, "Could not empty the link cache at {Root} while uninstalling", FormatUtilities.SanitizeForLog(root));
             }
         }
 

@@ -18,6 +18,7 @@ Each guide in [skills](skills/) covers one kind of work. Read the guide that mat
 | [skills/release.md](skills/release.md) | Cut a release. |
 | [skills/branches.md](skills/branches.md) | Pick a branch, sync the two, and promote unstable. |
 | [skills/translations.md](skills/translations.md) | Add or change a string a person reads. |
+| [skills/logging.md](skills/logging.md) | Write an activity log entry or a server log line. |
 
 A task that touches several areas needs every matching guide. A new setting, for example, needs the glossary, style, code, testing, documentation, and review guides.
 

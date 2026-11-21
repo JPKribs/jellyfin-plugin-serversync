@@ -18,10 +18,10 @@ Changes from other servers are summed on the dashboard's **Activity** page rathe
 
 | Name | Overview |
 | :--- | :--- |
-| 12 items synced | 12 items were synced from source-a (9), source-b (3) |
-| 3 items not synced | 3 items from source-a (2), source-b (1) were not synced: filtered out (2), ignored here (1) |
-| 4 items retrying | 4 items from source-a (4) could not be applied yet and will be retried |
+| Items synced | Synced 12 items from source-a (9) and source-b (3) |
+| Items not synced | Did not sync 3 items from source-a (2) and source-b: filtered out (2) and ignored here |
+| Items not applied yet | 4 items from source-a could not be applied yet and will be retried |
 
-A server's own events are written as they happen. "Changes paused for" a server names one that cannot take them, "Changes rejected by" one that refused a request as malformed, and "Changes resent to" one that lost changes it had accepted. Each change is still in the server log, and in the Change queue on the **Sync** tab.
+A server's own events are written as they happen, with the server in the overview. "Changes paused" names a server that cannot take changes, "Changes rejected" one that refused a request as malformed, and "Changes resent" one that lost changes it had accepted. Each change is still in the server log, and in the Change queue on the **Sync** tab.
 
 A paused server is left alone until the pause runs out. Changing its address, key, or direction on the **Servers** tab ends the pause, so the waiting changes go out on the next pass.

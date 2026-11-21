@@ -45,28 +45,14 @@ public partial class SourceServerClient
         BaseItemDto? rootItem;
 
         // Every failure rethrows, since an empty answer would read as files removed.
-        try
-        {
-            var client = GetApiClient();
-            var rootPage = await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.Ids = new Guid?[] { whitelistedId };
-                    config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-            rootItem = rootPage?.Items?.FirstOrDefault();
-        }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} on whitelist root {Id}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, whitelistedId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "Whitelist: failed to fetch item {Id}; aborting to protect tracking rows", whitelistedId);
-            throw;
-        }
+        var rootPage = await GetApiClient().Items.GetAsync(
+            config =>
+            {
+                config.QueryParameters.Ids = new Guid?[] { whitelistedId };
+                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+            },
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        rootItem = rootPage?.Items?.FirstOrDefault();
 
         // An entry gone from the source fails, so its files are not read as removed.
         if (rootItem == null || !rootItem.Id.HasValue)
@@ -124,29 +110,16 @@ public partial class SourceServerClient
                 async (startIndex, pageSize, ct) =>
                 {
                     // Every failure rethrows, since a list cut short would read as files removed.
-                    try
-                    {
-                        return await client.Items.GetAsync(
-                            config =>
-                            {
-                                config.QueryParameters.ParentId = parentId;
-                                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                                config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
-                                config.QueryParameters.StartIndex = startIndex;
-                                config.QueryParameters.Limit = pageSize;
-                            },
-                            cancellationToken: ct).ConfigureAwait(false);
-                    }
-                    catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-                    {
-                        _logger.LogWarning(ex, "Source server {Status} listing whitelist children of {ParentId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, parentId);
-                        throw;
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        _logger.LogWarning(ex, "Whitelist: failed to fetch children of {ParentId}; aborting to protect tracking rows", parentId);
-                        throw;
-                    }
+                    return await client.Items.GetAsync(
+                        config =>
+                        {
+                            config.QueryParameters.ParentId = parentId;
+                            config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                            config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
+                            config.QueryParameters.StartIndex = startIndex;
+                            config.QueryParameters.Limit = pageSize;
+                        },
+                        cancellationToken: ct).ConfigureAwait(false);
                 },
                 1000,
                 child =>
@@ -221,12 +194,7 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} getting items from library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not Microsoft.Kiota.Abstractions.ApiException { ResponseStatusCode: >= 400 })
         {
             _logger.LogError(ex, "Failed to get items from library {LibraryId}", libraryId);
             return null;
@@ -287,28 +255,15 @@ public partial class SourceServerClient
         await PageThroughAsync(
             async (startIndex, pageSize, ct) =>
             {
-                try
-                {
-                    return await client.Playlists[playlistId].Items.GetAsync(
-                        config =>
-                        {
-                            config.QueryParameters.UserId = userId;
-                            config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                            config.QueryParameters.StartIndex = startIndex;
-                            config.QueryParameters.Limit = pageSize;
-                        },
-                        cancellationToken: ct).ConfigureAwait(false);
-                }
-                catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-                {
-                    _logger.LogWarning(ex, "Source server {Status} listing playlist {Id} members. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, playlistId);
-                    throw;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogWarning(ex, "Playlist: failed to fetch members of {Id}; aborting to protect tracking rows", playlistId);
-                    throw;
-                }
+                return await client.Playlists[playlistId].Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.UserId = userId;
+                        config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                        config.QueryParameters.StartIndex = startIndex;
+                        config.QueryParameters.Limit = pageSize;
+                    },
+                    cancellationToken: ct).ConfigureAwait(false);
             },
             1000,
             item =>
@@ -456,12 +411,7 @@ public partial class SourceServerClient
 
             return result?.TotalRecordCount ?? 0;
         }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} getting item count for library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not Microsoft.Kiota.Abstractions.ApiException { ResponseStatusCode: >= 400 })
         {
             _logger.LogWarning(ex, "Failed to get item count for library {LibraryId}", libraryId);
             return 0;
@@ -508,14 +458,8 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        catch (Exception ex) when (ex is not OperationCanceledException and not Microsoft.Kiota.Abstractions.ApiException { ResponseStatusCode: >= 400 })
         {
-            _logger.LogWarning(ex, "Source server {Status} getting item paths from library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "Failed to get item paths from library {LibraryId} at index {Index}. Aborting refresh to protect tracking rows", libraryId, startIndex);
             throw new InvalidOperationException($"Failed to get item paths from library {libraryId} at index {startIndex}: {ex.Message}", ex);
         }
 
@@ -551,32 +495,19 @@ public partial class SourceServerClient
             cancellationToken.ThrowIfCancellationRequested();
             var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
 
-            try
-            {
-                var client = GetApiClient();
-                var response = await client.Items.GetAsync(
-                    config =>
-                    {
-                        config.QueryParameters.Ids = chunk;
-                        config.QueryParameters.Fields = fields;
-                    },
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                if (response?.Items != null)
+            var client = GetApiClient();
+            var response = await client.Items.GetAsync(
+                config =>
                 {
-                    await ApplyPeerLinksAsync(response.Items, cancellationToken).ConfigureAwait(false);
-                    result.AddRange(response.Items);
-                }
-            }
-            catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+                    config.QueryParameters.Ids = chunk;
+                    config.QueryParameters.Fields = fields;
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            if (response?.Items != null)
             {
-                _logger.LogWarning(ex, "Source server {Status} fetching items batch at index {Index}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, i);
-                throw;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}. Aborting refresh to protect tracking rows", i);
-                throw;
+                await ApplyPeerLinksAsync(response.Items, cancellationToken).ConfigureAwait(false);
+                result.AddRange(response.Items);
             }
         }
 
@@ -676,7 +607,6 @@ public partial class SourceServerClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Failed to download item {ItemId}", itemId);
             throw new InvalidOperationException(
                 $"Source download failed for item {itemId}: {ex.GetType().Name}: {ex.Message}",
                 ex);
@@ -743,7 +673,7 @@ public partial class SourceServerClient
 
         if (skippedNonSubtitle > 0)
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Item {ItemId} has {Count} external non-subtitle stream(s) (e.g. audio) that cannot be downloaded via the API. Skipping",
                 itemId, skippedNonSubtitle);
         }
@@ -790,7 +720,7 @@ public partial class SourceServerClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Failed to download companion subtitle {FilePath} (stream {Index}) for {ItemId}", FormatUtilities.SanitizeForLog(companion.SourcePath), companion.StreamIndex, itemId);
+            _logger.LogWarning(ex, "Failed to download companion subtitle {FilePath} (stream {Index}) for {ItemId}", FormatUtilities.SanitizeForLog(companion.SourcePath), companion.StreamIndex, itemId);
             return null;
         }
         finally

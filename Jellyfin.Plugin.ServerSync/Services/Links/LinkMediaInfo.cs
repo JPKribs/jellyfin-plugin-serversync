@@ -229,7 +229,7 @@ public sealed class LinkMediaInfo
             await TakeTrickplayAsync(stores.Trickplay, client!, video, description, cancellationToken).ConfigureAwait(false);
         }
 
-        _logger.LogInformation("Took the media info for the link {Path} from its source", FormatUtilities.SanitizeForLog(video.Path));
+        _logger.LogDebug("Took the media info for the link {Path} from its source", FormatUtilities.SanitizeForLog(video.Path));
         return true;
     }
 

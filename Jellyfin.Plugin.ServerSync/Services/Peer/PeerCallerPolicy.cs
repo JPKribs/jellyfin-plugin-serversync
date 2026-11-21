@@ -269,7 +269,7 @@ public sealed class PeerCallerPolicy
         }
         catch (Exception ex) when (ex is SocketException or ArgumentException)
         {
-            _logger.LogError("Could not look up the whitelist entry '{Host}': {Reason}", FormatUtilities.SanitizeForLog(host), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogError(ex, "Could not look up the whitelist entry '{Host}'", FormatUtilities.SanitizeForLog(host));
             var stale = known ? cached.Addresses : Array.Empty<IPAddress>();
             _resolved[host] = (DateTime.UtcNow, stale);
             return stale;

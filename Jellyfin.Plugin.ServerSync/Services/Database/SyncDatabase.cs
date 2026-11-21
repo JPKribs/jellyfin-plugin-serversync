@@ -310,7 +310,7 @@ public class SyncDatabase : IDisposable
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning(ex, "Failed to delete file {FilePath}", filePath);
+                _logger.LogDebug(ex, "Could not delete {FilePath}", filePath);
                 throw;
             }
         }
@@ -390,7 +390,7 @@ public class SyncDatabase : IDisposable
             catch (Exception recreateEx)
             {
                 // Any failure here must close the connection and surface as one error.
-                _logger.LogError(recreateEx, "Failed to recreate database");
+                _logger.LogDebug(recreateEx, "Could not recreate the sync database");
                 CloseConnection();
                 throw new InvalidOperationException("Unable to initialize or recover sync database", recreateEx);
             }
@@ -400,7 +400,7 @@ public class SyncDatabase : IDisposable
             // Logged once, since every later use fails the same way.
             if (System.Threading.Interlocked.Exchange(ref _tooOldReported, 1) == 0)
             {
-                _logger.LogError("{Message}", ex.Message);
+                _logger.LogError(ex, "Sync database is too old for this release to read");
             }
 
             CloseConnection();
@@ -475,7 +475,7 @@ public class SyncDatabase : IDisposable
         }
         catch (Exception ex) when (ex is SqliteException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            _logger.LogError(ex, "Failed to open database connection to {DbPath}", _dbPath);
+            _logger.LogDebug(ex, "Could not open the sync database at {DbPath}", _dbPath);
             throw new InvalidOperationException($"Unable to open database connection: {ex.Message}", ex);
         }
     }

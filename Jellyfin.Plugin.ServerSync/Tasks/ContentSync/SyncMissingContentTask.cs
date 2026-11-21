@@ -284,7 +284,7 @@ public class SyncMissingContentTask
         var staleCount = ActiveDownloadTracker.CleanupStaleEntries();
         if (staleCount > 0)
         {
-            Logger.LogInformation("Cleaned up {Count} stale download entries", staleCount);
+            Logger.LogDebug("Cleaned up {Count} stale download entries", staleCount);
         }
 
         _tempPath = ConfigManager.GetTempDownloadPath();
@@ -510,12 +510,12 @@ public class SyncMissingContentTask
         {
             if (_linkCache is not null && await Task.Run(() => _linkCache.Adopt(record.SourceItemId, copyPath, record.SourceSize), cancellationToken).ConfigureAwait(false))
             {
-                Logger.LogInformation("{File} is a link again, and its copy moved into the link cache", FormatUtilities.SanitizeForLog(name));
+                Logger.LogDebug("{File} is a link again, and its copy moved into the link cache", FormatUtilities.SanitizeForLog(name));
             }
             else
             {
                 File.Delete(copyPath);
-                Logger.LogInformation("{File} is a link again, and its copy was removed, since the link cache could not take it", FormatUtilities.SanitizeForLog(name));
+                Logger.LogDebug("{File} is a link again, and its copy was removed, since the link cache could not take it", FormatUtilities.SanitizeForLog(name));
             }
 
             _changedFiles.Enqueue(copyPath);
@@ -578,7 +578,7 @@ public class SyncMissingContentTask
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            Logger.LogWarning("Wrote the link {Path} without an .nfo: {Reason}", FormatUtilities.SanitizeForLog(record.LocalPath), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            Logger.LogWarning(ex, "Wrote the link {Path} without an .nfo", FormatUtilities.SanitizeForLog(record.LocalPath));
         }
     }
 
@@ -618,7 +618,7 @@ public class SyncMissingContentTask
             ActiveDownloadTracker.CompleteDownload(record.SourceItemId);
         }
 
-        Logger.LogInformation("Moved {FileName} from the link cache into the library", FormatUtilities.SanitizeForLog(Path.GetFileName(record.LocalPath)));
+        Logger.LogDebug("Moved {FileName} from the link cache into the library", FormatUtilities.SanitizeForLog(Path.GetFileName(record.LocalPath)));
         Interlocked.Increment(ref _successCount);
         _changedFiles.Enqueue(record.LocalPath);
         return true;
@@ -706,13 +706,11 @@ public class SyncMissingContentTask
                 await RetireReplacedCopiesAsync(record, source, cancellationToken).ConfigureAwait(false);
                 Interlocked.Increment(ref _successCount);
                 _changedFiles.Enqueue(record.LocalPath);
-                Logger.LogInformation("DOWNLOADED: {FileName} ({Size}) -> {LocalPath}", FormatUtilities.SanitizeForLog(fileName), fileSize, FormatUtilities.SanitizeForLog(record.LocalPath));
+                Logger.LogDebug("Downloaded {FileName} ({Size}) to {LocalPath}", FormatUtilities.SanitizeForLog(fileName), fileSize, FormatUtilities.SanitizeForLog(record.LocalPath));
             }
             else
             {
                 breaker.RecordFailure(result.ErrorMessage);
-                Logger.LogError("FAILED: {FileName} ({Size}) - {Error}. Source: {SourcePath}",
-                    FormatUtilities.SanitizeForLog(fileName), fileSize, FormatUtilities.SanitizeForLog(result.ErrorMessage, 300), FormatUtilities.SanitizeForLog(record.SourcePath));
                 throw new InvalidOperationException(
                     $"Download failed for {fileName} ({fileSize}): {result.ErrorMessage ?? "unknown error"} (source: {record.SourcePath ?? record.SourceItemId})");
             }
@@ -776,7 +774,7 @@ public class SyncMissingContentTask
 
             if (SyncStateService.ProcessMissingItem(TypedManager, old, config.DeletionApproval, Logger).Changed)
             {
-                Logger.LogInformation("{Old} was replaced on '{Server}' by {New}, so the old copy follows Removed files now", FormatUtilities.SanitizeForLog(Path.GetFileName(old.LocalPath)), source.Name, FormatUtilities.SanitizeForLog(Path.GetFileName(record.LocalPath)));
+                Logger.LogDebug("{Old} was replaced on '{Server}' by {New}, so the old copy follows Removed files now", FormatUtilities.SanitizeForLog(Path.GetFileName(old.LocalPath)), source.Name, FormatUtilities.SanitizeForLog(Path.GetFileName(record.LocalPath)));
             }
         }
     }
@@ -860,7 +858,7 @@ public class SyncMissingContentTask
         {
             try
             {
-                Logger.LogInformation("Triggering library refresh");
+                Logger.LogDebug("Triggering library refresh");
                 var refreshProgress = new Progress<double>(p =>
                     progress.Report(10 + (85.0 * Math.Clamp(p, 0, 100) / 100.0)));
                 await _libraryManager.ValidateMediaLibrary(refreshProgress, cancellationToken).ConfigureAwait(false);

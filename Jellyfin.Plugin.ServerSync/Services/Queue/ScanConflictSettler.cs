@@ -149,7 +149,7 @@ public sealed class ScanConflictSettler
 
             if (kept > 0)
             {
-                logger.LogInformation("Kept {Count} local {Kind} value(s) that are newer than '{Peer}'", kept, kind, FormatUtilities.SanitizeForLog(source.Name));
+                logger.LogDebug("Kept {Count} local {Kind} value(s) that are newer than '{Peer}'", kept, kind, FormatUtilities.SanitizeForLog(source.Name));
             }
         }
     }

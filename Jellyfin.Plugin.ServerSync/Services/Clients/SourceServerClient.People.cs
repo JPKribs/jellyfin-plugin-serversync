@@ -41,23 +41,10 @@ public partial class SourceServerClient
     public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var paged = await GetPersonPagesAsync(cancellationToken).ConfigureAwait(false);
-            return paged.Count > 0
-                ? await KeepOnePersonForEachNameAsync(paged, cancellationToken).ConfigureAwait(false)
-                : await GetPersonsUnpagedAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} bulk-fetching Persons. Aborting refresh to protect tracking rows", ex.ResponseStatusCode);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server. Aborting refresh to protect tracking rows");
-            throw;
-        }
+        var paged = await GetPersonPagesAsync(cancellationToken).ConfigureAwait(false);
+        return paged.Count > 0
+            ? await KeepOnePersonForEachNameAsync(paged, cancellationToken).ConfigureAwait(false)
+            : await GetPersonsUnpagedAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

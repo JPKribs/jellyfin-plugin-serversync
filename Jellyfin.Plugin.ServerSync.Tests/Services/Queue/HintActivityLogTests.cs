@@ -1,5 +1,9 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
+using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using Xunit;
@@ -50,5 +54,66 @@ public class HintActivityLogTests
         Assert.Equal("Only A (2021)", ItemTitles.TitleOf(movie));
         Assert.Equal("Metadata for Only A (2021)", HintActivityLog.SubjectOf(HintKind.Metadata, ItemTitles.LineOf(movie), null));
         Assert.Equal("Watch history for Only A (2021) (viewer)", HintActivityLog.SubjectOf(HintKind.History, ItemTitles.LineOf(movie), "viewer"));
+    }
+
+    /// <summary>
+    /// Applied changes from peers are written as one entry with a generic name and the count and servers in the overview.
+    /// True: "Items synced" with "Synced 3 items from source-a (2) and source-b".
+    /// False: the name would carry the count, or the overview list "source-b (1)".
+    /// </summary>
+    /// <returns>A task that ends when the test does.</returns>
+    [Fact]
+    public async Task Applied_WritesOneGenericEntry()
+    {
+        using var harness = new HintActivityHarness();
+        var hint = new InboundHint { Kind = HintKind.Metadata, Key = "k" };
+
+        await harness.Log.AppliedAsync(hint, "source-a");
+        await harness.Log.AppliedAsync(hint, "source-a");
+        await harness.Log.AppliedAsync(hint, "source-b");
+        harness.Log.Flush();
+
+        Assert.Equal(("Items synced", "Synced 3 items from source-a (2) and source-b"), Assert.Single(harness.Entries));
+    }
+
+    /// <summary>
+    /// Dropped changes name the server and the reasons once each.
+    /// True: "Item not synced" with "Did not sync 1 item from source-a: filtered out".
+    /// False: the overview would repeat a count of 1 in brackets.
+    /// </summary>
+    /// <returns>A task that ends when the test does.</returns>
+    [Fact]
+    public async Task Dropped_NamesTheServerAndReason()
+    {
+        using var harness = new HintActivityHarness();
+
+        await harness.Log.DroppedAsync(new InboundHint { Kind = HintKind.Metadata, Key = "k" }, "source-a", HintCode.Filtered);
+        harness.Log.Flush();
+
+        Assert.Equal(("Item not synced", "Did not sync 1 item from source-a: filtered out"), Assert.Single(harness.Entries));
+    }
+
+    /// <summary>
+    /// A server's own events keep the server out of the name and say each fact once in the overview.
+    /// True: "Changes rejected" with "Marked 2 changes failed, since source-b rejected the request as malformed".
+    /// False: the name would hold the server, or the overview the peer's raw response.
+    /// </summary>
+    /// <returns>A task that ends when the test does.</returns>
+    [Fact]
+    public async Task PeerEvents_HaveGenericNames()
+    {
+        using var harness = new HintActivityHarness();
+        var rows = new List<OutboundHint> { new() { Kind = HintKind.Metadata, Key = "a" }, new() { Kind = HintKind.Metadata, Key = "b" } };
+
+        await harness.Log.RejectedBatchAsync("source-b", rows);
+        await harness.Log.ResentAsync("source-b", rows.GetRange(0, 1));
+        await harness.Log.PausedAsync("source-b", "the peer refused this server's key", Array.Empty<OutboundHint>(), DateTime.UtcNow);
+
+        var entries = harness.Entries;
+        Assert.Equal(("Changes rejected", "Marked 2 changes failed, since source-b rejected the request as malformed"), entries[0]);
+        Assert.Equal(("Changes resent", "Resent 1 change that source-b lost before finishing"), entries[1]);
+        Assert.Equal("Changes paused", entries[2].Name);
+        Assert.StartsWith("Paused changes to source-b until ", entries[2].Overview, StringComparison.Ordinal);
+        Assert.EndsWith(" because the peer refused this server's key", entries[2].Overview, StringComparison.Ordinal);
     }
 }

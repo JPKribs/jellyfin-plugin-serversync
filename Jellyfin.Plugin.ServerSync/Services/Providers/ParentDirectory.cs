@@ -165,7 +165,7 @@ public sealed class ParentDirectory
         // A faulted probe would be remembered, so every failure counts as unreachable.
         catch (Exception ex)
         {
-            _logger.LogInformation("Server Sync will not ask '{Server}' for metadata for now: it could not be reached ({Error})", FormatUtilities.SanitizeForLog(server.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogInformation(ex, "Server Sync will not ask \'{Server}\' for metadata for now, since it could not be reached", FormatUtilities.SanitizeForLog(server.DisplayName));
             return false;
         }
     }

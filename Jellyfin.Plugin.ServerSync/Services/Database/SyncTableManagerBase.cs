@@ -683,7 +683,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == SqliteCorrupt)
         {
-            Logger.LogError(ex, "Database CORRUPT during read '{Op}' on {Table}", callerName, TableName);
+            Logger.LogError(ex, "Sync database is corrupt, so read '{Op}' on {Table} failed", callerName, TableName);
             return fallback;
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("connection", StringComparison.OrdinalIgnoreCase))
@@ -712,7 +712,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         }
         catch (SqliteException ex)
         {
-            Logger.LogError(ex, "Write '{Op}' on {Table} failed with SQLite error {Code}", callerName, TableName, ex.SqliteErrorCode);
+            Logger.LogDebug(ex, "Write '{Op}' on {Table} failed with SQLite error {Code}", callerName, TableName, ex.SqliteErrorCode);
             throw;
         }
     }

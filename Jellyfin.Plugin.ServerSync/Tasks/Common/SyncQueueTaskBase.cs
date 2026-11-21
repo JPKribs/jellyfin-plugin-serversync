@@ -455,7 +455,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <summary>Runs the task and disposes every connected source on every way out, so no client outlives the run.</summary>
     private async Task ExecuteCoreAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("Starting {Task}", Name);
+        Logger.LogDebug("Starting {Task}", Name);
         progress.Report(0);
 
         try
@@ -495,7 +495,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         var queued = all.Where(r => SourceFor(r) is not null || AppliesWithoutSource(r) || (string.IsNullOrEmpty(r.ServerKey) && !hasPullServers)).ToList();
         if (queued.Count < all.Count)
         {
-            Logger.LogInformation("{Task}: leaving {Count} queued row(s) whose server is not configured or did not connect this run", Name, all.Count - queued.Count);
+            Logger.LogDebug("{Task}: leaving {Count} queued row(s) whose server is not configured or did not connect this run", Name, all.Count - queued.Count);
         }
 
         var successes = 0;
@@ -574,7 +574,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        Logger.LogInformation("{Task}: cancellation requested, stopping queue processing", Name);
+                        Logger.LogDebug("{Task}: cancellation requested, stopping queue processing", Name);
                         break;
                     }
 
@@ -640,7 +640,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    Logger.LogInformation("{Task}: cancellation requested, stopping queue processing", Name);
+                    Logger.LogDebug("{Task}: cancellation requested, stopping queue processing", Name);
                 }
             }
         }

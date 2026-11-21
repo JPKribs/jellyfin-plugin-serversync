@@ -289,7 +289,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     if (row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
                     {
                         _inbound.Remove(row.Id, row.VersionTimestamp);
-                        _logger.LogInformation("Dropped a change from server {Origin}, which is not set up as a Pull or Sync server here", FormatUtilities.SanitizeForLog(row.OriginServerId));
+                        _logger.LogWarning("Dropped a change from server {Origin}, which is not set up as a Pull or Sync server here", FormatUtilities.SanitizeForLog(row.OriginServerId));
                         continue;
                     }
 
@@ -302,7 +302,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     if (row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
                     {
                         _inbound.Remove(row.Id, row.VersionTimestamp);
-                        _logger.LogInformation("Dropped a change from '{Origin}', whose address here is not valid: {Error}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(clientError, 300));
+                        _logger.LogWarning("Dropped a change from '{Origin}', whose address here is not valid: {Error}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(clientError, 300));
                         continue;
                     }
 
@@ -341,7 +341,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
 
             foreach (var (origin, count) in neverArrived.Values)
             {
-                _logger.LogInformation("Item never arrived; dropped {Count} hint(s) from '{Origin}'", count, FormatUtilities.SanitizeForLog(origin.DisplayName));
+                _logger.LogDebug("Item never arrived; dropped {Count} hint(s) from '{Origin}'", count, FormatUtilities.SanitizeForLog(origin.DisplayName));
             }
 
             foreach (var (origin, done) in completions.Values)
@@ -433,7 +433,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         catch (Tasks.Common.ModuleBusyException ex)
         {
             _inbound.Postpone(row, DateTime.UtcNow + TimeSpan.FromMinutes(1), ex.Message);
-            _logger.LogDebug("Hint {Hint} from '{Origin}' waits: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogDebug(ex, "Hint {Hint} from '{Origin}' waits", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName));
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -480,12 +480,20 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         {
             case HintApplyOutcome.Retry:
                 _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), result.Reason ?? "failed");
-                _logger.LogWarning("Hint {Hint} from '{Origin}' will be retried: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(result.Reason, 300));
+                _logger.LogDebug("Hint {Hint} from '{Origin}' will be retried: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(result.Reason, 300));
                 await _activity.RetryingAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
                 return null;
 
             case HintApplyOutcome.Dropped:
-                _logger.LogInformation("Hint {Hint} from '{Origin}' dropped as {Code}: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), result.Code, FormatUtilities.SanitizeForLog(result.Reason, 300));
+                if (result.Code == HintCode.GaveUp)
+                {
+                    _logger.LogWarning("Gave up on hint {Hint} from '{Origin}': {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(result.Reason, 300));
+                }
+                else
+                {
+                    _logger.LogDebug("Hint {Hint} from '{Origin}' dropped as {Code}: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), result.Code, FormatUtilities.SanitizeForLog(result.Reason, 300));
+                }
+
                 if (row.Attempts > 0)
                 {
                     await _activity.DroppedAsync(row, origin.DisplayName, result.Code).ConfigureAwait(false);
@@ -582,7 +590,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             // A standard user's API Key cannot reach the route, so the origin reads status.
             if (!await client.CompleteHintsAsync(request, cancellationToken).ConfigureAwait(false))
             {
-                _logger.LogInformation("Could not tell '{Origin}' that {Count} hint(s) are complete. It will read them from this server's status", FormatUtilities.SanitizeForLog(origin.DisplayName), done.Count);
+                _logger.LogDebug("Could not tell '{Origin}' that {Count} hint(s) are complete. It will read them from this server's status", FormatUtilities.SanitizeForLog(origin.DisplayName), done.Count);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)

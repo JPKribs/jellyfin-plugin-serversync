@@ -50,7 +50,7 @@ internal static class ScanSources
             }
             catch (ArgumentException ex)
             {
-                logger.LogError("{Task}: server '{Server}' rejected: {Error}", taskName, server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                logger.LogError(ex, "{Task}: server '{Server}' rejected", taskName, server.DisplayName);
                 onUnavailable?.Invoke($"server '{server.DisplayName}' has an invalid URL");
                 continue;
             }

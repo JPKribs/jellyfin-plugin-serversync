@@ -109,12 +109,7 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} fetching user-data items for user {UserId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not Microsoft.Kiota.Abstractions.ApiException { ResponseStatusCode: >= 400 })
         {
             _logger.LogWarning(ex, "Failed to fetch user-data items for user {UserId}", userId);
             return null;
@@ -195,12 +190,7 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
-        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
-        {
-            _logger.LogWarning(ex, "Source server {Status} getting played items for user {UserId} in library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId, libraryId);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not Microsoft.Kiota.Abstractions.ApiException { ResponseStatusCode: >= 400 })
         {
             _logger.LogError(ex, "Failed to get played items for user {UserId} in library {LibraryId}", userId, libraryId);
             return null;

@@ -113,7 +113,7 @@ public sealed class LinkVerifier
                 catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
                 {
                     // A source that is down is not a dead link, so nothing is flagged.
-                    _logger.LogDebug("Could not check links against '{Server}': {Reason}", server.Key, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                    _logger.LogDebug(ex, "Could not check links against '{Server}'", server.Key);
                     break;
                 }
 
@@ -200,7 +200,7 @@ public sealed class LinkVerifier
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogDebug("Could not ask whether {Path} is still on its source: {Reason}", FormatUtilities.SanitizeForLog(row.SourcePath), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogDebug(ex, "Could not ask whether {Path} is still on its source", FormatUtilities.SanitizeForLog(row.SourcePath));
             return false;
         }
     }
@@ -231,7 +231,7 @@ public sealed class LinkVerifier
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogDebug("Could not take the media info for {Path} again: {Reason}", FormatUtilities.SanitizeForLog(row.LocalPath), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogDebug(ex, "Could not take the media info for {Path} again", FormatUtilities.SanitizeForLog(row.LocalPath));
             return false;
         }
     }
@@ -270,7 +270,7 @@ public sealed class LinkVerifier
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
             {
-                _logger.LogDebug("Could not take media info for links: {Reason}", FormatUtilities.SanitizeForLog(ex.Message, 300));
+                _logger.LogDebug(ex, "Could not take media info for links");
                 break;
             }
         }

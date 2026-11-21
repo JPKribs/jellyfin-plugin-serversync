@@ -419,7 +419,7 @@ public class RefreshMetadataSyncTableTask
 
         if (castSince is not null)
         {
-            Logger.LogInformation("{Task}: read the cast of {Count} of {Total} items from '{Server}', since the rest are unchanged since the last scan", Name, castFetches, totalMatched, source.Name);
+            Logger.LogDebug("{Task}: read the cast of {Count} of {Total} items from '{Server}', since the rest are unchanged since the last scan", Name, castFetches, totalMatched, source.Name);
         }
 
         var listed = work.ToList();
@@ -451,7 +451,7 @@ public class RefreshMetadataSyncTableTask
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                Logger.LogWarning("{Task}: could not read media segments from '{Server}', so its files keep the ones their rows held: {Reason}", Name, source.Name, JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(ex.Message, 300));
+                Logger.LogWarning(ex, "{Task}: could not read media segments from '{Server}', so its files keep the ones their rows held", Name, source.Name);
                 return;
             }
 

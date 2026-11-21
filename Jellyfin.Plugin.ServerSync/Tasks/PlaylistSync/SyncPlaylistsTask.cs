@@ -96,7 +96,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         var servers = config.GetPullServers().Where(s => s.GetEnabledUserMappings().Count > 0).ToList();
         if (servers.Count == 0)
         {
-            _logger.LogInformation("{Task}: no server has a user mapping, nothing to mirror", Name);
+            _logger.LogDebug("{Task}: no server has a user mapping, nothing to mirror", Name);
             progress.Report(100);
             return;
         }
@@ -294,7 +294,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
             }
             else
             {
-                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed playlists is set to Keep", Name, source.Name, FormatUtilities.SanitizeForLog(playlist.Name));
+                _logger.LogDebug("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed playlists is set to Keep", Name, source.Name, FormatUtilities.SanitizeForLog(playlist.Name));
             }
 
             _resolver.Record(theirs);

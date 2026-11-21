@@ -144,7 +144,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                     }
                     else
                     {
-                        _logger.LogInformation("Refused to play the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(links[i].Link.LinkPath), FormatUtilities.SanitizeForLog(choices[i].Refusal, 300));
+                        _logger.LogDebug("Refused to play the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(links[i].Link.LinkPath), FormatUtilities.SanitizeForLog(choices[i].Refusal, 300));
                         refused.Add(links[i].VersionId);
                     }
                 }
@@ -174,7 +174,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             else if (userId is not { } streaming || !_grants.Refresh(links[0].Link.LinkId, streaming))
             {
                 // A stream nobody asked to play would read the link as whoever last did.
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "Refused a {Controller} request for the link {Path}, since {Who} holds no permission to play it",
                     controller,
                     FormatUtilities.SanitizeForLog(links[0].Link.LinkPath),

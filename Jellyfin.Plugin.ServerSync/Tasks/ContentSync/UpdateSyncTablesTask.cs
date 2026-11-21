@@ -288,7 +288,7 @@ public class UpdateSyncTablesTask
 
         if (settled > 0)
         {
-            Logger.LogInformation("{Task}: settled {Count} row(s) for files their server says it removed", Name, settled);
+            Logger.LogDebug("{Task}: settled {Count} row(s) for files their server says it removed", Name, settled);
         }
 
         return settled;
@@ -403,7 +403,7 @@ public class UpdateSyncTablesTask
 
         if (kept.Count < items.Count)
         {
-            Logger.LogInformation("{Task}: {Count} file(s) offered by a server that was given them were left to the server they first came from", Name, items.Count - kept.Count);
+            Logger.LogDebug("{Task}: {Count} file(s) offered by a server that was given them were left to the server they first came from", Name, items.Count - kept.Count);
         }
 
         return kept;
@@ -465,7 +465,7 @@ public class UpdateSyncTablesTask
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            Logger.LogWarning("{Task}: could not ask '{Server}' whether it offers links, so files new to a Link mapping wait: {Reason}", Name, source.Name, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            Logger.LogWarning(ex, "{Task}: could not ask '{Server}' whether it offers links, so files new to a Link mapping wait", Name, source.Name);
         }
 
         return false;
@@ -626,14 +626,14 @@ public class UpdateSyncTablesTask
                 if (droppedIds > 0)
                 {
                     Logger.LogWarning(
-                        "{Library} whitelist has {Count} unparseable ID(s), those entries will not sync until corrected.",
+                        "{Library} whitelist has {Count} unparseable ID(s), those entries will not sync until corrected",
                         mapping.SourceLibraryName, droppedIds);
                 }
 
                 if (ids.Count == 0)
                 {
-                    Logger.LogInformation(
-                        "{Library} is in whitelist mode but FilteredItems is empty, nothing to fetch.",
+                    Logger.LogDebug(
+                        "{Library} is in whitelist mode but FilteredItems is empty, nothing to fetch",
                         mapping.SourceLibraryName);
                     RecordMappingSeen(source.Key, mapping.SourceLibraryId, -1);
                     continue;
@@ -716,8 +716,8 @@ public class UpdateSyncTablesTask
                         mapping.SourceLibraryName, outsideRoot);
                 }
 
-                Logger.LogInformation(
-                    "{Library} whitelist resolved to {Count} leaf item(s) from {WhitelistCount} whitelisted entry/entries.",
+                Logger.LogDebug(
+                    "{Library} whitelist resolved to {Count} leaf item(s) from {WhitelistCount} whitelisted entry/entries",
                     mapping.SourceLibraryName,
                     collected,
                     ids.Count);
@@ -774,7 +774,7 @@ public class UpdateSyncTablesTask
 
                 if (excludedThisMapping > 0)
                 {
-                    Logger.LogInformation(
+                    Logger.LogDebug(
                         "{Library}: {Count} item(s) excluded via blacklisted collection(s)/playlist(s)",
                         mapping.SourceLibraryName, excludedThisMapping);
                 }
@@ -1258,7 +1258,7 @@ public class UpdateSyncTablesTask
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.LogWarning("Could not remove the .ignore file in {Folder}: {Error}", FormatUtilities.SanitizeForLog(title.Key), FormatUtilities.SanitizeForLog(ex.Message, 300));
+                    Logger.LogWarning(ex, "Could not remove the .ignore file in {Folder}", FormatUtilities.SanitizeForLog(title.Key));
                     continue;
                 }
             }
@@ -1269,7 +1269,7 @@ public class UpdateSyncTablesTask
                 changed++;
             }
 
-            Logger.LogInformation("Showed {Folder} again, {Why}", title.Key.Length > 0 ? FormatUtilities.SanitizeForLog(title.Key) : "a title", why);
+            Logger.LogDebug("Showed {Folder} again, {Why}", title.Key.Length > 0 ? FormatUtilities.SanitizeForLog(title.Key) : "a title", why);
         }
 
         return changed;
@@ -1369,11 +1369,11 @@ public class UpdateSyncTablesTask
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Logger.LogWarning("Could not hide {Folder} with a .ignore file: {Error}", FormatUtilities.SanitizeForLog(title.Key), FormatUtilities.SanitizeForLog(ex.Message, 300));
+                Logger.LogWarning(ex, "Could not hide {Folder} with a .ignore file", FormatUtilities.SanitizeForLog(title.Key));
                 continue;
             }
 
-            Logger.LogInformation("Hid {Folder} with a .ignore file, since everything in it is gone from the source", FormatUtilities.SanitizeForLog(title.Key));
+            Logger.LogDebug("Hid {Folder} with a .ignore file, since everything in it is gone from the source", FormatUtilities.SanitizeForLog(title.Key));
             foreach (var row in title.Where(row => row.Status != SyncStatus.Ignored))
             {
                 if (SyncStateService.MarkHidden(manager, row, Logger).Changed)
@@ -1492,7 +1492,7 @@ public class UpdateSyncTablesTask
 
         if (fileless.Count > 0)
         {
-            Logger.LogInformation("{Task}: dropped {Count} row(s) for items the source no longer has and that hold no file here", Name, fileless.Count);
+            Logger.LogDebug("{Task}: dropped {Count} row(s) for items the source no longer has and that hold no file here", Name, fileless.Count);
         }
 
         if (!deletes && !hide)
@@ -1603,7 +1603,7 @@ public class UpdateSyncTablesTask
             {
                 // Dropping the user would widen the filter, so the whole filter is turned off.
                 Logger.LogWarning(
-                    "Watched-by-all filter disabled: invalid user ID {UserId} in WatchedFilterUserIds. Fix the configuration to re-enable the filter.",
+                    "Watched-by-all filter disabled: invalid user ID {UserId} in WatchedFilterUserIds. Fix the configuration to re-enable the filter",
                     userIdStr);
                 return null;
             }
@@ -1769,7 +1769,7 @@ public class UpdateSyncTablesTask
 
         if (resolved > 0)
         {
-            Logger.LogInformation("Resolved {Count} local item IDs", resolved);
+            Logger.LogDebug("Resolved {Count} local item IDs", resolved);
         }
     }
 }

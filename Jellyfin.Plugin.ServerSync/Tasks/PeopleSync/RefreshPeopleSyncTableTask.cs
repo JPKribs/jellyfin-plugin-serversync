@@ -188,7 +188,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             }
 
             _localPersonsByName = byName;
-            Logger.LogInformation(
+            Logger.LogDebug(
                 "{Task}: enumerated {Count} local persons. Bulk-fetching source persons",
                 Name,
                 _localPersonsByName.Count);
@@ -241,7 +241,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             matched.Add(new PersonWork(source, person));
         }
 
-        Logger.LogInformation(
+        Logger.LogDebug(
             "{Task}: matched {Matched}/{Local} local persons against {SourceTotal} source persons",
             Name,
             matched.Count,

@@ -41,6 +41,13 @@ public sealed class HintActivityHarness : IDisposable
         .Select(call => ((ActivityLog)call.Args[0]!).Type)
         .ToList();
 
+    /// <summary>Gets the names and overviews of the entries written so far, in order.</summary>
+    public List<(string Name, string Overview)> Entries => _manager.Calls
+        .Where(call => call.Name == nameof(IActivityManager.CreateAsync))
+        .Select(call => (ActivityLog)call.Args[0]!)
+        .Select(entry => (entry.Name, entry.ShortOverview ?? string.Empty))
+        .ToList();
+
     /// <inheritdoc/>
     public void Dispose() => Log.Dispose();
 }

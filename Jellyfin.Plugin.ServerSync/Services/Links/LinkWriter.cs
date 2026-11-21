@@ -119,7 +119,7 @@ public sealed class LinkWriter
             _floorRaised = true;
         }
 
-        _logger.LogInformation("LINKED: {FileName} -> {LocalPath}", FormatUtilities.SanitizeForLog(Path.GetFileName(row.SourcePath)), FormatUtilities.SanitizeForLog(path));
+        _logger.LogDebug("Linked {FileName} at {LocalPath}", FormatUtilities.SanitizeForLog(Path.GetFileName(row.SourcePath)), FormatUtilities.SanitizeForLog(path));
     }
 
     /// <summary>
@@ -174,7 +174,7 @@ public sealed class LinkWriter
 
         table.Delete(predecessor.SourceItemId);
         _links.Invalidate();
-        _logger.LogInformation(
+        _logger.LogDebug(
             "The link {LocalPath} now follows {NewFile}, since {OldFile} is gone from the source",
             FormatUtilities.SanitizeForLog(row.LocalPath),
             FormatUtilities.SanitizeForLog(Path.GetFileName(row.SourcePath)),
@@ -191,7 +191,7 @@ public sealed class LinkWriter
         if (File.Exists(path) && LinkFiles.PointsAtLinkRoute(LinkFiles.ReadUrl(path)))
         {
             File.Delete(path);
-            _logger.LogInformation("Removed the link {LocalPath}, now that its copy is in place", FormatUtilities.SanitizeForLog(path));
+            _logger.LogDebug("Removed the link {LocalPath}, now that its copy is in place", FormatUtilities.SanitizeForLog(path));
         }
 
         _links.Invalidate();

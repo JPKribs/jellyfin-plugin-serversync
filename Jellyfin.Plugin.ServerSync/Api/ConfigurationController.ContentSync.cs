@@ -595,14 +595,14 @@ public partial class ConfigurationController
         var failedCount = 0;
         var skippedCount = 0;
 
-        _logger.LogInformation("Starting deletion of {Count} items from local server", request.SourceItemIds.Count);
+        _logger.LogDebug("Starting deletion of {Count} items from local server", request.SourceItemIds.Count);
 
         foreach (var sourceItemId in request.SourceItemIds)
         {
             var item = manager.GetBySourceItemId(sourceItemId);
             if (item == null)
             {
-                _logger.LogWarning("SKIPPED DELETE: Item {SourceItemId} not found in tracking database", SanitizeForLog(sourceItemId));
+                _logger.LogWarning("Did not delete {SourceItemId}, since it is not in the sync table", SanitizeForLog(sourceItemId));
                 skippedCount++;
                 continue;
             }
@@ -614,7 +614,7 @@ public partial class ConfigurationController
             if (!string.IsNullOrEmpty(item.LocalPath) && !FileValidationService.IsPathWithinLibrary(item.LocalPath, config))
             {
                 _logger.LogWarning(
-                    "SKIPPED DELETE: {FileName} - Path is outside configured library directories. Local path: {LocalPath}",
+                    "Did not delete {FileName}, since {LocalPath} is outside every library folder",
                     sanitizedFileName,
                     sanitizedLocalPath);
                 skippedCount++;
@@ -627,7 +627,7 @@ public partial class ConfigurationController
                 if (containingRoot != null && FileValidationService.HasSymlinkedDirectoryComponent(item.LocalPath, containingRoot))
                 {
                     _logger.LogWarning(
-                        "SKIPPED DELETE: {FileName} - Path traverses a symlinked directory. The physical file may live outside the library. Local path: {LocalPath}",
+                        "Did not delete {FileName}, since {LocalPath} passes through a symlinked folder and may live outside the library",
                         sanitizedFileName,
                         sanitizedLocalPath);
                     skippedCount++;
@@ -670,7 +670,7 @@ public partial class ConfigurationController
             if (!fileExists)
             {
                 _logger.LogWarning(
-                    "SKIPPED DELETE: {FileName} - File not found in Jellyfin library or on disk, so the row is kept as Ignored. Source path: {SourcePath}",
+                    "Did not delete {FileName} from {SourcePath}, since it is in neither the library nor on disk, so its row is kept as Ignored",
                     sanitizedFileName,
                     SanitizeForLog(item.SourcePath));
                 KeepAsIgnored(manager, item);
@@ -686,7 +686,7 @@ public partial class ConfigurationController
                 if (targetRoot != null && FileValidationService.HasSymlinkedDirectoryComponent(targetPath, targetRoot))
                 {
                     _logger.LogWarning(
-                        "SKIPPED DELETE: {FileName} - Path traverses a symlinked directory. The physical file may live outside the library. Item path: {ItemPath}",
+                        "Did not delete {FileName}, since {ItemPath} passes through a symlinked folder and may live outside the library",
                         sanitizedFileName,
                         SanitizeForLog(targetPath));
                     skippedCount++;
@@ -699,7 +699,7 @@ public partial class ConfigurationController
             if (result.Success && result.AlreadyGone)
             {
                 _logger.LogInformation(
-                    "DELETE (external): {FileName} - The file was already gone, so only the stale library entry was removed and the row is kept as Ignored. Local path: {LocalPath}",
+                    "Removed the stale library entry for {FileName} at {LocalPath}, since the file was already gone, and kept its row as Ignored",
                     sanitizedFileName,
                     SanitizeForLog(targetPath));
                 KeepAsIgnored(manager, item);
@@ -708,9 +708,9 @@ public partial class ConfigurationController
             else if (result.Success)
             {
                 var useRecyclingBin = config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath);
-                var action = useRecyclingBin ? "RECYCLED" : "DELETED";
-                var suffix = localItem == null ? " (direct)" : string.Empty;
-                _logger.LogInformation("{Action}{Suffix}: {FileName} - Local path: {LocalPath}", action, suffix, sanitizedFileName, sanitizedLocalPath);
+                var action = useRecyclingBin ? "Recycled" : "Deleted";
+                var suffix = localItem == null ? " directly" : string.Empty;
+                _logger.LogInformation("{Action} {FileName} at {LocalPath}{Suffix}", action, sanitizedFileName, sanitizedLocalPath, suffix);
                 KeepAsIgnored(manager, item);
                 deletedCount++;
             }
@@ -722,7 +722,7 @@ public partial class ConfigurationController
                 if (!stillExists)
                 {
                     _logger.LogInformation(
-                        "DELETE (external): {FileName} - File no longer exists after deletion attempt, so the row is kept as Ignored. Local path: {LocalPath}",
+                        "{FileName} at {LocalPath} was gone after the delete, so its row is kept as Ignored",
                         sanitizedFileName,
                         sanitizedLocalPath);
                     KeepAsIgnored(manager, item);
@@ -730,7 +730,7 @@ public partial class ConfigurationController
                 }
                 else
                 {
-                    _logger.LogError("FAILED DELETE: {FileName} - {Error}. Local path: {LocalPath}", sanitizedFileName, SanitizeForLog(result.ErrorMessage), sanitizedLocalPath);
+                    _logger.LogError("Could not delete {FileName} at {LocalPath}: {Error}", sanitizedFileName, sanitizedLocalPath, SanitizeForLog(result.ErrorMessage));
                     failedCount++;
                 }
             }

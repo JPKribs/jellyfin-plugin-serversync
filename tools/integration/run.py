@@ -3220,7 +3220,7 @@ def scenario_file_changes(creds, apis, storage):
             expect(source_id("R") in open(held("R", r_new), encoding="utf-8").read(), "the renamed link streams from the new item")
             expect(not os.path.exists(os.path.splitext(held("R", r_old))[0] + ".nfo"), "the old link's .nfo is gone")
         else:
-            expect(f"DOWNLOADED: {r_new}" not in local_log(since), "the renamed copy is moved, not downloaded")
+            expect(f"Downloaded {r_new}" not in local_log(since), "the renamed copy is moved, not downloaded")
 
         # A new container: the old file is replaced under Changed files, and nothing is left beside it.
         x_target = os.path.join(src["X"], x_new)

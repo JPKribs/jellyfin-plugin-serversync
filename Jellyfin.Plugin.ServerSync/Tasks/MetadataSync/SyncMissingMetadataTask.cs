@@ -601,16 +601,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         var name = FormatUtilities.SanitizeForLog(record.ItemName);
         if (error is not null)
         {
-            Logger.LogError("{Task}: could not update {ItemName}. {Reason}", Name, name, FormatUtilities.SanitizeForLog(error.Message, 500));
-            Logger.LogDebug(error, "{Task}: {ItemName} errored", Name, name);
+            Logger.LogError(error, "{Task}: could not update {ItemName}", Name, name);
         }
         else if (string.IsNullOrEmpty(categories))
         {
-            Logger.LogInformation("{Task}: skipped {ItemName}, nothing to update", Name, name);
+            Logger.LogDebug("{Task}: skipped {ItemName}, nothing to update", Name, name);
         }
         else
         {
-            Logger.LogInformation("{Task}: updated {Categories} for {ItemName}", Name, categories, name);
+            Logger.LogDebug("{Task}: updated {Categories} for {ItemName}", Name, categories, name);
         }
     }
 

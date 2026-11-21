@@ -270,7 +270,7 @@ public static class SyncStateService
         if (localFileExists && item.Kept == KeptReason.Own && !ownLink)
         {
             manager.DeleteByKey(item.SourceItemId);
-            logger.LogInformation("Kept {FileName}: it was on this server before it was matched to a source's file, so the source removing its own leaves it here", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
+            logger.LogDebug("Kept {FileName}: it was on this server before it was matched to a source's file, so the source removing its own leaves it here", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
             return new TransitionResult(true, "Kept, since the file was this server's own");
         }
 
@@ -509,7 +509,7 @@ public static class SyncStateService
             }
 
             MoveCompanionsAlong(companions, oldLocalPath, newLocalPath, logger);
-            logger.LogInformation("Moved {Old} to {New} to follow a rename on the source", FormatUtilities.SanitizeForLog(oldLocalPath), FormatUtilities.SanitizeForLog(newLocalPath));
+            logger.LogDebug("Moved {Old} to {New} to follow a rename on the source", FormatUtilities.SanitizeForLog(oldLocalPath), FormatUtilities.SanitizeForLog(newLocalPath));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {

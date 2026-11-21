@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
 /// Writes the Change queue's events to the Activity page.
-/// Changes from peers are summed into one entry for each outcome, such as "12 items synced", so a busy sync never floods it.
+/// Changes from peers are summed into one entry for each outcome, such as "Items synced", so a busy sync never floods it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HintActivityLog : IDisposable
@@ -44,17 +44,17 @@ public sealed class HintActivityLog : IDisposable
             "ServerSync.HintsApplied",
             TranslationKeys.ActivitySyncedNameOne,
             TranslationKeys.ActivitySyncedNameMany,
-            (t, language) => BaseTranslations.Format(t.Total == 1 ? TranslationKeys.ActivitySyncedOne : TranslationKeys.ActivitySyncedMany, language, CountItems(t.Total, language), ActivityText.CountedList(t.Sources)));
+            (t, language) => BaseTranslations.Format(TranslationKeys.ActivitySynced, language, CountItems(t.Total, language), Counted(t.Sources, language)));
         _notSynced = new ActivityOutcome(
             "ServerSync.HintsDropped",
             TranslationKeys.ActivityNotSyncedNameOne,
             TranslationKeys.ActivityNotSyncedNameMany,
-            (t, language) => BaseTranslations.Format(t.Total == 1 ? TranslationKeys.ActivityNotSyncedOne : TranslationKeys.ActivityNotSyncedMany, language, CountItems(t.Total, language), ActivityText.CountedList(t.Sources), ActivityText.CountedList(t.Reasons)));
+            (t, language) => BaseTranslations.Format(TranslationKeys.ActivityNotSynced, language, CountItems(t.Total, language), Counted(t.Sources, language), Counted(t.Reasons, language)));
         _retrying = new ActivityOutcome(
             "ServerSync.HintsRetrying",
             TranslationKeys.ActivityRetryingNameOne,
             TranslationKeys.ActivityRetryingNameMany,
-            (t, language) => BaseTranslations.Format(TranslationKeys.ActivityRetrying, language, CountItems(t.Total, language), ActivityText.CountedList(t.Sources)),
+            (t, language) => BaseTranslations.Format(TranslationKeys.ActivityRetrying, language, CountItems(t.Total, language), Counted(t.Sources, language)),
             LogLevel.Warning);
     }
 
@@ -142,7 +142,7 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer was applied here, written together with the others as "12 items synced".
+    /// Records that a hint from a peer was applied here, written together with the others as "Items synced".
     /// </summary>
     /// <param name="hint">The hint that was applied.</param>
     /// <param name="originName">The name the entry gives the origin.</param>
@@ -156,7 +156,7 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer was dropped here, written together with the others as "3 items not synced".
+    /// Records that a hint from a peer was dropped here, written together with the others as "Items not synced".
     /// </summary>
     /// <param name="hint">The hint that was dropped.</param>
     /// <param name="originName">The name the entry gives the origin.</param>
@@ -170,7 +170,7 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer keeps failing here, on its second and sixth try, as "4 items retrying".
+    /// Records that a hint from a peer keeps failing here, on its second and sixth try, as "Items not applied yet".
     /// The first failure is often a passing one, so it writes nothing.
     /// </summary>
     /// <param name="hint">The hint that failed, whose attempts decide whether to write.</param>
@@ -199,10 +199,10 @@ public sealed class HintActivityLog : IDisposable
         ArgumentNullException.ThrowIfNull(waiting);
         var at = until.ToLocalTime().ToString("t", System.Globalization.CultureInfo.CurrentCulture);
         var overview = waiting.Count == 0
-            ? Text(TranslationKeys.ActivityPausedOverview, ActivityText.Sentence(reason), peerName, at)
-            : Text(TranslationKeys.ActivityPausedWaiting, ActivityText.Sentence(reason), peerName, at, CountChanges(waiting.Count, Language));
+            ? Text(TranslationKeys.ActivityPausedOverview, peerName, at, reason)
+            : Text(TranslationKeys.ActivityPausedWaiting, peerName, at, reason, CountChanges(waiting.Count, Language));
         return WriteAsync(
-            Text(TranslationKeys.ActivityPausedName, peerName),
+            Text(TranslationKeys.ActivityPausedName),
             "ServerSync.PeerPaused",
             overview,
             LogLevel.Warning);
@@ -211,15 +211,14 @@ public sealed class HintActivityLog : IDisposable
     /// <summary>Records that a peer rejected a whole request, once for the batch.</summary>
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="rows">The hints the request carried.</param>
-    /// <param name="reason">Why the peer could not read the request.</param>
     /// <returns>A task that ends when the entry is written.</returns>
-    public Task RejectedBatchAsync(string peerName, IReadOnlyList<OutboundHint> rows, string reason)
+    public Task RejectedBatchAsync(string peerName, IReadOnlyList<OutboundHint> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
-            Text(TranslationKeys.ActivityRejectedName, peerName),
+            Text(TranslationKeys.ActivityRejectedName),
             "ServerSync.HintRejected",
-            Text(TranslationKeys.ActivityRejectedOverview, peerName, CountChanges(rows.Count, Language), reason),
+            Text(TranslationKeys.ActivityRejectedOverview, peerName, CountChanges(rows.Count, Language)),
             LogLevel.Error);
     }
 
@@ -231,9 +230,9 @@ public sealed class HintActivityLog : IDisposable
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
-            Text(TranslationKeys.ActivityResentName, peerName),
+            Text(TranslationKeys.ActivityResentName),
             "ServerSync.HintResent",
-            Text(rows.Count == 1 ? TranslationKeys.ActivityResentOne : TranslationKeys.ActivityResentMany, CountChanges(rows.Count, Language), peerName),
+            Text(TranslationKeys.ActivityResent, CountChanges(rows.Count, Language), peerName),
             LogLevel.Warning);
     }
 
@@ -264,6 +263,30 @@ public sealed class HintActivityLog : IDisposable
             _ => TranslationKeys.ReasonCouldNotApply
         },
         language);
+
+    /// <summary>Lists names with their counts, the largest first, such as "source-a (9) and source-b". A count of 1 is left out, and so is the count of a single name.</summary>
+    /// <param name="counts">The counts by name. A count of zero or less is left out, and equal counts sort by name.</param>
+    /// <param name="language">The language, or <c>null</c> for US English.</param>
+    /// <returns>The list, or an empty string when there is nothing to list.</returns>
+    public static string Counted(IReadOnlyDictionary<string, int> counts, string? language = null)
+    {
+        ArgumentNullException.ThrowIfNull(counts);
+        var listed = counts
+            .Where(p => p.Value > 0)
+            .OrderByDescending(p => p.Value)
+            .ThenBy(p => p.Key, StringComparer.Ordinal)
+            .ToList();
+        var names = listed
+            .Select(p => listed.Count == 1 || p.Value == 1 ? p.Key : string.Create(CultureInfo.InvariantCulture, $"{p.Key} ({p.Value})"))
+            .ToList();
+        return names.Count switch
+        {
+            0 => string.Empty,
+            1 => names[0],
+            2 => BaseTranslations.Format(TranslationKeys.ListTwo, language, names[0], names[1]),
+            _ => BaseTranslations.Format(TranslationKeys.ListLast, language, string.Join(", ", names.GetRange(0, names.Count - 1)), names[^1])
+        };
+    }
 
     /// <summary>Lists the subjects of some changes in a sentence, naming at most a few and counting the rest.</summary>
     /// <param name="rows">The changes whose subjects are listed.</param>

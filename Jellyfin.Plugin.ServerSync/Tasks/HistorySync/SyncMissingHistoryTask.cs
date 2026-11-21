@@ -152,7 +152,7 @@ public class SyncMissingHistoryTask
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
                 _oneWay.Add(source.Key);
-                Logger.LogWarning("{Task}: Server Sync on '{Server}' refused this server's key ({Reason}), so it cannot be asked to negotiate. History from it is applied one way. Add this server or its user to the whitelist there", Name, source.Name, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                Logger.LogWarning(ex, "{Task}: Server Sync on '{Server}' refused this server's key, so it cannot be asked to negotiate. History from it is applied one way. Add this server or its user to the whitelist there", Name, source.Name);
                 continue;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -173,7 +173,7 @@ public class SyncMissingHistoryTask
                 continue;
             }
 
-            Logger.LogInformation("{Task}: negotiating history with Server Sync {Version} on '{Server}'", Name, FormatUtilities.SanitizeForLog(capabilities.PluginVersion), source.Name);
+            Logger.LogDebug("{Task}: negotiating history with Server Sync {Version} on '{Server}'", Name, FormatUtilities.SanitizeForLog(capabilities.PluginVersion), source.Name);
         }
 
         if (_negotiationBlocked.Count == Sources.Count)
@@ -290,7 +290,7 @@ public class SyncMissingHistoryTask
         var step = PeerHistoryNegotiator.ResolveOutcome(record, answer, allowRetry: true);
         if (step.Action == NegotiationAction.Retry)
         {
-            Logger.LogInformation("Source state for {ItemName} changed since refresh, merging again", FormatUtilities.SanitizeForLog(record.ItemName));
+            Logger.LogDebug("Source state for {ItemName} changed since refresh, merging again", FormatUtilities.SanitizeForLog(record.ItemName));
             answer = await OfferAloneAsync(record, cancellationToken).ConfigureAwait(false);
             step = PeerHistoryNegotiator.ResolveOutcome(record, answer, allowRetry: false);
         }
@@ -370,7 +370,7 @@ public class SyncMissingHistoryTask
             throw new InvalidOperationException(reason ?? "verification failed");
         }
 
-        Logger.LogInformation("Apply History verified for {ItemName}: {Changes}{Peer}",
+        Logger.LogDebug("Apply History verified for {ItemName}: {Changes}{Peer}",
             FormatUtilities.SanitizeForLog(record.ItemName),
             HistorySyncMergeService.GetChangeSummary(record),
             NegotiatesFor(record) ? " (source updated as well)" : string.Empty);

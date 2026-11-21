@@ -105,7 +105,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
 
         if (modules.Count == 0)
         {
-            _logger.LogInformation("{Task}: no information module is enabled, nothing to do", Name);
+            _logger.LogDebug("{Task}: no information module is enabled, nothing to do", Name);
             progress.Report(100);
             return;
         }
@@ -154,7 +154,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
         {
             var task = create();
             stepName = task.Name;
-            _logger.LogInformation("{Task}: running {Step}", Name, stepName);
+            _logger.LogDebug("{Task}: running {Step}", Name, stepName);
             await task.ExecuteAsync(new Progress<double>(p => progress.Report(offset + (share * Math.Clamp(p, 0, 100) / 100.0))), cancellationToken).ConfigureAwait(false);
             return true;
         }

@@ -80,7 +80,7 @@ public class CleanupTempFilesTask : IScheduledTask
         if (RecyclingBinService.OverlapsLibraryRoot(tempPath, config))
         {
             _logger.LogError(
-                "Temp download path {Path} overlaps a configured library root, cleanup would delete media files. Skipping cleanup until the path is corrected.",
+                "Temp download path {Path} overlaps a configured library root, cleanup would delete media files. Skipping cleanup until the path is corrected",
                 tempPath);
             return Task.CompletedTask;
         }

@@ -150,17 +150,17 @@ public class SyncMissingUserTask
         {
             case UserPropertyCategory.Policy:
                 VerifyPolicyApplied(localUserId, record);
-                Logger.LogInformation("Apply Policy verified for {User}", localUser.Username);
+                Logger.LogDebug("Apply Policy verified for {User}", localUser.Username);
                 break;
 
             case UserPropertyCategory.Configuration:
                 VerifyConfigurationApplied(localUserId, record);
-                Logger.LogInformation("Apply Configuration verified for {User}", localUser.Username);
+                Logger.LogDebug("Apply Configuration verified for {User}", localUser.Username);
                 break;
 
             case UserPropertyCategory.ProfileImage:
                 VerifyProfileImageApplied(record);
-                Logger.LogInformation("Apply ProfileImage verified for {User}", localUser.Username);
+                Logger.LogDebug("Apply ProfileImage verified for {User}", localUser.Username);
                 break;
 
             default:
@@ -493,7 +493,7 @@ public class SyncMissingUserTask
             item.SyncedImageSize = downloadedSize;
             item.LocalValue = item.SourceValue;
 
-            Logger.LogInformation("ProfileImage: updated for {User} (hash: {Hash}, size: {Size})",
+            Logger.LogDebug("ProfileImage: updated for {User} (hash: {Hash}, size: {Size})",
                 localUser.Username, downloadedHash, downloadedSize);
         }
         finally

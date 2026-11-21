@@ -322,7 +322,7 @@ public partial class PeerController
             await sessionManager.SendMessageCommand(null!, session.Id, new MediaBrowser.Model.Session.MessageCommand { Header = string.IsNullOrWhiteSpace(request.Header) ? peer.DisplayName : $"{peer.DisplayName}: {request.Header}", Text = request.Text, TimeoutMs = request.TimeoutMs }, aborted).ConfigureAwait(false);
         }
 
-        _logger.LogInformation("Passed a remote control command from '{Server}' to a viewer of {Path}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(playing));
+        _logger.LogDebug("Passed a remote control command from '{Server}' to a viewer of {Path}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(playing));
         return NoContent();
     }
 

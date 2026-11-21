@@ -14,6 +14,7 @@ services:
       - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
     environment:
       - JELLYFIN_PublishedServerUrl=http://source-a:8096
+      - JELLYFIN_Serilog__MinimumLevel__Override__Jellyfin.Plugin.ServerSync=Debug
 
   source-b:
     image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.4.20261026-211555}
@@ -27,6 +28,7 @@ services:
       - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
     environment:
       - JELLYFIN_PublishedServerUrl=http://source-b:8096
+      - JELLYFIN_Serilog__MinimumLevel__Override__Jellyfin.Plugin.ServerSync=Debug
 
   local:
     image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.4.20261026-211555}
@@ -44,3 +46,4 @@ services:
       - /media-tiny:size=64m,mode=0777
     environment:
       - JELLYFIN_PublishedServerUrl=http://local:8096
+      - JELLYFIN_Serilog__MinimumLevel__Override__Jellyfin.Plugin.ServerSync=Debug

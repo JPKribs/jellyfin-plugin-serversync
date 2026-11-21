@@ -330,7 +330,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 }
             }
 
-            Logger.LogInformation("{Task}: '{Server}' offered {Count} item(s)", Name, source.Name, items.Count);
+            Logger.LogDebug("{Task}: '{Server}' offered {Count} item(s)", Name, source.Name, items.Count);
         }
 
         progress.Report(100);
@@ -404,7 +404,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         if (dropped > 0)
         {
-            Logger.LogInformation("{Task}: {Dropped} item(s) offered by more than one server were left to one of them, {Outranked} to a lower priority server that holds the newer edit", Name, dropped, outranked);
+            Logger.LogDebug("{Task}: {Dropped} item(s) offered by more than one server were left to one of them, {Outranked} to a lower priority server that holds the newer edit", Name, dropped, outranked);
         }
 
         return kept;
@@ -790,7 +790,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <summary>Runs the task and disposes every connected source on every way out, so no client outlives the run.</summary>
     private async Task ExecuteCoreAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("Starting {Task}", Name);
+        Logger.LogDebug("Starting {Task}", Name);
         _sourceUnavailable = false;
         _unavailableBeyondOneServer = false;
         _pruneBlocked = false;
@@ -865,7 +865,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 pruned = await ApplyReportedRemovalsAsync(run.Existing, run.SeenKeySet, cancellationToken).ConfigureAwait(false);
             }
 
-            Logger.LogInformation("{Task}: listed only what changed, so stale rows are pruned on the next full scan", Name);
+            Logger.LogDebug("{Task}: listed only what changed, so stale rows are pruned on the next full scan", Name);
         }
         else
         {
@@ -936,7 +936,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         if (why is not null)
         {
-            Logger.LogInformation("{Task}: full scan, since {Why}", Name, why);
+            Logger.LogDebug("{Task}: full scan, since {Why}", Name, why);
             return;
         }
 
@@ -946,7 +946,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
 
         IsIncrementalRun = true;
-        Logger.LogInformation("{Task}: listing only what changed since the last scan. A full scan runs every {Hours} hours", Name, intervalHours);
+        Logger.LogDebug("{Task}: listing only what changed since the last scan. A full scan runs every {Hours} hours", Name, intervalHours);
     }
 
     /// <summary>Records when each cleanly listed source was scanned, unless the run was not clean.</summary>
@@ -959,7 +959,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         if (_sourceUnavailable || run.HadFailures || (!IsIncrementalRun && _pruneBlocked))
         {
-            Logger.LogInformation("{Task}: the run was not clean, so the next scan lists from where the last clean one did", Name);
+            Logger.LogDebug("{Task}: the run was not clean, so the next scan lists from where the last clean one did", Name);
             return;
         }
 
@@ -1229,7 +1229,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         {
             if (!run.SeenPriorityKeys.IsEmpty)
             {
-                Logger.LogInformation("{Task}: a server did not answer this run, so no rows are retired to another server", Name);
+                Logger.LogDebug("{Task}: a server did not answer this run, so no rows are retired to another server", Name);
             }
 
             return;

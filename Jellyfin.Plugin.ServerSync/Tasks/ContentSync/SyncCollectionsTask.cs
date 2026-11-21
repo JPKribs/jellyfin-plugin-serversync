@@ -168,7 +168,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
                 catch (ArgumentException ex)
                 {
                     // One server's bad URL must not stop the other servers' collections.
-                    _logger.LogError("Sync Collections: server '{Server}' rejected: {Error}", server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                    _logger.LogError(ex, "Sync Collections: server '{Server}' rejected", server.DisplayName);
                     processed += collectionsByIdN.Count;
                     progress.Report(100.0 * processed / total);
                     continue;
@@ -266,7 +266,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         {
             if (targetIds.Count == 0)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "Sync Collections: no synced members for '{Name}' yet. The collection will be created once content sync has downloaded some",
                     FormatUtilities.SanitizeForLog(root.Name));
                 return;
@@ -280,7 +280,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
             }).ConfigureAwait(false);
 
             await _collectionManager.AddToCollectionAsync(created.Id, targetIds).ConfigureAwait(false);
-            _logger.LogInformation("Sync Collections: created '{Name}' with {Count} member(s)", FormatUtilities.SanitizeForLog(root.Name), targetIds.Count);
+            _logger.LogDebug("Sync Collections: created '{Name}' with {Count} member(s)", FormatUtilities.SanitizeForLog(root.Name), targetIds.Count);
             return;
         }
 
@@ -316,7 +316,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
 
         if (toAdd.Count > 0 || toRemove.Count > 0)
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Sync Collections: '{Name}' updated (+{Added}/-{Removed}, {Total} member(s))",
                 existing.Name, toAdd.Count, toRemove.Count, targetIds.Count);
         }

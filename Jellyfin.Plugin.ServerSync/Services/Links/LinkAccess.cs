@@ -202,7 +202,7 @@ public sealed class LinkAccess : ILinkAccess
 
             if (roomier is { } chosen)
             {
-                _logger.LogInformation("Playing the link {Path} from '{Server}', which has more room than '{Primary}'", FormatUtilities.SanitizeForLog(link.LinkPath), chosen.Server.DisplayName, primary!.DisplayName);
+                _logger.LogDebug("Playing the link {Path} from '{Server}', which has more room than '{Primary}'", FormatUtilities.SanitizeForLog(link.LinkPath), chosen.Server.DisplayName, primary!.DisplayName);
                 return new LinkChoice(chosen.Route, null);
             }
 
@@ -232,7 +232,7 @@ public sealed class LinkAccess : ILinkAccess
 
         if (await standIn.ConfigureAwait(false) is { } found)
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Playing the link {Path} from '{Server}' instead: {Reason}",
                 FormatUtilities.SanitizeForLog(link.LinkPath),
                 found.Server.DisplayName,
@@ -356,7 +356,7 @@ public sealed class LinkAccess : ILinkAccess
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _health.Failed(server.Key);
-            _logger.LogWarning("Could not ask '{Server}' whether a link may play: {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not ask '{Server}' whether a link may play", server.DisplayName);
             return new LinkStreamCheckResponse { Reason = $"{server.DisplayName} could not be reached" };
         }
     }

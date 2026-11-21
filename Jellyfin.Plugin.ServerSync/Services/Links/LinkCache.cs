@@ -275,7 +275,7 @@ public sealed class LinkCache
                 return path;
             }
 
-            _logger.LogInformation("Dropped {File} from the link cache: the file changed on its source", FormatUtilities.SanitizeForLog(Path.GetFileName(path)));
+            _logger.LogDebug("Dropped {File} from the link cache: the file changed on its source", FormatUtilities.SanitizeForLog(Path.GetFileName(path)));
             Remove(linkId);
             return null;
         }
@@ -294,7 +294,7 @@ public sealed class LinkCache
             _changes[linkId] = _changes.GetValueOrDefault(linkId) + 1;
             if (Entries().TryGetValue(linkId, out var entry))
             {
-                _logger.LogInformation("Dropped {File} from the link cache: the file changed on its source", FormatUtilities.SanitizeForLog(entry.File));
+                _logger.LogDebug("Dropped {File} from the link cache: the file changed on its source", FormatUtilities.SanitizeForLog(entry.File));
                 Remove(linkId);
             }
         }
@@ -382,7 +382,7 @@ public sealed class LinkCache
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not take {File} into the link cache: {Reason}", name, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                _logger.LogWarning(ex, "Could not take {File} into the link cache", name);
                 return false;
             }
         }
@@ -437,7 +437,7 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("Could not move {File} out of the link cache: {Reason}", Path.GetFileName(cached), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not move {File} out of the link cache", Path.GetFileName(cached));
             lock (_lock)
             {
                 try
@@ -449,7 +449,7 @@ public sealed class LinkCache
                 }
                 catch (Exception back) when (back is IOException or UnauthorizedAccessException)
                 {
-                    _logger.LogWarning("Could not return {File} to the link cache: {Reason}", Path.GetFileName(cached), FormatUtilities.SanitizeForLog(back.Message, 300));
+                    _logger.LogWarning(back, "Could not return {File} to the link cache", Path.GetFileName(cached));
                 }
 
                 Delete(part);
@@ -493,7 +493,7 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("Could not move {File} into the link cache: {Reason}", FormatUtilities.SanitizeForLog(Path.GetFileName(file)), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not move {File} into the link cache", FormatUtilities.SanitizeForLog(Path.GetFileName(file)));
             if (File.Exists(file))
             {
                 Delete(part);
@@ -576,7 +576,7 @@ public sealed class LinkCache
                 var cutoff = _now() - TimeSpan.FromDays(config.LinkCacheRetentionDays);
                 foreach (var old in entries.Values.Where(e => (e.LastPlayedAt ?? e.CachedAt) < cutoff && keep?.Contains(e.LinkId) != true).ToList())
                 {
-                    _logger.LogInformation("Dropped {File} from the link cache: not played for {Days} day(s)", FormatUtilities.SanitizeForLog(old.File), config.LinkCacheRetentionDays);
+                    _logger.LogDebug("Dropped {File} from the link cache: not played for {Days} day(s)", FormatUtilities.SanitizeForLog(old.File), config.LinkCacheRetentionDays);
                     entries.Remove(old.LinkId);
                     Delete(Path.Combine(Root, old.File));
                     changed = true;
@@ -591,7 +591,7 @@ public sealed class LinkCache
                     break;
                 }
 
-                _logger.LogInformation("Dropped {File} from the link cache to make room", FormatUtilities.SanitizeForLog(next.File));
+                _logger.LogDebug("Dropped {File} from the link cache to make room", FormatUtilities.SanitizeForLog(next.File));
                 entries.Remove(next.LinkId);
                 Delete(Path.Combine(Root, next.File));
                 used -= next.Size;
@@ -653,7 +653,7 @@ public sealed class LinkCache
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not tidy the link cache at {Root}: {Reason}", root, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                _logger.LogWarning(ex, "Could not tidy the link cache at {Root}", root);
             }
 
             if (changed)
@@ -702,7 +702,7 @@ public sealed class LinkCache
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", Root, FormatUtilities.SanitizeForLog(ex.Message, 300));
+                _logger.LogWarning(ex, "Could not empty the link cache at {Root}", Root);
             }
 
             _entries = null;
@@ -742,7 +742,7 @@ public sealed class LinkCache
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Left for the next tidy, as when a player still has the file open.
-            _logger.LogDebug("Could not delete {Path} from the link cache: {Reason}", path, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogDebug(ex, "Could not delete {Path} from the link cache", path);
         }
     }
 
@@ -776,12 +776,12 @@ public sealed class LinkCache
         {
             // A damaged index will not read later either, so the cache starts over.
             entries.Clear();
-            _logger.LogWarning("The link cache's index at {Root} is damaged, so the cache starts over: {Reason}", root, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "The link cache's index at {Root} is damaged, so the cache starts over", root);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _indexUnreadable = true;
-            _logger.LogWarning("Could not read the link cache's index at {Root}, so it starts empty: {Reason}", root, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not read the link cache's index at {Root}, so it starts empty", root);
         }
 
         _entries = entries;
@@ -801,7 +801,7 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("Could not save the link cache's index at {Root}: {Reason}", _loadedRoot, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not save the link cache's index at {Root}", _loadedRoot);
         }
     }
 }

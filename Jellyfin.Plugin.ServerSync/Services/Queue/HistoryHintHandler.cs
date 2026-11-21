@@ -278,7 +278,7 @@ public sealed class HistoryHintHandler
             _versions.Set(HintProtocol.IncomingVersion(hint, HintKind.History, localKey));
         }
 
-        _logger.LogInformation("Applied a history hint from '{Origin}' for {Item}: {Changes}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(record.ItemName), HistorySyncMergeService.GetChangeSummary(record));
+        _logger.LogDebug("Applied a history hint from '{Origin}' for {Item}: {Changes}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(record.ItemName), HistorySyncMergeService.GetChangeSummary(record));
         return HintApplyResult.AppliedTo(_libraryManager.GetItemById(localItemId));
     }
 

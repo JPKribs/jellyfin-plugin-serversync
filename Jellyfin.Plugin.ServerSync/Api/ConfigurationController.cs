@@ -108,7 +108,7 @@ public partial class ConfigurationController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Server '{Server}' rejected: {Error}", FormatUtilities.SanitizeForLog(server.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Server '{Server}' rejected", FormatUtilities.SanitizeForLog(server.DisplayName));
             return null;
         }
     }

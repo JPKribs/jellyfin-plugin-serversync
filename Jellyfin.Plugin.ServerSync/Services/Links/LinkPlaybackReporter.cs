@@ -328,7 +328,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
         catch (Exception ex) when (report.Event == LinkPlaybackEvent.Stop)
         {
             // The source stops the playback itself ten minutes after the last report it had.
-            _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", FormatUtilities.SanitizeForLog(link.LinkPath), server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them", FormatUtilities.SanitizeForLog(link.LinkPath), server.DisplayName);
         }
         catch (Exception ex)
         {

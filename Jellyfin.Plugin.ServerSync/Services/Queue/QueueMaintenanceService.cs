@@ -156,19 +156,14 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         var total = failing.Sum(kind => kind.Count);
         var example = failing.Select(kind => kind.Reason).FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason));
         string Overview(string? language)
-        {
-            var kinds = string.Join(", ", failing.Select(kind => CountFailing(kind, language)));
-            return example is null
-                ? BaseTranslations.Format(TranslationKeys.AttentionFailingOverview, language, kinds)
-                : BaseTranslations.Format(TranslationKeys.AttentionFailingExample, language, kinds, example);
-        }
+            => BaseTranslations.Format(total == 1 ? TranslationKeys.AttentionFailingOverviewOne : TranslationKeys.AttentionFailingOverview, language, string.Join(", ", failing.Select(kind => CountFailing(kind, language))));
 
-        _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(Overview(null), 1000));
+        _logger.LogWarning("{Count} rows have failed on every run for a day. One reason is {Reason}", total, FormatUtilities.SanitizeForLog(example ?? "unknown", 1000));
         if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
         {
             var language = ActivityLanguage();
             _ = activity.LogAndWaitAsync(
-                BaseTranslations.Format(total == 1 ? TranslationKeys.AttentionFailingNameOne : TranslationKeys.AttentionFailingNameMany, language, total),
+                BaseTranslations.Get(total == 1 ? TranslationKeys.AttentionFailingNameOne : TranslationKeys.AttentionFailingNameMany, language),
                 "ServerSyncAttention",
                 ActivityText.Sentence(Overview(language)),
                 LogLevel.Warning);
@@ -186,12 +181,12 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         foreach (var failure in standing)
         {
             var phase = failure.Phase.ToLowerInvariant();
-            _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(BaseTranslations.Format(TranslationKeys.AttentionHeldOverview, null, failure.ModuleKey, phase, failure.Reason), 1000));
+            _logger.LogWarning("{Module} {Phase} has been held up on every run for a day: {Reason}", failure.ModuleKey, phase, FormatUtilities.SanitizeForLog(failure.Reason, 1000));
             if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
             {
                 var language = ActivityLanguage();
                 _ = activity.LogAndWaitAsync(
-                    BaseTranslations.Format(TranslationKeys.AttentionHeldName, language, failure.ModuleKey, failure.Phase),
+                    BaseTranslations.Get(TranslationKeys.AttentionHeldName, language),
                     "ServerSyncAttention",
                     ActivityText.Sentence(BaseTranslations.Format(TranslationKeys.AttentionHeldOverview, language, failure.ModuleKey, phase, failure.Reason)),
                     LogLevel.Warning);
@@ -368,7 +363,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
             var count = step();
             if (count > 0)
             {
-                _logger.LogInformation("Server Sync upkeep: {Step}, {Count} row(s)", name, count);
+                _logger.LogDebug("Server Sync upkeep: {Step}, {Count} row(s)", name, count);
             }
         }
         // One failing step must not stop the rest of the upkeep or its loop.

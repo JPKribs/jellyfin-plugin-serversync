@@ -334,7 +334,7 @@ public static partial class ImageUtilities
 
         if (removed > 0)
         {
-            logger.LogInformation("Cleared {Count} existing {ImageType} image(s) for {Context}", removed, imageType, FormatUtilities.SanitizeForLog(context));
+            logger.LogDebug("Cleared {Count} existing {ImageType} image(s) for {Context}", removed, imageType, FormatUtilities.SanitizeForLog(context));
         }
 
         return removed;

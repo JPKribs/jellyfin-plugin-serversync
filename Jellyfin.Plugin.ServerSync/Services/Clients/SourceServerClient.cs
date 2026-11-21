@@ -397,7 +397,7 @@ public partial class SourceServerClient : IDisposable
             }
         }
 
-        _logger.LogInformation("Fetched {Count} libraries via user views fallback for user {UserId}", libraries.Count, FormatUtilities.SanitizeForLog(userId));
+        _logger.LogDebug("Fetched {Count} libraries via user views fallback for user {UserId}", libraries.Count, FormatUtilities.SanitizeForLog(userId));
         return libraries;
     }
 
@@ -458,7 +458,7 @@ public partial class SourceServerClient : IDisposable
 
         if (!string.IsNullOrEmpty(id) && Guid.TryParse(id, out var parsedId))
         {
-            _logger.LogInformation("Fetched single user via fallback: {UserName} ({UserId})", FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(id));
+            _logger.LogDebug("Fetched single user via fallback: {UserName} ({UserId})", FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(id));
             return new List<UserDto>
             {
                 new UserDto
@@ -550,7 +550,7 @@ public partial class SourceServerClient : IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Could not read the current user's policy, reporting administrator access without confirming it: {Reason}", FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not read the current user's policy, reporting administrator access without confirming it");
             return (true, null, null, null);
         }
     }

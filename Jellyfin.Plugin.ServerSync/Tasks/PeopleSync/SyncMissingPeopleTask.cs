@@ -242,16 +242,15 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         var name = FormatUtilities.SanitizeForLog(record.PersonName);
         if (error is not null)
         {
-            Logger.LogError("{Task}: could not update {PersonName}. {Reason}", Name, name, FormatUtilities.SanitizeForLog(error.Message, 500));
-            Logger.LogDebug(error, "{Task}: {PersonName} errored", Name, name);
+            Logger.LogError(error, "{Task}: could not update {PersonName}", Name, name);
         }
         else if (string.IsNullOrEmpty(categories))
         {
-            Logger.LogInformation("{Task}: skipped {PersonName}, nothing to update", Name, name);
+            Logger.LogDebug("{Task}: skipped {PersonName}, nothing to update", Name, name);
         }
         else
         {
-            Logger.LogInformation("{Task}: updated {Categories} for {PersonName}", Name, categories, name);
+            Logger.LogDebug("{Task}: updated {Categories} for {PersonName}", Name, categories, name);
         }
     }
 

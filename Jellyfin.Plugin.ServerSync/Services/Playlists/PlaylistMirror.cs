@@ -305,7 +305,7 @@ public sealed class PlaylistMirror
         {
             if (desired.Count == 0 && source.EntryPaths.Count > 0)
             {
-                _logger.LogInformation("Playlists: none of the items in '{Name}' are here yet. The playlist is created once some arrive", FormatUtilities.SanitizeForLog(source.Name));
+                _logger.LogDebug("Playlists: none of the items in '{Name}' are here yet. The playlist is created once some arrive", FormatUtilities.SanitizeForLog(source.Name));
                 return PlaylistMirrorOutcome.Waiting;
             }
 
@@ -333,7 +333,7 @@ public sealed class PlaylistMirror
                 }
             }
 
-            _logger.LogInformation("Playlists: created '{Name}' for {User} with {Count} item(s), {Dropped} not here", FormatUtilities.SanitizeForLog(source.Name), owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
+            _logger.LogDebug("Playlists: created '{Name}' for {User} with {Count} item(s), {Dropped} not here", FormatUtilities.SanitizeForLog(source.Name), owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
             return PlaylistMirrorOutcome.Created;
         }
 
@@ -397,7 +397,7 @@ public sealed class PlaylistMirror
             }
         }
 
-        _logger.LogInformation("Playlists: updated '{Name}' for {User}, {Count} item(s), {Dropped} not here", FormatUtilities.SanitizeForLog(source.Name), owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
+        _logger.LogDebug("Playlists: updated '{Name}' for {User}, {Count} item(s), {Dropped} not here", FormatUtilities.SanitizeForLog(source.Name), owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
         return PlaylistMirrorOutcome.Updated;
     }
 

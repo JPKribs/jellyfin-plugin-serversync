@@ -77,7 +77,7 @@ public static class ChangedFolders
             report(folder);
         }
 
-        logger.LogInformation("Asked Jellyfin to refresh {Folders}", FormatUtilities.SanitizeForLog(string.Join(", ", folders), 500));
+        logger.LogDebug("Asked Jellyfin to refresh {Folders}", FormatUtilities.SanitizeForLog(string.Join(", ", folders), 500));
         return true;
     }
 

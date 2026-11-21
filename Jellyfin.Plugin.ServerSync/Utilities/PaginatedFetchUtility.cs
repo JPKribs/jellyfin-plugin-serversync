@@ -88,7 +88,7 @@ public static class PaginatedFetchUtility
 
             if (pass < MaxEnumerationPasses)
             {
-                logger.LogInformation(
+                logger.LogDebug(
                     "Library {LibraryName} changed during enumeration, listing it again so items that moved between pages are not missed",
                     FormatUtilities.SanitizeForLog(libraryName));
             }
@@ -177,7 +177,7 @@ public static class PaginatedFetchUtility
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 consecutiveErrors++;
-                logger.LogWarning(ex,
+                logger.LogDebug(ex,
                     "Failed to fetch items from library {LibraryName} at index {Index} (attempt {Attempt}/{Max})",
                     FormatUtilities.SanitizeForLog(libraryName), startIndex, consecutiveErrors, MaxConsecutiveErrors);
 
@@ -205,7 +205,7 @@ public static class PaginatedFetchUtility
             if (result == null)
             {
                 consecutiveErrors++;
-                logger.LogWarning(
+                logger.LogDebug(
                     "Fetch returned null for library {LibraryName} at index {Index} (attempt {Attempt}/{Max})",
                     FormatUtilities.SanitizeForLog(libraryName), startIndex, consecutiveErrors, MaxConsecutiveErrors);
 

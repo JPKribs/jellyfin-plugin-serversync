@@ -130,7 +130,7 @@ public sealed class LinkRehomer
                     _logger.LogDebug(ex, "The link {Path} is written again on the next run", FormatUtilities.SanitizeForLog(row.LocalPath));
                 }
 
-                _logger.LogInformation("The link {Path} now streams from '{Server}', since the server it streamed from no longer has the file", FormatUtilities.SanitizeForLog(row.LocalPath), alternate.Server.DisplayName);
+                _logger.LogDebug("The link {Path} now streams from '{Server}', since the server it streamed from no longer has the file", FormatUtilities.SanitizeForLog(row.LocalPath), alternate.Server.DisplayName);
                 return alternate.Server.DisplayName;
             }
         }

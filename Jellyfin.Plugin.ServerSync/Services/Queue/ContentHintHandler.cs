@@ -230,7 +230,7 @@ public sealed class ContentHintHandler
             if (await download.ApplyRowAsync(row!, source, cancellationToken).ConfigureAwait(false))
             {
                 applied.Add(row!);
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "{Action} {Path} on a hint from '{Origin}'",
                     StorageModes.IsLink(row!.StorageMode) ? "Linked" : "Downloaded",
                     FormatUtilities.SanitizeForLog(row.LocalPath),
@@ -298,7 +298,7 @@ public sealed class ContentHintHandler
         {
             if (fitting.Count > 1)
             {
-                _logger.LogInformation("{Path} on '{Origin}' could be any of {Count} files that left its folder, so it arrives as a new file", FormatUtilities.SanitizeForLog(dto.Path), FormatUtilities.SanitizeForLog(origin.DisplayName), fitting.Count);
+                _logger.LogDebug("{Path} on '{Origin}' could be any of {Count} files that left its folder, so it arrives as a new file", FormatUtilities.SanitizeForLog(dto.Path), FormatUtilities.SanitizeForLog(origin.DisplayName), fitting.Count);
             }
 
             return null;
@@ -310,7 +310,7 @@ public sealed class ContentHintHandler
         }
 
         FollowInLinkCache(replaced, key, size);
-        _logger.LogInformation("{Old} became {New} on '{Origin}', so the row here follows it", FormatUtilities.SanitizeForLog(System.IO.Path.GetFileName(replaced.SourcePath)), FormatUtilities.SanitizeForLog(System.IO.Path.GetFileName(dto.Path)), FormatUtilities.SanitizeForLog(origin.DisplayName));
+        _logger.LogDebug("{Old} became {New} on '{Origin}', so the row here follows it", FormatUtilities.SanitizeForLog(System.IO.Path.GetFileName(replaced.SourcePath)), FormatUtilities.SanitizeForLog(System.IO.Path.GetFileName(dto.Path)), FormatUtilities.SanitizeForLog(origin.DisplayName));
         return _table.GetByKey(key);
     }
 

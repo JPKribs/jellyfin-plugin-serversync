@@ -64,20 +64,32 @@ public class HintActivityTextTests
     }
 
     /// <summary>
-    /// Summaries read the same way every time: a sentence case name with the count, and the servers
-    /// listed with their counts, the largest first.
-    /// True: a busy sync leaves one tidy entry an operator can read at a glance.
-    /// False: names would differ in shape, or servers be listed in no useful order.
+    /// Summary names are generic and in sentence case, with no count, and the count lives in the overview.
+    /// True: a busy sync leaves one tidy entry whose name is the same every time.
+    /// False: the name would carry a count or a server, and repeat what the overview says.
     /// </summary>
     [Fact]
-    public void Summaries_HaveOneShape()
+    public void Summaries_HaveGenericNames()
     {
-        Assert.Equal("1 item synced", BaseTranslations.Format("ActivitySyncedNameOne", null, 1));
-        Assert.Equal("12 items not synced", BaseTranslations.Format("ActivityNotSyncedNameMany", null, 12));
-        Assert.Equal("1 change", ActivityText.Count(1, "change"));
-        Assert.Equal("3 items", ActivityText.Count(3, "item"));
-        Assert.Equal("source-a (9), source-b (3), source-c (3)",
-            ActivityText.CountedList(new Dictionary<string, int> { ["source-c"] = 3, ["source-a"] = 9, ["source-b"] = 3 }));
+        Assert.Equal("Item synced", BaseTranslations.Format("ActivitySyncedNameOne", null, 1));
+        Assert.Equal("Items synced", BaseTranslations.Format("ActivitySyncedNameMany", null, 12));
+        Assert.Equal("Items not synced", BaseTranslations.Format("ActivityNotSyncedNameMany", null, 12));
+        Assert.Equal("Items not applied yet", BaseTranslations.Format("ActivityRetryingNameMany", null, 4));
         Assert.Equal("filtered out", HintActivityLog.ReasonOf(HintCode.Filtered));
+    }
+
+    /// <summary>
+    /// Counted lists name each source once, the largest first, and leave out a count of 1 or of a single name.
+    /// True: "source-a (9), source-b (3), and source-c" and "source-a".
+    /// False: an entry would read "source-a (12)" after "12 items", or "source-c (1)".
+    /// </summary>
+    [Fact]
+    public void Counted_LeavesOutCountsOfOne()
+    {
+        Assert.Equal("source-a (9), source-b (3), and source-c",
+            HintActivityLog.Counted(new Dictionary<string, int> { ["source-c"] = 1, ["source-a"] = 9, ["source-b"] = 3 }));
+        Assert.Equal("source-a (2) and source-b", HintActivityLog.Counted(new Dictionary<string, int> { ["source-b"] = 1, ["source-a"] = 2 }));
+        Assert.Equal("source-a", HintActivityLog.Counted(new Dictionary<string, int> { ["source-a"] = 12 }));
+        Assert.Equal(string.Empty, HintActivityLog.Counted(new Dictionary<string, int>()));
     }
 }

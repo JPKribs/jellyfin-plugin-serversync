@@ -46,7 +46,7 @@ Every string is in sentence case, mirroring Jellyfin, such as "Allow media playb
 | Dialog title | Remove server |
 | Badge and status chip | Pending deletion |
 | Column header | Last sync |
-| Activity log name | 12 items synced |
+| Activity log name | Items synced |
 | Description, message, placeholder sentence | Copies played and unplayed marks. |
 
 * Write product names, services, formats, and acronyms as they are written, such as "Server Sync", "API Key", and "Mbps". Each one the plugin uses goes in `Localization/casing.json`, per [translations.md](translations.md#casing).
@@ -177,10 +177,10 @@ Use `shared.emptySection(text)` for a region and `shared.emptySection(text, { in
 
 ### Activity Log
 
-Use `ActivitySummary` and `ActivityText` from Base.
+Use `ActivitySummary` and `ActivityText` from Base, per [logging.md](logging.md#activity-log).
 
-* The name is short and in sentence case, with keys for one and many. "12 items synced".
-* The overview is one sentence with no closing period, as Base writes it. "12 items were synced from source-a (9), source-b (3)".
+* The name is generic and in sentence case, with keys for one and many and no count. "Items synced".
+* The overview is one sentence with no closing period, as Base writes it. "Synced 12 items from source-a (9) and source-b (3)".
 * Use the same verb the UI uses for the action.
 
 ### Messages From C#

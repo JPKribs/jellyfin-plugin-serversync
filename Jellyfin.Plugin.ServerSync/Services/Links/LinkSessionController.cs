@@ -131,7 +131,7 @@ public sealed class LinkSessionController : ISessionController
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning("Could not pass a remote control command to '{Server}': {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
+            _logger.LogWarning(ex, "Could not pass a remote control command to '{Server}'", server.DisplayName);
         }
     }
 }

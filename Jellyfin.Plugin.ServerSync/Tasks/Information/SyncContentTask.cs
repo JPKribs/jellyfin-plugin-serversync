@@ -65,7 +65,7 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
 
         if (!_configManager.Configuration.EnableContentSync)
         {
-            _logger.LogInformation("{Task}: content sync is disabled, nothing to do", Name);
+            _logger.LogDebug("{Task}: content sync is disabled, nothing to do", Name);
             progress.Report(100);
             return;
         }
@@ -103,7 +103,7 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
         {
             var task = create();
             stepName = task.Name;
-            _logger.LogInformation("{Task}: running {Step}", Name, stepName);
+            _logger.LogDebug("{Task}: running {Step}", Name, stepName);
             await task.ExecuteAsync(new Progress<double>(p => progress.Report(offset + (share * Math.Clamp(p, 0, 100) / 100.0))), cancellationToken).ConfigureAwait(false);
             return true;
         }

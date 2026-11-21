@@ -70,7 +70,7 @@ public sealed class PeerHistoryService
             }
         }
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "Peer {Sender} negotiated {Count} history entries: {Applied} applied, {Stale} stale",
             string.IsNullOrWhiteSpace(request.SenderServerId) ? "(unknown)" : FormatUtilities.SanitizeForLog(request.SenderServerId),
             request.Items.Count,
