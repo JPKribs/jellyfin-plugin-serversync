@@ -27,22 +27,21 @@ export default function (view) {
 
     var currentConfig = null;
 
+    // The Save Bar that ends each section.
+    var saveBars = serverSyncModule.createSaveBars(made.page);
+
     // saveSection
-    // Saves one section and reports the result on its status line. The config is replaced only once a save
-    // has landed, so the page never holds a change the server did not keep.
+    // Saves one section for its Save Bar. The config is replaced only once a save has landed, so the page
+    // never holds a change the server did not keep.
     //
     // Inputs
     // mutator [function]: Changes the fresh config in place.
-    // statusId [string]: The id of the status element beside the section's Save button.
-    // successMessage [string]: What the status says when the save landed.
-    // failureMessage [string]: What the status says when it did not.
     //
     // Output
-    // [Promise]: Resolves true when the save landed.
-    function saveSection(mutator, statusId, successMessage, failureMessage) {
-        return ServerSyncShared.saveSection(mutator, statusId, successMessage, failureMessage).then(function (saved) {
-            if (saved) currentConfig = saved;
-            return !!saved;
+    // [Promise]: Resolves once the save landed, and rejects when it did not.
+    function saveSection(mutator) {
+        return ServerSyncShared.saveSection(mutator).then(function (saved) {
+            currentConfig = saved;
         });
     }
 
@@ -235,7 +234,7 @@ export default function (view) {
                 scheduled: Math.max(0, parseInt(row.querySelector('.serversync-stream-scheduled-speed').value, 10) || 0)
             };
         });
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.MaxDownloadSpeed = getIntValue('txtMaxDownloadSpeed', 0);
             config.DownloadSpeedUnit = 'Mbps';
             config.EnableBandwidthScheduling = getChecked('chkEnableBandwidthScheduling');
@@ -250,7 +249,7 @@ export default function (view) {
                     server.LinkScheduledStreamSpeedMbps = speed.scheduled;
                 }
             });
-        }, 'saveBandwidthStatus', ServerSyncShared.t.tr('ToastBandwidthSaved'), ServerSyncShared.t.tr('ErrorSaveBandwidth'));
+        });
     }
 
     // What the link cache holds now, shown under its settings.
@@ -283,8 +282,14 @@ export default function (view) {
         });
     }
 
+    // reflectLinkCacheActions
+    // Shows Delete cached files above the Content Save Bar while content sync is on, as its options are.
+    function reflectLinkCacheActions() {
+        setVisible('linkCacheActions', getChecked('chkEnableContentSync'));
+    }
+
     function saveContentSettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.EnableContentSync = getChecked('chkEnableContentSync');
             config.DetectUpdatedFiles = getChecked('chkDetectUpdatedFiles');
             config.MirrorSyncedCollections = getChecked('chkMirrorSyncedCollections');
@@ -332,7 +337,7 @@ export default function (view) {
             config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
             config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
             config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
-        }, 'saveContentStatus', ServerSyncShared.t.tr('ToastContentSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveContentSettings')).then(loadLinkCacheStatus);
+        }).then(loadLinkCacheStatus);
     }
 
     function loadHistorySettings(config) {
@@ -345,14 +350,14 @@ export default function (view) {
     }
 
     function saveHistorySettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.EnableHistorySync = hasUserMapping(config) && getChecked('chkEnableHistorySync');
             config.HistorySyncPlayedStatus = getChecked('chkHistorySyncPlayedStatus');
             config.HistorySyncPlaybackPosition = getChecked('chkHistorySyncPlaybackPosition');
             config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
             config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
             config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
-        }, 'saveHistoryStatus', ServerSyncShared.t.tr('ToastHistorySettingsSaved'), ServerSyncShared.t.tr('ErrorSaveHistorySettings'));
+        });
     }
 
     // A choice is saved by name and may be read back by name or by number.
@@ -383,7 +388,7 @@ export default function (view) {
     }
 
     function saveMetadataSettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.EnableMetadataSync = getChecked('chkEnableMetadataSync');
             config.MetadataSyncMetadata = getChecked('chkMetadataSyncMetadata');
             config.MetadataSyncGenres = getChecked('chkMetadataSyncGenres');
@@ -400,7 +405,7 @@ export default function (view) {
             config.MetadataSyncConsolidateOutros = getChecked('chkMetadataSyncConsolidateOutros');
             config.MetadataSyncConsolidateOtherSegments = getChecked('chkMetadataSyncConsolidateOtherSegments');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
-        }, 'saveMetadataStatus', ServerSyncShared.t.tr('ToastMetadataSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveMetadataSettings'));
+        });
     }
 
     function loadPeopleSettings(config) {
@@ -411,12 +416,12 @@ export default function (view) {
     }
 
     function savePeopleSettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
             config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
             config.PeopleSyncProvider = getChecked('chkPeopleSyncProvider');
             config.PeopleSyncPrecedence = getValue('selPeopleSyncPrecedence') || 'Newest';
-        }, 'savePeopleStatus', ServerSyncShared.t.tr('ToastPeopleSettingsSaved'), ServerSyncShared.t.tr('ErrorSavePeopleSettings'));
+        });
     }
 
     function loadUserSyncSettings(config) {
@@ -429,14 +434,14 @@ export default function (view) {
     }
 
     function saveUserSyncSettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.EnableUserSync = hasUserMapping(config) && getChecked('chkEnableUserSync');
             config.UserSyncPolicy = getChecked('chkUserSyncPolicy');
             config.UserSyncConfiguration = getChecked('chkUserSyncConfiguration');
             config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
             config.UserSyncPrecedence = getValue('selUserSyncPrecedence') || 'Newest';
             config.UserSyncConflict = getValue('selUserSyncConflict') || 'Newest';
-        }, 'saveUserSyncStatus', ServerSyncShared.t.tr('ToastUserSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveUserSettings'));
+        });
     }
 
     function hasUserMapping(config) {
@@ -467,12 +472,12 @@ export default function (view) {
     }
 
     function savePlaylistSettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.EnablePlaylistSync = hasUserMapping(config) && getChecked('chkEnablePlaylistSync');
             config.PlaylistSyncShares = getChecked('chkPlaylistSyncShares');
             config.PlaylistSyncPrecedence = getValue('selPlaylistSyncPrecedence') || 'Newest';
             config.PlaylistRemovedAction = getValue('selPlaylistRemovedAction') || 'Delete';
-        }, 'savePlaylistStatus', ServerSyncShared.t.tr('ToastPlaylistSettingsSaved'), ServerSyncShared.t.tr('ErrorSavePlaylistSettings'));
+        });
     }
 
     function loadProcessingSettings(config) {
@@ -495,7 +500,7 @@ export default function (view) {
     }
 
     function saveProcessingSettings() {
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.HintDebounceSeconds = Math.min(3600, Math.max(1, getIntValue('txtHintDebounceSeconds', 60)));
             config.HintRetrySeconds = Math.min(3600, Math.max(5, getIntValue('txtHintRetrySeconds', 30)));
             config.HintRetryMaxMinutes = Math.min(1440, Math.max(1, getIntValue('txtHintRetryMaxMinutes', 60)));
@@ -506,7 +511,7 @@ export default function (view) {
             config.FullScanIntervalHours = Math.min(720, Math.max(0, getIntValue('txtFullScanIntervalHours', 24)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
             config.MaxRetryCount = Math.min(10, Math.max(1, getIntValue('txtMaxRetryCount', 3)));
-        }, 'saveProcessingStatus', ServerSyncShared.t.tr('ToastProcessingSettingsSaved'), ServerSyncShared.t.tr('ErrorSaveProcessingSettings'));
+        });
     }
 
     var grantUsers = [];
@@ -597,11 +602,11 @@ export default function (view) {
     }
 
     function saveCallerAccessSettings() {
-        if (!grantsLoaded) return;
+        if (!grantsLoaded) return Promise.reject(new Error(ServerSyncShared.t.tr('ErrorSaveWhitelist')));
         var grants = collectGrants();
-        saveSection(function (config) {
+        return saveSection(function (config) {
             config.PeerCallerGrants = grants;
-        }, 'saveCallerAccessStatus', ServerSyncShared.t.tr('ToastWhitelistSaved'), ServerSyncShared.t.tr('ErrorSaveWhitelist'));
+        });
     }
 
     function loadConfig() {
@@ -624,8 +629,10 @@ export default function (view) {
                 ['chkMetadataSyncSegmentProvider', 'segmentProviderOptions']].forEach(function (pair) {
                 ServerSyncShared.bindReveal(pair[0], pair[1]);
             });
+            reflectLinkCacheActions();
             loadCallerAccessSettings(config);
             fetchWatchedFilterUsers();
+            saveBars.clean();
         }).catch(function() {
             ServerSyncShared.setStatus('settingsStatus', ServerSyncShared.t.tr('ErrorLoadSettings'), true, { timeout: 0 });
         });
@@ -693,17 +700,27 @@ export default function (view) {
     function bindPage() {
         ServerSyncShared.initCollapsibles();
 
-        bindClick('btnSaveProcessing', saveProcessingSettings);
-        bindClick('btnSaveCallerAccess', saveCallerAccessSettings);
-
-        bindClick('btnSaveContentSettings', saveContentSettings);
-        bindClick('btnSaveBandwidth', saveBandwidthSettings);
+        // Each section ends in its own Save Bar.
+        [
+            ['bandwidthConfigContent', saveBandwidthSettings, 'ToastBandwidthSaved', 'ErrorSaveBandwidth'],
+            ['processingConfigContent', saveProcessingSettings, 'ToastProcessingSettingsSaved', 'ErrorSaveProcessingSettings'],
+            ['callerAccessContent', saveCallerAccessSettings, 'ToastWhitelistSaved', 'ErrorSaveWhitelist'],
+            ['contentSyncSettingsContent', saveContentSettings, 'ToastContentSettingsSaved', 'ErrorSaveContentSettings'],
+            ['historySyncSettingsContent', saveHistorySettings, 'ToastHistorySettingsSaved', 'ErrorSaveHistorySettings'],
+            ['metadataSyncSettingsContent', saveMetadataSettings, 'ToastMetadataSettingsSaved', 'ErrorSaveMetadataSettings'],
+            ['peopleSyncSettingsContent', savePeopleSettings, 'ToastPeopleSettingsSaved', 'ErrorSavePeopleSettings'],
+            ['playlistSyncSettingsContent', savePlaylistSettings, 'ToastPlaylistSettingsSaved', 'ErrorSavePlaylistSettings'],
+            ['userSyncSettingsContent', saveUserSyncSettings, 'ToastUserSettingsSaved', 'ErrorSaveUserSettings']
+        ].forEach(function (section) {
+            saveBars.add(getEl(section[0]), {
+                savedText: ServerSyncShared.t.tr(section[2]),
+                failedText: ServerSyncShared.t.tr(section[3]),
+                onSave: section[1]
+            });
+        });
         bindClick('btnClearLinkCache', clearLinkCache);
-        bindClick('btnSaveHistorySettings', saveHistorySettings);
-        bindClick('btnSaveMetadataSettings', saveMetadataSettings);
-        bindClick('btnSavePeopleSettings', savePeopleSettings);
-        bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
-        bindClick('btnSavePlaylistSettings', savePlaylistSettings);
+        var contentSync = getEl('chkEnableContentSync');
+        if (contentSync) contentSync.addEventListener('change', reflectLinkCacheActions);
 
         bindClick('btnResetContentTable', function() { resetTable('Content', ServerSyncShared.t.tr('ConfirmResetContentTable'), ServerSyncShared.t.tr('ToastContentTableReset'), ServerSyncShared.t.tr('ErrorResetContentTable')); });
         bindClick('btnResetHistoryTable', function() { resetTable('History', ServerSyncShared.t.tr('ConfirmResetHistoryTable'), ServerSyncShared.t.tr('ToastHistoryTableReset'), ServerSyncShared.t.tr('ErrorResetHistoryTable')); });

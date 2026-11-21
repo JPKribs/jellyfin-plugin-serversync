@@ -595,12 +595,6 @@ div:not(.serversync-form-row) + .serversync-form-row {
 @media (max-width: 768px) { #authChoices { grid-template-columns: 1fr; } }
 #btnCheckPeer, #btnTestConnection { white-space: nowrap; flex: 0 0 auto; }
 
-/* serversync-editor-footer */
-/* Footer of a server editor, Save server and Remove server with the result line between them. */
-/* Example: <div class="serversync-editor-footer"><button>Save server</button><span class="serversync-save-status base-status-text"></span><button>Remove server</button></div> */
-.serversync-editor-footer { display: flex; gap: 8px; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-.serversync-save-status { flex: 1; align-self: center; }
-
 /* serversync-mapping */
 /* Bordered row of a library or user mapping, a header with Remove and a two column grid of fields. */
 /* Example: <div class="serversync-mapping"><div class="serversync-mapping-header"></div><div class="serversync-mapping-grid"><div class="serversync-mapping-column"></div></div></div> */

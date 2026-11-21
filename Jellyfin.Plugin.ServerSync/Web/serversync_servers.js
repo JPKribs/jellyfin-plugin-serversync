@@ -48,24 +48,14 @@ export default function (view) {
     var sourceUsers = [];
     var localUsers = [];
 
-    // saveSection
-    // Saves one section and reports the result on a status line. Resolves true once the save landed and false
-    // when it did not, so a caller never acts on a change the server never kept. The config is replaced only
-    // from a save that landed.
-    //
-    // Inputs
-    // mutator [function]: Changes the fresh config in place.
-    // statusId [string]: The id of the status element that reports the result.
-    // successMessage [string]: What the status says when the save landed.
-    // failureMessage [string]: What the status says when it did not.
-    //
-    // Output
-    // [Promise]: Resolves true when the save landed.
-    function saveSection(mutator, statusId, successMessage, failureMessage) {
-        return ServerSyncShared.saveSection(mutator, statusId, successMessage, failureMessage).then(function (saved) {
-            if (saved) currentConfig = saved;
-            return !!saved;
-        });
+    // The Save Bar that ends the server editor, made when the page binds.
+    var saveBars = serverSyncModule.createSaveBars(made.page);
+    var serverBar = null;
+
+    // markEdited
+    // Marks the editor unsaved after a change no field reports, such as a mapping row added or removed.
+    function markEdited() {
+        if (serverBar) saveBars.markDirty(serverBar);
     }
 
     // The configured servers live in config.Servers in rank order. The page
@@ -951,6 +941,7 @@ export default function (view) {
             UserMappings: []
         });
         selectServer(servers.length - 1);
+        markEdited();
     }
 
     function deleteServer() {
@@ -992,75 +983,91 @@ export default function (view) {
         });
     }
 
-    // saveServers
+    // persistServers
     // Posts the in memory list. The server resolves kept sentinels against the stored entry with the same key,
     // so keys are never retyped. A list other than the page's own, such as the list without a server being
-    // removed, can be saved, and becomes the page's list only on success.
+    // removed, can be saved, and becomes the page's list only on success. The whole list is saved, so the
+    // editor holds nothing unsaved afterwards.
     //
     // Inputs
-    // successMessage [string]: What the status says when the save landed.
-    // failureMessage [string]: What the status says when it did not.
     // list [object[]]: The list to save, instead of the page's own.
-    // statusId [string]: The status element that reports the result. Defaults to the editor's.
     //
     // Output
-    // [Promise]: Resolves true when the save landed.
-    function saveServers(successMessage, failureMessage, list, statusId) {
+    // [Promise]: Resolves once the save landed, and rejects when it did not.
+    function persistServers(list) {
         var snapshot = JSON.parse(JSON.stringify(list || servers));
         // A save made for another reason never empties a saved address.
         snapshot.forEach(function (entry) {
             var stored = storedUrlFor(entry.Key);
             if (urlWasCleared(stored, entry.Url)) entry.Url = stored;
         });
-        return saveSection(function (config) {
+        return ServerSyncShared.saveSection(function (config) {
             keepStoredStorageFields(config.Servers, snapshot);
             config.Servers = snapshot;
-        }, statusId || 'saveServerStatus', successMessage || ServerSyncShared.t.tr('ToastServersSaved'), failureMessage || ServerSyncShared.t.tr('ErrorServersSave')).then(function (saved) {
+        }).then(function (saved) {
             // The saved list becomes the page's list. Its entries are fresh copies, which is why answers
             // that arrive later look their server up again with serverByKey.
-            if (saved && currentConfig && currentConfig.Servers) {
+            currentConfig = saved;
+            if (currentConfig && currentConfig.Servers) {
                 servers = currentConfig.Servers;
                 renderServerList();
             }
-            return saved;
+            saveBars.clean();
+        });
+    }
+
+    // saveServers
+    // Saves the list for an action outside the editor's Save Bar, such as a reorder, and reports on a status line.
+    //
+    // Inputs
+    // successMessage [string]: What the status says when the save landed.
+    // failureMessage [string]: What the status says when it did not.
+    // list [object[]]: The list to save, instead of the page's own.
+    // statusId [string]: The status element that reports the result.
+    //
+    // Output
+    // [Promise]: Resolves true when the save landed.
+    function saveServers(successMessage, failureMessage, list, statusId) {
+        return persistServers(list).then(function () {
+            ServerSyncShared.setStatus(statusId, successMessage, false);
+            return true;
+        }, function () {
+            ServerSyncShared.setStatus(statusId, failureMessage, true, { timeout: 10000 });
+            return false;
         });
     }
 
     // Push and Sync, and a library kept as links, only work when the other server runs a Server Sync
     // this one can talk to. A plain Jellyfin server can only be pulled from, as copies. So a server
     // that answers and does not run it, or runs one too far from this version, is not saved that way. One that cannot be reached is saved, since it cannot be asked.
+    // The Save Bar shows a refusal as its failed line, and an unreachable server as its saved line.
     function saveServerConfig() {
         var server = collectServerEditor();
-        if (!server) return;
-        ServerSyncShared.setStatus('saveServerStatus', '', false);
+        if (!server) return Promise.reject(new Error(ServerSyncShared.t.tr('ErrorServerSave')));
         if (urlWasCleared(storedUrlFor(server.Key), server.Url)) {
-            ServerSyncShared.setStatus('saveServerStatus', ServerSyncShared.t.tr('ErrorEnterUrlNotSaved'), true, { timeout: 0 });
-            return;
+            return Promise.reject(new Error(ServerSyncShared.t.tr('ErrorEnterUrlNotSaved')));
         }
         var links = (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
         if ((modeOf(server) === 'Pull' && !links) || !server.Url || !server.ApiKey) {
-            saveServers(ServerSyncShared.t.tr('ToastServerSaved'), ServerSyncShared.t.tr('ErrorServerSave'));
-            return;
+            return persistServers();
         }
 
         var request = requestFor(server);
         request.Mode = modeOf(server);
-        apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
+        return apiRequest('Hints/CheckPeer', 'POST', request).catch(function () { return null; }).then(function (result) {
             if (result && result.Reachable && !result.HasPlugin) {
                 peerPlugin[server.Key] = 'no';
-                ServerSyncShared.setStatus('saveServerStatus', ServerSyncShared.t.format('ErrorPeerNoPlugin', serverTitle(server)), true, { timeout: 0 });
-                return;
+                throw new Error(ServerSyncShared.t.format('ErrorPeerNoPlugin', serverTitle(server)));
             }
             // Its Server Sync and this one cannot talk until one is updated, which leaves it where a
             // server without Server Sync is: nothing sent to it would be taken, and no link would play.
             if (result && result.Reachable && result.Incompatible) {
-                ServerSyncShared.setStatus('saveServerStatus', ServerSyncShared.t.format('ErrorPeerIncompatible', result.Message || ServerSyncShared.t.format('ErrorPeerIncompatibleReason', serverTitle(server))), true, { timeout: 0 });
-                return;
+                throw new Error(ServerSyncShared.t.format('ErrorPeerIncompatible', result.Message || ServerSyncShared.t.format('ErrorPeerIncompatibleReason', serverTitle(server))));
             }
 
-            saveServers(result && result.Reachable ? ServerSyncShared.t.tr('ToastServerSaved') : ServerSyncShared.t.tr('ToastServerSavedUnreachable'), ServerSyncShared.t.tr('ErrorServerSave'));
-        }).catch(function () {
-            saveServers(ServerSyncShared.t.tr('ToastServerSaved'), ServerSyncShared.t.tr('ErrorServerSave'));
+            return persistServers().then(function () {
+                return result && !result.Reachable ? ServerSyncShared.t.tr('ToastServerSavedUnreachable') : '';
+            });
         });
     }
 
@@ -1403,6 +1410,7 @@ export default function (view) {
 
         div.querySelector('.serversync-remove-mapping').addEventListener('click', function() {
             div.remove();
+            markEdited();
         });
     }
 
@@ -1650,7 +1658,7 @@ export default function (view) {
         });
         if (mapping.LocalUserId) selectLoose(localSelect, mapping.LocalUserId);
 
-        div.querySelector('.serversync-remove-user-mapping').addEventListener('click', function() { div.remove(); });
+        div.querySelector('.serversync-remove-user-mapping').addEventListener('click', function() { div.remove(); markEdited(); });
     }
 
     // An empty box means "use the server's own value", which is stored as null.
@@ -1684,6 +1692,7 @@ export default function (view) {
             servers = config.Servers || [];
             Promise.all([fetchLocalLibraries(), fetchLocalUsers()]).then(function() {
                 selectServer(servers.length > 0 ? 0 : -1);
+                saveBars.clean();
                 refreshServerHealth();
                 checkPoolPlugins();
             });
@@ -1698,7 +1707,6 @@ export default function (view) {
         ServerSyncShared.initCollapsibles();
 
         bindClick('btnTestConnection', testConnection);
-        bindClick('btnSaveServer', saveServerConfig);
         bindClick('btnGenerateToken', generateToken);
         bindClick('btnAddServer', addServer);
         bindClick('btnDeleteServer', deleteServer);
@@ -1730,7 +1738,13 @@ export default function (view) {
 
         // The buttons are disabled while the open server's lists load. The check here covers a
         // click that lands before the disabled state does.
-        bindClick('btnAddMapping', function() { if (mappingsLoaded) addLibraryMappingRow(); });
-        bindClick('btnAddUserMapping', function() { if (mappingsLoaded) addUserMappingRow(); });
+        bindClick('btnAddMapping', function() { if (mappingsLoaded) { addLibraryMappingRow(); markEdited(); } });
+        bindClick('btnAddUserMapping', function() { if (mappingsLoaded) { addUserMappingRow(); markEdited(); } });
+
+        serverBar = saveBars.add(getEl('serverEditor'), {
+            savedText: ServerSyncShared.t.tr('ToastServerSaved'),
+            failedText: ServerSyncShared.t.tr('ErrorServerSave'),
+            onSave: saveServerConfig
+        });
     }
 }

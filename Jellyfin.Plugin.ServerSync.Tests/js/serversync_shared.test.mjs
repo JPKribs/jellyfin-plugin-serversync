@@ -171,35 +171,74 @@ test('saveConfig remembers the content setting of the config it saved', async fu
     assert.equal(page.store[mod.STORAGE_TAB_KEY], '1');
 });
 
-test('saveSection saves the changed config and reports the success message', async function () {
+test('saveSection saves the changed config and resolves with it', async function () {
     await build({ config: { Servers: [] } });
     var seen = null;
-    var saved = await shared.saveSection(function (config) { config.Changed = true; seen = config; }, 'status', 'Saved.', 'Could not save.');
+    var saved = await shared.saveSection(function (config) { config.Changed = true; seen = config; });
     assert.equal(seen.Changed, true);
     assert.equal(saved.Changed, true);
-    var el = view.querySelector('#status');
-    assert.equal(statusText(el), 'Saved.');
-    assert.ok(el.classList.contains('base-status-ok'));
 });
 
-test('saveSection resolves null and reports the failure message when the save does not land', async function () {
+test('saveSection rejects when the save does not land, so a Save Bar shows it failed', async function () {
     await build({ config: {} });
     globalThis.ApiClient.updatePluginConfiguration = function () { return Promise.reject(new Error('refused')); };
-    var saved = await shared.saveSection(function () {}, 'status', 'Saved.', 'Could not save.');
-    assert.equal(saved, null);
-    var el = view.querySelector('#status');
-    assert.equal(statusText(el), 'Could not save.');
-    assert.ok(el.classList.contains('base-status-bad'));
+    await assert.rejects(shared.saveSection(function () {}));
 });
 
-test('saveSection reports a failure when the mutator throws, and never saves', async function () {
+test('saveSection rejects when the mutator throws, and never saves', async function () {
     await build({ config: {} });
     var posted = 0;
     globalThis.ApiClient.updatePluginConfiguration = function () { posted++; return Promise.resolve(); };
-    var saved = await shared.saveSection(function () { throw new Error('removed'); }, 'status', 'Saved.', 'Could not save.');
-    assert.equal(saved, null);
+    await assert.rejects(shared.saveSection(function () { throw new Error('removed'); }), /removed/);
     assert.equal(posted, 0);
-    assert.equal(statusText(view.querySelector('#status')), 'Could not save.');
+});
+
+// fakePage
+// A page handle that keeps the unsaved check createSaveBars gives it.
+function fakePage() {
+    var handle = { guard: null };
+    handle.guardUnsaved = function (fn) { handle.guard = fn; };
+    return handle;
+}
+
+test('createSaveBars ends a section with a full width Save Bar, and a changed field marks it unsaved', function () {
+    var handle = fakePage();
+    var bars = mod.createSaveBars(handle);
+    var section = page.dom.el('div', {}, [page.dom.el('input', { id: 'sectionField' })]);
+    view.appendChild(section);
+    var bar = bars.add(section, { savedText: 'Saved.', failedText: 'Could not save.', onSave: function () { return Promise.resolve(); } });
+
+    assert.equal(section.children[section.children.length - 1], bar.element);
+    assert.ok(bar.element.classList.contains('base-save-bar'));
+    assert.equal(handle.guard(), false);
+
+    section.querySelector('#sectionField').dispatch('input');
+    assert.equal(bar.getState(), 'pending');
+    assert.equal(handle.guard(), true);
+
+    bars.clean();
+    assert.equal(bar.getState(), '');
+    assert.equal(handle.guard(), false);
+});
+
+test('createSaveBars clears the unsaved mark only once a save lands', async function () {
+    var handle = fakePage();
+    var bars = mod.createSaveBars(handle);
+    var section = page.dom.el('div');
+    view.appendChild(section);
+    var result = Promise.reject(new Error('refused'));
+    result.catch(function () {});
+    var bar = bars.add(section, { savedText: 'Saved.', failedText: 'Could not save.', onSave: function () { return result; } });
+
+    bars.markDirty(bar);
+    assert.equal(await bar.save(), false);
+    assert.equal(bar.getState(), 'failed');
+    assert.equal(handle.guard(), true);
+
+    result = Promise.resolve();
+    assert.equal(await bar.save(), true);
+    assert.equal(bar.getState(), 'saved');
+    assert.equal(handle.guard(), false);
 });
 
 test('syncStatus shows a result on the Sync tab status line, in the error color for a failure', function () {

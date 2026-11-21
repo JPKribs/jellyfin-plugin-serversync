@@ -22,6 +22,7 @@ import {
     createLineChart,
     createUsageMeter,
     createRepeater,
+    createSaveBar,
     generateGuid,
     bindDialog,
     confirmDialog,
@@ -153,6 +154,71 @@ export function createServerSyncPage(view, opts) {
         if (!view.classList.contains('hide')) setTabs('serversync', tabIndex(), tabs);
     };
     return { shared: bag, page: page };
+}
+
+// createSaveBars
+// Ends sections with Base's Save Bar and asks before the page is left while one has unsaved changes.
+// A field changed inside a section marks its bar unsaved, and a save that lands clears it.
+//
+// Inputs
+// page [object]: Base's page handle, from createServerSyncPage.
+//
+// Output
+// [object]: add(content, opts) appends a Save Bar to content and returns the bar. opts holds savedText,
+//   failedText, and onSave, which returns the save's promise. A promise that resolves with text shows that
+//   text as the saved line. markDirty(bar) marks a bar unsaved from code. clean() clears every bar, for
+//   after the page loads its values.
+export function createSaveBars(page) {
+    var entries = [];
+
+    function entryOf(bar) {
+        return entries.find(function (entry) { return entry.bar === bar; }) || null;
+    }
+
+    function markDirty(bar) {
+        var entry = entryOf(bar);
+        if (!entry) return;
+        entry.dirty = true;
+        bar.setDirty(true);
+    }
+
+    page.guardUnsaved(function () { return entries.some(function (entry) { return entry.dirty; }); });
+
+    return {
+        add: function (content, opts) {
+            if (!content) return null;
+            var bar = createSaveBar({
+                fill: true,
+                savedText: opts.savedText,
+                failedText: opts.failedText,
+                onSave: function () {
+                    return Promise.resolve().then(opts.onSave).then(function (savedLine) {
+                        var entry = entryOf(bar);
+                        if (entry) entry.dirty = false;
+                        // The bar shows its own saved line once this resolves, so a line of the save's own follows it.
+                        if (typeof savedLine === 'string' && savedLine) setTimeout(function () { bar.setState('saved', savedLine); }, 0);
+                    });
+                }
+            });
+            entries.push({ bar: bar, dirty: false });
+            content.appendChild(bar.element);
+            // A table's search and filters only change what it shows, so they leave the section saved.
+            var mark = function (e) {
+                if (bar.element.contains(e.target) || (e.target.closest && e.target.closest('.base-table-controls'))) return;
+                markDirty(bar);
+            };
+            content.addEventListener('input', mark);
+            content.addEventListener('change', mark);
+            return bar;
+        },
+        markDirty: markDirty,
+        clean: function () {
+            entries.forEach(function (entry) {
+                entry.dirty = false;
+                entry.bar.setDirty(false);
+            });
+        }
+    };
 }
 
 // createServerSyncShared
@@ -415,33 +481,23 @@ export function createServerSyncShared(view, bag) {
     };
 
     // saveSection
-    // Saves one section of the config. It reads the config again, applies only that section's fields, and
-    // saves, since posting a page load snapshot whole would overwrite what other writers changed since,
-    // such as the timestamps and failure records the tasks write, or the other dashboard pages' sections.
-    // The result shows on the status element.
+    // Saves one section of the config through Base's saveConfigWith. It reads the config again, applies only
+    // that section's fields, and saves, since posting a page load snapshot whole would overwrite what other
+    // writers changed since, such as the timestamps and failure records the tasks write, or the other
+    // dashboard pages' sections.
     //
     // Inputs
     // mutator [function]: Called with the fresh config, and changes it in place.
-    // statusId [string]: The id of the status element that reports the result.
-    // successMessage [string]: What the status says when the save landed.
-    // failureMessage [string]: What the status says when it did not.
     //
     // Output
-    // [Promise]: Resolves with the saved config when the save landed and null when it did not. The caller
-    // keeps its own copy of the config and updates it only from a save the server really kept.
-    shared.saveSection = function (mutator, statusId, successMessage, failureMessage) {
+    // [Promise]: Resolves with the saved config, and rejects when the save failed, so a Save Bar shows the
+    // result. The caller keeps its own copy of the config and updates it only from a save the server kept.
+    shared.saveSection = function (mutator) {
         var pending = null;
-        return shared.getConfig().then(function (config) {
+        return shared.saveConfigWith(function (config) {
             mutator(config);
             pending = config;
-            return shared.saveConfig(config);
-        }).then(function () {
-            shared.setStatus(statusId, successMessage, false);
-            return pending;
-        }, function () {
-            shared.setStatus(statusId, failureMessage, true, { timeout: 10000 });
-            return null;
-        });
+        }).then(function () { return pending; });
     };
 
     // pageHelpers

@@ -42,13 +42,6 @@
                                 <div class="serversync-form-row serversync-schedule-row"><span class="serversync-form-label"><span data-str="LabelHours">Hours</span><span class="serversync-form-hint" data-str="HintUsesServersClock">Uses the server's clock. 22 to 6 runs overnight. Equal hours run all day.</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtScheduledStartHour" min="0" max="23" class="serversync-form-input" /><span class="serversync-unit" data-str="UnitHourTo">to</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtScheduledEndHour" min="0" max="24" class="serversync-form-input" /></span></div>
                             </div>
                             <div class="fieldDescription serversync-mb-md" data-str="HelpSetStreamSpeedsAbove">Set stream speeds above your files' bitrate, or playback buffers. 0 is no limit, and a user mapping can set a lower one.</div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveBandwidth" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="saveBandwidthStatus" class="base-status-text" role="status"></span>
-                            </div>
                         </div>
                     </div>
 
@@ -103,13 +96,6 @@
                                 </label>
                                 <div class="fieldDescription checkboxFieldDescription" data-str="HelpCheckImageSizeRefresh">Check every image size each refresh. Slow.</div>
                             </div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveProcessing" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="saveProcessingStatus" class="base-status-text" role="status"></span>
-                            </div>
                         </div>
                     </div>
 
@@ -125,13 +111,6 @@
 
                             <div id="callerGrants"></div>
                             <div class="fieldDescription serversync-mb-md" data-str="HelpAcceptsHostsURLsIPs">Accepts hosts, URLs, IPs, or ranges, separated by commas. Empty allows every location.</div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveCallerAccess" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="saveCallerAccessStatus" class="base-status-text" role="status"></span>
-                            </div>
                         </div>
                     </div>
 
@@ -344,17 +323,13 @@
                                     </div>
                                     </div>
                                     <div id="linkCacheStatus" class="base-neutral serversync-mb-md"></div>
-                                    <button is="emby-button" type="button" id="btnClearLinkCache" class="raised base-button destructive small">
-                                        <span data-str="ButtonDeleteCachedFiles">Delete cached files</span>
-                                    </button>
                                 </div>
                             </div>
 
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveContentSettings" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
+                            <div id="linkCacheActions" class="base-button-row">
+                                <button is="emby-button" type="button" id="btnClearLinkCache" class="raised base-button destructive fill">
+                                    <span data-str="ButtonDeleteCachedFiles">Delete cached files</span>
                                 </button>
-                                <span id="saveContentStatus" class="base-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
@@ -435,13 +410,6 @@
                                     </div>
                                 </div>
 
-                            </div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveHistorySettings" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="saveHistoryStatus" class="base-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
@@ -604,13 +572,6 @@
                                     </div>
                                 </div>
                             </div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveMetadataSettings" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="saveMetadataStatus" class="base-status-text" role="status"></span>
-                            </div>
                         </div>
                     </div>
 
@@ -676,13 +637,6 @@
                                     </div>
                                 </div>
                             </div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSavePeopleSettings" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="savePeopleStatus" class="base-status-text" role="status"></span>
-                            </div>
                         </div>
                     </div>
 
@@ -737,13 +691,6 @@
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesSharesPublicAccess">Copies shares and public access.</div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSavePlaylistSettings" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="savePlaylistStatus" class="base-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
@@ -825,13 +772,6 @@
                                         <div class="fieldDescription checkboxFieldDescription" data-str="HelpCopiesProfilePictures">Copies profile pictures.</div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <div class="base-collapsible-actions flush">
-                                <button is="emby-button" type="button" id="btnSaveUserSyncSettings" class="raised base-button primary small">
-                                    <span data-str="Save">Save</span>
-                                </button>
-                                <span id="saveUserSyncStatus" class="base-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>

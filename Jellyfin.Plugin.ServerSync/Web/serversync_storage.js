@@ -53,6 +53,10 @@ export default function (view) {
 
     var contentOn = true;
     var currentConfig = null;
+
+    // The Save Bar that ends the Libraries section, made when the page binds.
+    var saveBars = serverSyncModule.createSaveBars(made.page);
+    var storageBar = null;
     var selectedKey = '';
     var _tableSeq = 0;
     var _thumbSeq = 0;
@@ -160,7 +164,9 @@ export default function (view) {
             });
         }
         setVisible('storageNoLibraries', !!server && count === 0);
-        setVisible('btnSaveStorage', count > 0);
+        // Fresh cards hold what is saved, so nothing is unsaved.
+        if (storageBar) setVisible(storageBar.element, count > 0);
+        saveBars.clean();
     }
 
     function pickedItem(item) {
@@ -313,6 +319,7 @@ export default function (view) {
 
         // Selection lives in the picks object, so it persists across searches and pagination.
         function onPickerItemClick(item, selected, pickerContainer) {
+            if (storageBar) saveBars.markDirty(storageBar);
             if (selected[item.Id]) {
                 delete selected[item.Id];
             } else {
@@ -423,9 +430,9 @@ export default function (view) {
     function saveStorage() {
         var key = selectedKey;
         var edits = cards.map(function (card) { return { card: card, values: card.read() }; });
-        if (!key || edits.length === 0) return;
+        if (!key || edits.length === 0) return Promise.resolve();
         var missing = 0;
-        ServerSyncShared.saveSection(function (config) {
+        return ServerSyncShared.saveSection(function (config) {
             var server = ((config && config.Servers) || []).find(function (s) { return s.Key === key; });
             if (!server) throw new Error('The server was removed');
             edits.forEach(function (edit) {
@@ -436,15 +443,15 @@ export default function (view) {
                 }
                 Object.keys(edit.values).forEach(function (field) { target[field] = edit.values[field]; });
             });
-        }, 'saveStorageStatus', tr('ToastStorageSaved'), tr('ErrorSaveStorage')).then(function (saved) {
-            if (!saved) return;
+        }).then(function (saved) {
             currentConfig = saved;
+            reloadKeptCopies();
+            // The rest saved, and the Save Bar says which mappings changed meanwhile.
             if (missing > 0) {
-                ServerSyncShared.setStatus('saveStorageStatus', ServerSyncShared.plural(missing, 'ErrorMappingsChangedOne', 'ErrorMappingsChangedMany'), true, { timeout: 10000 });
                 renderServerPicker();
                 renderLibraries();
+                throw new Error(ServerSyncShared.plural(missing, 'ErrorMappingsChangedOne', 'ErrorMappingsChangedMany'));
             }
-            reloadKeptCopies();
         });
     }
 
@@ -705,7 +712,11 @@ export default function (view) {
     // Wires the page's buttons and controls. Base calls it once, the first time the page shows.
     function bindPage() {
         ServerSyncShared.initCollapsibles();
-        bindClick('btnSaveStorage', saveStorage);
+        storageBar = saveBars.add(getEl('storageLibrariesContent'), {
+            savedText: tr('ToastStorageSaved'),
+            failedText: tr('ErrorSaveStorage'),
+            onSave: saveStorage
+        });
 
         var select = getEl('selStorageServer');
         if (select) {

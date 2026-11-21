@@ -10,8 +10,8 @@ globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
 globalThis.setInterval = function () { return 1; };
 
-var IDS = ['settingsStatus', 'resetStatus', 'saveBandwidthStatus', 'streamSpeedRows', 'linkTakeRows', 'linkCacheStatus', 'bandwidthTable', 'watchedFilterUsersList', 'saveContentSettingsStatus', 'callerGrants', 'saveCallerAccessStatus'];
-var BUTTONS = ['btnResetEntireDatabase', 'btnResetContentTable', 'btnClearLinkCache', 'btnSaveBandwidth', 'btnSaveContentSettings', 'btnSaveCallerAccess'];
+var IDS = ['settingsStatus', 'resetStatus', 'bandwidthConfigContent', 'streamSpeedRows', 'linkTakeRows', 'linkCacheStatus', 'bandwidthTable', 'watchedFilterUsersList', 'contentSyncSettingsContent', 'callerGrants', 'callerAccessContent'];
+var BUTTONS = ['btnResetEntireDatabase', 'btnResetContentTable', 'btnClearLinkCache'];
 
 // openPage
 // Loads the Settings controller over a view that holds the elements it uses, and shows the page.
@@ -32,6 +32,18 @@ async function openPage(opts) {
     view.dispatch('viewshow');
     await settle();
     return { page: page, view: view, calls: calls };
+}
+
+// saveButton
+// Finds the Save button of the Save Bar that ends a section.
+function saveButton(view, contentId) {
+    return view.querySelector('#' + contentId + ' .base-save-bar .base-save-button');
+}
+
+// barStatus
+// Finds the status line of the Save Bar that ends a section.
+function barStatus(view, contentId) {
+    return view.querySelector('#' + contentId + ' .base-save-bar .base-save-status');
 }
 
 // posts
@@ -142,17 +154,17 @@ test('the bandwidth rows list each server that may link, with its name and speed
     assert.doesNotMatch(html, /No linking/);
 });
 
-test('saving the bandwidth posts the changed fields and reports it beside the Save button', async function () {
+test('saving the bandwidth posts the changed fields and reports it on the Save Bar', async function () {
     var opened = await openPage({ config: { Servers: [], Untouched: 'kept' } });
     var saved = null;
     globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
     opened.view.querySelector('#txtMaxDownloadSpeed').value = '12';
-    opened.view.querySelector('#btnSaveBandwidth').click();
+    saveButton(opened.view, 'bandwidthConfigContent').click();
     await settle(20);
     assert.equal(saved.MaxDownloadSpeed, 12);
     assert.equal(saved.DownloadSpeedUnit, 'Mbps');
     assert.equal(saved.Untouched, 'kept');
-    var status = opened.view.querySelector('#saveBandwidthStatus');
+    var status = barStatus(opened.view, 'bandwidthConfigContent');
     assert.equal(statusText(status), 'Bandwidth saved.');
     assert.ok(status.classList.contains('base-status-ok'));
 });
@@ -161,8 +173,7 @@ test('the provider switches show on when never saved, and each section saves its
     var opened = await openPage({
         config: { Servers: [] },
         checkboxes: ['chkMetadataSyncProvider', 'chkPeopleSyncProvider'],
-        buttons: ['btnSaveMetadataSettings', 'btnSavePeopleSettings'],
-        ids: ['saveMetadataStatus', 'savePeopleStatus']
+        ids: ['metadataSyncSettingsContent', 'peopleSyncSettingsContent']
     });
     var saved = null;
     globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
@@ -172,12 +183,12 @@ test('the provider switches show on when never saved, and each section saves its
     assert.equal(people.checked, true);
 
     metadata.checked = false;
-    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    saveButton(opened.view, 'metadataSyncSettingsContent').click();
     await settle(20);
     assert.equal(saved.MetadataSyncProvider, false);
 
     people.checked = false;
-    opened.view.querySelector('#btnSavePeopleSettings').click();
+    saveButton(opened.view, 'peopleSyncSettingsContent').click();
     await settle(20);
     assert.equal(saved.PeopleSyncProvider, false);
 });
@@ -186,30 +197,30 @@ test('the media segment provider switch shows off when never saved, and the Meta
     var opened = await openPage({
         config: { Servers: [] },
         checkboxes: ['chkMetadataSyncSegmentProvider'],
-        buttons: ['btnSaveMetadataSettings'],
-        ids: ['saveMetadataStatus']
+        ids: ['metadataSyncSettingsContent']
     });
     var saved = null;
     globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
     var segments = opened.view.querySelector('#chkMetadataSyncSegmentProvider');
     assert.equal(segments.checked, false);
 
-    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    saveButton(opened.view, 'metadataSyncSettingsContent').click();
     await settle(20);
     assert.equal(saved.MetadataSyncSegmentProvider, false);
 
     segments.checked = true;
-    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    saveButton(opened.view, 'metadataSyncSettingsContent').click();
     await settle(20);
     assert.equal(saved.MetadataSyncSegmentProvider, true);
 });
 
 test('a bandwidth save that fails says so and does not claim success', async function () {
     var opened = await openPage();
-    globalThis.ApiClient.updatePluginConfiguration = function () { return Promise.reject(new Error('refused')); };
-    opened.view.querySelector('#btnSaveBandwidth').click();
+    // Jellyfin's client rejects with the response, which carries no message of its own.
+    globalThis.ApiClient.updatePluginConfiguration = function () { return Promise.reject({ status: 500 }); };
+    saveButton(opened.view, 'bandwidthConfigContent').click();
     await settle(20);
-    var status = opened.view.querySelector('#saveBandwidthStatus');
+    var status = barStatus(opened.view, 'bandwidthConfigContent');
     assert.equal(statusText(status), 'Could not save the bandwidth.');
     assert.ok(status.classList.contains('base-status-bad'));
 });
@@ -239,7 +250,7 @@ test('saving Content keeps the picked users, keeps a saved user whose server did
     await settle(20);
     var saved = null;
     globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
-    opened.view.querySelector('#btnSaveContentSettings').click();
+    saveButton(opened.view, 'contentSyncSettingsContent').click();
     await settle(20);
     assert.deepEqual(saved.WatchedFilterUserIds, ['u2', 'gone']);
     assert.equal(saved.SkipWatchedByAllUsers, true);
@@ -263,22 +274,21 @@ test('the whitelist is a Repeater that saves each row with a user, its name, and
     assert.ok(opened.view.querySelector('#callerGrants').children.length > 0);
     var saved = null;
     globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
-    opened.view.querySelector('#btnSaveCallerAccess').click();
+    saveButton(opened.view, 'callerAccessContent').click();
     await settle(20);
     assert.deepEqual(saved.PeerCallerGrants, [
         { UserId: 'apikey', UserName: 'API Keys', Locations: ['10.0.0.0/8', 'source-a'] },
         { UserId: 'aaaa1111', UserName: 'viewer', Locations: [] },
         { UserId: 'gone', UserName: 'Left', Locations: [] }
     ]);
-    assert.equal(statusText(opened.view.querySelector('#saveCallerAccessStatus')), 'Whitelist saved.');
+    assert.equal(statusText(barStatus(opened.view, 'callerAccessContent')), 'Whitelist saved.');
 });
 
 test('the two media segment switches show off when never saved, and the Metadata save keeps what they show', async function () {
     var opened = await openPage({
         config: { Servers: [] },
         checkboxes: ['chkMetadataSyncReplaceSegments', 'chkMetadataSyncRemoveSegments'],
-        buttons: ['btnSaveMetadataSettings'],
-        ids: ['saveMetadataStatus']
+        ids: ['metadataSyncSettingsContent']
     });
     var saved = null;
     globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
@@ -288,7 +298,7 @@ test('the two media segment switches show off when never saved, and the Metadata
     assert.equal(remove.checked, false);
 
     replace.checked = true;
-    opened.view.querySelector('#btnSaveMetadataSettings').click();
+    saveButton(opened.view, 'metadataSyncSettingsContent').click();
     await settle(20);
     assert.equal(saved.MetadataSyncReplaceSegments, true);
     assert.equal(saved.MetadataSyncRemoveSegments, false);
