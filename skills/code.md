@@ -213,6 +213,7 @@ export function createSyncTableModule(view, shared) {
 * Read the clock once in a method and reuse the value. Two reads can straddle a second and disagree.
 * Take a `TimeProvider` wherever time decides an outcome, so a test can move it.
 * Register services with `[PluginService]`.
+* Never take a source item id to mean the same bytes. A file replaced in place keeps its id, so anything kept by that id, such as a cached file, is dropped when the source announces a change.
 
 ## JavaScript Conventions
 
