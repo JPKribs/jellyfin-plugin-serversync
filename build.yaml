@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.21.0"
+version: "12.4.20.2"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step."
@@ -22,7 +22,12 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  changed:
+  - Every Save on the Settings, Servers, and Storage tabs is a full width Save at the end of what it saves, with a line above it that says Unsaved changes, Saving, Changes saved, or why the save failed. Leaving a tab with unsaved changes asks first
+  - Save server in the server editor reads Save. Remove server and Delete cached files sit in a row directly above Save
   fixed:
   - The Link streams chart on the Statistics tab could draw its dates over each other across 30 days or on a narrow screen. It shows only the dates that fit side by side, and keeps the first and last whenever they fit
   developer:
-  - Uses JPKribs.Jellyfin.Base 12.4.2, after 12.4.1. Base's Line Chart picks its x axis labels by their measured width
+  - Uses JPKribs.Jellyfin.Base 12.4.3, after 12.4.1. Base's Line Chart picks its x axis labels by their measured width, and its Filtered List draws a reload icon on its selection bar
+  - createSaveBars in serversync_shared.js ends a section with Base's Save Bar and guards leaving the page. saveSection saves through saveConfigWith and rejects when the save fails
+  - build.sh checks wildcard resources without globstar
