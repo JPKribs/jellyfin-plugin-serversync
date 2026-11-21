@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.20.3",
+        "changelog": "\n## Changed\n- Activity page entries have short names such as Items synced or Changes paused, with the count, servers, and reason in the overview. The server log keeps per item lines at Debug\n\n## Developer\n- skills/logging.md sets how activity entries and server log lines are written. The integration pools log Server Sync at Debug, since their scenarios read per item lines\n- The integration pool checks a changed link by the line that says it was linked again, not by its .nfo time",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.20.3/jellyfin-plugin-serversync-12.4.20.3.zip",
+        "checksum": "d5bd0a3107f36c568a945cc8411eab01",
+        "timestamp": "2026-11-21T06:02:50Z"
+      },
+      {
         "version": "12.4.20.2",
         "changelog": "\n## Changed\n- Every Save on the Settings, Servers, and Storage tabs is a full width Save at the end of what it saves, with a line above it that says Unsaved changes, Saving, Changes saved, or why the save failed. Leaving a tab with unsaved changes asks first\n- Save server in the server editor reads Save. Remove server and Delete cached files sit in a row directly above Save\n\n## Fixed\n- The Link streams chart on the Statistics tab could draw its dates over each other across 30 days or on a narrow screen. It shows only the dates that fit side by side, and keeps the first and last whenever they fit\n\n## Developer\n- Uses JPKribs.Jellyfin.Base 12.4.3, after 12.4.1. Base's Line Chart picks its x axis labels by their measured width, and its Filtered List draws a reload icon on its selection bar\n- createSaveBars in serversync_shared.js ends a section with Base's Save Bar and guards leaving the page. saveSection saves through saveConfigWith and rejects when the save fails\n- build.sh checks wildcard resources without globstar",
         "targetAbi": "12.4.0.0",
