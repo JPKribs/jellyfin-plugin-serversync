@@ -3234,9 +3234,10 @@ def scenario_file_changes(creds, apis, storage):
 
         # A rewrite in place: a copy is replaced, and a link is written again.
         if link:
-            wait_until(lambda: mtime(os.path.splitext(held("W", w_file))[0] + ".nfo") > before["W"][1], 300, "a link whose file was rewritten has its .nfo written again")
-            wait_until(lambda: mtime(os.path.splitext(held("T", titles["T"] + ".mp4"))[0] + ".nfo") > before["T"][1], 300,
-                       "a link whose file only has a new time has its .nfo written again")
+            # The link is written again, and its .nfo only when the source's details changed.
+            wait_until(lambda: f"{titles['W']}.strm on a hint from 'source-a'" in local_log(since), 300, "a link whose file was rewritten is written again")
+            wait_until(lambda: f"{titles['T']}.strm on a hint from 'source-a'" in local_log(since), 300, "a link whose file only has a new time is written again")
+            expect(mtime(os.path.splitext(held("T", titles["T"] + ".mp4"))[0] + ".nfo") == before["T"][1], "an unchanged .nfo is left as it is")
         else:
             wait_until(lambda: os.path.getsize(held("W", w_file)) == os.path.getsize(os.path.join(src["W"], w_file)) != w_size, 300,
                        "a copy whose file was rewritten in place is replaced")
