@@ -303,4 +303,26 @@ public sealed class LinkNfoTests : IDisposable
         Assert.True(LinkNfo.IsOurs(path));
         Assert.False(File.Exists(path + ".serversync-tmp"));
     }
+
+    /// <summary>
+    /// An .nfo that already says the same is left untouched, and one that differs is written again.
+    /// True: a link written again changes its .nfo only when the source's details changed.
+    /// False: every hint would touch the .nfo and make Jellyfin read the item again.
+    /// </summary>
+    [Fact]
+    public void Write_SameDetails_LeavesTheFile_AndNewDetailsWriteIt()
+    {
+        var link = Path.Combine(_dir, "Film.strm");
+        var path = Path.Combine(_dir, "Film.nfo");
+        Assert.True(LinkNfo.Write(link, new BaseItemDto { Type = BaseItemDto_Type.Movie, Name = "Film" }));
+        var before = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(path, before);
+
+        Assert.True(LinkNfo.Write(link, new BaseItemDto { Type = BaseItemDto_Type.Movie, Name = "Film" }));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(path));
+
+        Assert.True(LinkNfo.Write(link, new BaseItemDto { Type = BaseItemDto_Type.Movie, Name = "Film (Director's Cut)" }));
+        Assert.NotEqual(before, File.GetLastWriteTimeUtc(path));
+        Assert.Contains("Director's Cut", File.ReadAllText(path), StringComparison.Ordinal);
+    }
 }
