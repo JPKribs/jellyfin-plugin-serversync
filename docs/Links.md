@@ -114,6 +114,8 @@ A comment directly below the `<?xml …?>` line says it was written by Server Sy
 * An `.nfo` already there that Server Sync did not write is left alone.
 * Deleting that comment line keeps your own edits from then on.
 
+Each time the link is written again the `.nfo` is rewritten only when the source's details changed, so an unchanged one is left untouched.
+
 Jellyfin reads an `.nfo` again on a full metadata refresh. While Server Sync's `.nfo` is in place, a full refresh can put edits made on this server, or by metadata sync, back to the source's values. Delete the comment line, or the `.nfo`, to hand the metadata to Jellyfin. An `.nfo` you delete is not written again.
 
 ### Subtitles
@@ -196,6 +198,8 @@ The cache is one folder with one size limit, whichever servers its links stream 
 * **Episodes ahead.** The next episodes after the one a user starts, in order and across a season's end, up to **Pre-cache episodes**.
 
 Files are downloaded one at a time in the background, from the link's own server. The source's speed limits for the linking server and for the user apply, and so does the linking server's own download speed and schedule. A download passes the source's checks for the user it is made for, and nobody is watching it, so it is not counted as a stream and the stream limits do not hold it back. The source sends one linking server at most two cache downloads at once. A file is only served once it is whole and the size the source reports.
+
+A file that changes on the source leaves the cache. When the source announces the change, the linking server drops its cached copy at once, even at the same size, and writes the `.strm` and `.nfo` again. A download already running for the old file is thrown away. A change found by a **Sync Content** run instead drops the cached copy when the size differs. The new version is cached the next time someone plays it.
 
 * A file larger than **Cache size** is never cached.
 * Only a settled link is cached, and only from its own server. Another server that holds the same file is not used for the download.

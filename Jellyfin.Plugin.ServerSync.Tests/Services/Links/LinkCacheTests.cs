@@ -500,6 +500,50 @@ public sealed class LinkCacheTests : IDisposable
         Assert.Equal(100_000_000, server.GetLinkStreamSpeedBytes(false, capped));
     }
 
+    /// <summary>
+    /// A cached file of another size than the source reports now is dropped when asked for at that size.
+    /// True: a film replaced on its source plays the new version, not the old cached one.
+    /// False: the old version would keep playing from the cache after the source replaced it.
+    /// </summary>
+    [Fact]
+    public void PathFor_AtANewSize_DropsTheOldVersion()
+    {
+        var cache = Cache();
+        Put(cache, A, 100);
+
+        Assert.NotNull(cache.PathFor(A, 100));
+        Assert.NotNull(cache.PathFor(A, 0));
+        Assert.Null(cache.PathFor(A, 120));
+        Assert.Null(cache.PathFor(A));
+        Assert.False(File.Exists(Path.Combine(_dir, A + ".mkv")));
+    }
+
+    /// <summary>
+    /// A file its source changed is dropped even at the same size, and a download that started before the change is refused.
+    /// True: a file rewritten in place, or announced while it downloads, is never served from the cache as the old version.
+    /// False: a same size rewrite, or a download overtaken by the change, would play the old version.
+    /// </summary>
+    [Fact]
+    public void Invalidate_DropsTheFile_AndRefusesADownloadStartedBefore()
+    {
+        var cache = Cache();
+        Put(cache, A, 100);
+        Put(cache, B, 100);
+
+        var started = cache.VersionOf(A);
+        cache.Invalidate(A);
+        Assert.Null(cache.PathFor(A));
+        Assert.NotNull(cache.PathFor(B));
+
+        File.WriteAllBytes(cache.PartPathFor(A, ".mkv"), new byte[100]);
+        Assert.False(cache.Complete(A, ".mkv", 100, CacheReason.Played, started));
+        Assert.False(File.Exists(cache.PartPathFor(A, ".mkv")));
+
+        File.WriteAllBytes(cache.PartPathFor(A, ".mkv"), new byte[100]);
+        Assert.True(cache.Complete(A, ".mkv", 100, CacheReason.Played, cache.VersionOf(A)));
+        Assert.NotNull(cache.PathFor(A));
+    }
+
     private LinkCache Cache() => new(new FakeConfig(_config), _dir, NullLogger<LinkCache>.Instance, () => _now);
 
     /// <summary>

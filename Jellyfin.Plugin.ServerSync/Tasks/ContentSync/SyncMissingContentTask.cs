@@ -429,6 +429,12 @@ public class SyncMissingContentTask
             Logger.LogDebug("Took the media info for {Path} again, since the file behind it changed", FormatUtilities.SanitizeForLog(record.LocalPath));
         }
 
+        // A cached file of another size is an older version of the source's file.
+        if (record.SourceSize > 0)
+        {
+            _ = _linkCache?.PathFor(record.SourceItemId, record.SourceSize);
+        }
+
         Interlocked.Increment(ref _successCount);
         _changedFiles.Enqueue(record.LocalPath!);
     }

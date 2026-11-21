@@ -84,12 +84,12 @@ public static class LinkNfo
         => row.CompanionFiles?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
 
     /// <summary>
-    /// Writes the .nfo for a link, replacing only one this plugin wrote. Returns <c>false</c> when another .nfo
-    /// is already there, which is left as it is.
+    /// Writes the .nfo for a link when it differs from the one there, replacing only one this plugin wrote.
+    /// Returns <c>false</c> when another .nfo is already there, which is left as it is.
     /// </summary>
     /// <param name="linkPath">The link's .strm path.</param>
     /// <param name="item">The source item the .nfo describes.</param>
-    /// <returns><c>true</c> when the .nfo was written.</returns>
+    /// <returns><c>true</c> when the .nfo is this plugin's and up to date.</returns>
     public static bool Write(string linkPath, BaseItemDto item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -99,7 +99,13 @@ public static class LinkNfo
             return false;
         }
 
-        AtomicFile.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(Build(item)));
+        // An .nfo that already says the same is left, so Jellyfin sees no change to read.
+        var bytes = new UTF8Encoding(false).GetBytes(Build(item));
+        if (!File.Exists(path) || !File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes))
+        {
+            AtomicFile.WriteAllBytes(path, bytes);
+        }
+
         return true;
     }
 

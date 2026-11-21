@@ -130,7 +130,7 @@ public sealed class LinkStreamer
         ArgumentNullException.ThrowIfNull(grant);
 
         // A cached link plays from here and asks nothing of the source.
-        if (_cache?.PathFor(link.LinkId) is { } cached)
+        if (_cache?.PathFor(link.LinkId, link.Size) is { } cached)
         {
             try
             {

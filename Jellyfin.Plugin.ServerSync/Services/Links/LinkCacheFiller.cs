@@ -353,6 +353,9 @@ public sealed class LinkCacheFiller : BackgroundService
     private async Task FillAsync(Fill fill, CancellationToken cancellationToken)
     {
         var config = _configManager.Configuration;
+
+        // Read before the row, so a change on the source while this downloads throws the download away.
+        var version = _cache.VersionOf(fill.LinkId);
         if (!_cache.Enabled || _cache.Holds(fill.LinkId)
             || Table().GetBySourceItemId(fill.LinkId) is not { StorageMode: StorageMode.Link, Status: SyncStatus.Synced } row
             || MappingFor(config, row) is not { ExcludeFromLinkCache: false }
@@ -419,13 +422,13 @@ public sealed class LinkCacheFiller : BackgroundService
                 }
             }
 
-            if (_cache.Complete(fill.LinkId, extension, row.SourceSize, fill.Reason))
+            if (_cache.Complete(fill.LinkId, extension, row.SourceSize, fill.Reason, version))
             {
                 _logger.LogInformation("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(row.SourceSize), server.DisplayName);
             }
             else
             {
-                _logger.LogWarning("Did not cache {File}: what '{Server}' sent was not the size of the file", name, server.DisplayName);
+                _logger.LogWarning("Did not cache {File}: what '{Server}' sent was not the size of the file, or the file changed there meanwhile", name, server.DisplayName);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException && !cancellationToken.IsCancellationRequested)

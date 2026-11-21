@@ -42,6 +42,7 @@ public sealed class LinkCache
     private readonly Func<DateTime> _now;
     private readonly object _lock = new();
     private Dictionary<string, CacheEntry>? _entries;
+    private readonly Dictionary<string, int> _changes = new(StringComparer.OrdinalIgnoreCase);
     private string? _loadedRoot;
     private int _loadedAtWipe;
     private bool _indexUnreadable;
@@ -253,6 +254,63 @@ public sealed class LinkCache
         }
     }
 
+    /// <summary>
+    /// The whole file for a link at the size its source reports now, or null. A held file of another
+    /// size is an older version of the source's file, so it is dropped.
+    /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="size">The size the source reports for the file, or 0 when unknown.</param>
+    /// <returns>The file's path, or null.</returns>
+    public string? PathFor(string linkId, long size)
+    {
+        lock (_lock)
+        {
+            if (PathFor(linkId) is not { } path)
+            {
+                return null;
+            }
+
+            if (size <= 0 || Entries()[linkId].Size == size)
+            {
+                return path;
+            }
+
+            _logger.LogInformation("Dropped {File} from the link cache: the file changed on its source", FormatUtilities.SanitizeForLog(Path.GetFileName(path)));
+            Remove(linkId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Drops a link's file because its source changed the file, and refuses any download of the old
+    /// file that started before now.
+    /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    public void Invalidate(string linkId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        lock (_lock)
+        {
+            _changes[linkId] = _changes.GetValueOrDefault(linkId) + 1;
+            if (Entries().TryGetValue(linkId, out var entry))
+            {
+                _logger.LogInformation("Dropped {File} from the link cache: the file changed on its source", FormatUtilities.SanitizeForLog(entry.File));
+                Remove(linkId);
+            }
+        }
+    }
+
+    /// <summary>How many times a link's file was invalidated since Jellyfin started, read when a download of it starts.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns>The count.</returns>
+    public int VersionOf(string linkId)
+    {
+        lock (_lock)
+        {
+            return _changes.GetValueOrDefault(linkId);
+        }
+    }
+
     /// <summary>Whether the cache holds a link's file.</summary>
     /// <param name="linkId">The link's id.</param>
     /// <returns><c>true</c> when the cache holds the file.</returns>
@@ -297,8 +355,9 @@ public sealed class LinkCache
     /// <param name="extension">The source file's extension.</param>
     /// <param name="expectedSize">The size the source reports for the file, or 0 when unknown.</param>
     /// <param name="reason">Why it was cached.</param>
+    /// <param name="version">What <see cref="VersionOf"/> gave when the download started, or null to skip that check.</param>
     /// <returns><c>true</c> when the file is now in the cache.</returns>
-    public bool Complete(string linkId, string extension, long expectedSize, CacheReason reason)
+    public bool Complete(string linkId, string extension, long expectedSize, CacheReason reason, int? version = null)
     {
         ArgumentNullException.ThrowIfNull(linkId);
         var name = FileNameFor(linkId, extension);
@@ -308,8 +367,9 @@ public sealed class LinkCache
         {
             try
             {
+                // A download cut short, or one the source changed the file during, is thrown away.
                 var size = new FileInfo(part).Length;
-                if (size == 0 || (expectedSize > 0 && size != expectedSize))
+                if (size == 0 || (expectedSize > 0 && size != expectedSize) || (version is { } started && started != _changes.GetValueOrDefault(linkId)))
                 {
                     File.Delete(part);
                     return false;

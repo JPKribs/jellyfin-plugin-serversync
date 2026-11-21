@@ -176,8 +176,15 @@ public sealed class ContentHintHandler
 
         // A new id may be an old file renamed or given a new container, so its row follows the file instead of a second copy arriving.
         var key = originItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
-        var existing = _table.GetByKey(key) ?? await PairWithReplacedRowAsync(origin, client, mapping, dto, key, cancellationToken).ConfigureAwait(false);
+        var tracked = _table.GetByKey(key);
+        var existing = tracked ?? await PairWithReplacedRowAsync(origin, client, mapping, dto, key, cancellationToken).ConfigureAwait(false);
         var pathBefore = existing?.LocalPath;
+
+        // The origin announced a change to a file it kept under the same id, which may keep its size, so the cached copy is an older version.
+        if (tracked is not null && StorageModes.IsLink(tracked.StorageMode))
+        {
+            _services.GetService<Links.LinkCache>()?.Invalidate(key);
+        }
 
         var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, watchedByAll), cancellationToken).ConfigureAwait(false);
 
