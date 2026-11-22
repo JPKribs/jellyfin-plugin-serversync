@@ -877,7 +877,7 @@ def scenario_hints_three_servers(creds, apis):
     time.sleep(12)
     expect(queues_empty(), "no hint was raised by an apply, so the pool is loop free")
     expect(all(played(n) and favorite(n) for n in names), "all three servers hold the same state")
-    wait_until(lambda: all(len(activity(apis[n], " synced from ")) >= 1 for n in names), 60, "every server wrote one summary entry for the changes it applied")
+    wait_until(lambda: all(len(activity(apis[n], "synced")) >= 1 for n in names), 60, "every server wrote one summary entry for the changes it applied")
 
     # A later edit on source-b reverses the play everywhere, through the three way merge.
     apis["source-b"].call("DELETE", f"/UserPlayedItems/{ids['source-b'][1]}?userId={ids['source-b'][0]}", expect=200)
@@ -1737,10 +1737,17 @@ def synced_count(api, server, limit=100):
     """How many changes from a server the activity log's summaries say were synced."""
     total = 0
     for e in api.get(f"/System/ActivityLog/Entries?limit={limit}")["Items"]:
-        if (e.get("Type") or "") == "ServerSync.HintsApplied":
-            m = re.search(re.escape(server) + r" \((\d+)\)", e.get("ShortOverview") or e.get("Overview") or "")
-            if m:
-                total += int(m.group(1))
+        if (e.get("Type") or "") != "ServerSync.HintsApplied":
+            continue
+        # "Synced 5 items from source-a (4) and source-b" names a count only beside a server that gave more than one.
+        m = re.match(r"Synced (\d+) items? from (.+)$", e.get("ShortOverview") or e.get("Overview") or "")
+        if not m:
+            continue
+        parts = [p.strip() for p in re.split(r", | and ", m.group(2))]
+        for part in parts:
+            named = re.match(r"(.+) \((\d+)\)$", part)
+            if (named.group(1) if named else part) == server:
+                total += int(named.group(2)) if named else (int(m.group(1)) if len(parts) == 1 else 1)
     return total
 
 
@@ -1876,7 +1883,7 @@ def scenario_push_responses(creds, apis):
     expect("not installed" in (peers.get("no-plugin", {}).get("Reason") or ""), "a URL with no Server Sync behind it pauses as not installed (404)")
     paused_rows = [r for r in h["Outbound"] if r["PeerName"] in ("source-a", "source-b", "no-plugin")]
     expect(paused_rows and all(r["State"] == "Pending" and r["Attempts"] >= 1 for r in paused_rows), "paused rows stay pending with an attempt recorded, nothing is lost")
-    expect(len(activity(local, "changes paused for")) >= 3, "each pause wrote an activity entry")
+    expect(len(activity(local, "changes paused")) >= 3, "each pause wrote an activity entry")
 
     # Clear the pauses, give source-a its real key, list local on source-b, and send a metadata hint that
     # source-a declines because its metadata module is off while source-b applies it.
@@ -1886,12 +1893,13 @@ def scenario_push_responses(creds, apis):
     # The rows deferred by the pauses above wait fifteen minutes; discard them so only the new hint counts.
     for r in hints(local)["Outbound"]:
         local.call("DELETE", f"/Sync/Hints/Outbound/{r['Id']}", expect=204)
-    applied_before = synced_count(apis["source-a"], "local")
-    set_overview(local, "Movie", "Shared Movie", f"Declined test {time.strftime('%H:%M:%S')}")
+    declined = f"Declined test {time.strftime('%H:%M:%S')}"
+    set_overview(local, "Movie", "Shared Movie", declined)
     wait_until(lambda: not [r for r in hints(local)["Outbound"] if r["PeerName"] == "source-a"], 60, "a hint for a module the receiver has off is never owed to it, or is dropped once it declines")
     wait_until(lambda: not hints(local)["Outbound"], 60, "the same hint was accepted and completed by the peer whose module is on")
     time.sleep(35)
-    expect(synced_count(apis["source-a"], "local") == applied_before, "the declining receiver applied nothing")
+    # Summary entries land in batches up to a minute late, so the overview itself is what shows nothing was applied.
+    expect(overview(apis["source-a"], "Movie", "Shared Movie") != declined, "the declining receiver applied nothing")
 
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
