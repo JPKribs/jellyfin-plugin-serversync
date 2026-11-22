@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.20.3"
+version: "12.4.21.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step."
@@ -22,8 +22,11 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  changed:
-  - Activity page entries have short names such as Items synced or Changes paused, with the count, servers, and reason in the overview. The server log keeps per item lines at Debug
+  added:
+  - Downloading a link. Jellyfin's Download button on a link saves the file it stands in for under the copy's name, from the link cache or the source. A cached file needs download permission on this server only. Any other needs it on both servers, and the source needs this release too
+  fixed:
+  - A link's media info showed the size of its .strm, a few bytes. It shows the size of the file the link stands in for
   developer:
-  - skills/logging.md sets how activity entries and server log lines are written. The integration pools log Server Sync at Debug, since their scenarios read per item lines
-  - The integration pool checks a changed link by the line that says it was linked again, not by its .nfo time
+  - GET /Sync/Peer/Stream/{itemId} takes download=true, and POST /Sync/Peer/Stream/Check takes Download and answers DownloadAllowed. The protocol version is unchanged, since a source that leaves DownloadAllowed out refuses the download
+  - The integration pool checks the Download route on a link, a refusal on either server, and a download from the link cache
+  - The integration pool reads Activity entries by their current names and overviews
