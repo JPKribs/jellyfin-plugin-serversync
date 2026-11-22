@@ -2747,7 +2747,7 @@ def scenario_link_cache(creds, apis):
 
 
 def scenario_link_download(creds, apis):
-    """The Download button on a link saves the source's file under the copy's name, a user barred from downloading on either server is refused, a cached link downloads from the cache under local's rules alone, and Jellyfin's file route still refuses a link."""
+    """The Download button on a link saves the source's file under the copy's name, a user barred from downloading on either server is refused, a cached link downloads from the cache under local's rules alone, Jellyfin's file route still refuses a link, and the link's media source shows the file's size."""
     film = LinkedFilm(creds, apis, seconds=10, size="320x240", local_flags=dict(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)).setup()
     a, local = film.a, film.local
     au = creds["servers"]["source-a"]["userId"]
@@ -2761,6 +2761,8 @@ def scenario_link_download(creds, apis):
 
     try:
         data = film.original()
+        film.play_info()
+        expect(film.source.get("Size") == len(data), f"the link's media source shows the file's size, not the .strm's ({film.source.get('Size')} of {len(data)})")
         status, headers, body = http(local, "GET", path)
         expect(status == 200 and body == data, f"downloading the link gives the source's file ({status}, {len(body)} bytes)")
         expect(saved_as(headers).startswith("attachment") and f"{film.title}.mp4" in saved_as(headers), f"the download is saved under the copy's name ({saved_as(headers)})")

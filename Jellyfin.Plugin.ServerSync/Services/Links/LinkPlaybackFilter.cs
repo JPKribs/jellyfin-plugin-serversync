@@ -26,7 +26,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// A filter on Jellyfin's own routes, for this server's links only, that asks the source whether a user
 /// may play a link, refuses at once when no server allows it, and records the user and server the link
 /// route streams as. It also clears the link's loopback URL from every response so clients never see the
-/// link's secret, and answers a player's direct play or a download by streaming from the source for that user.
+/// link's secret, gives each link's media source the size of its file, and answers a player's direct play or a
+/// download by streaming from the source for that user.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
@@ -239,6 +240,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                 var linked = Items(value).Where(i => i?.MediaSources?.Any(s => LinkFiles.PointsAtLinkRoute(s?.Path)) == true).ToList();
                 foreach (var source in LinkSources(value))
                 {
+                    // Jellyfin reads the size of the .strm, so the file's own size is put back.
+                    if (LinkedSize(source) is { } size)
+                    {
+                        source.Size = size;
+                    }
+
                     source.IsRemote = false;
                     source.Protocol = MediaProtocol.File;
                     source.Path = null;
@@ -280,6 +287,14 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
 
         return sources?.Where(s => LinkFiles.PointsAtLinkRoute(s?.Path)).ToList() ?? Enumerable.Empty<MediaSourceInfo>();
     }
+
+    /// <summary>The size of the file a link's media source stands in for, or null when this server has not recorded it.</summary>
+    private long? LinkedSize(MediaSourceInfo source)
+        => Guid.TryParse(source.Id, out var id)
+            && _libraryManager.GetItemById(id)?.Path is { } path
+            && _links.Find(path) is { Size: > 0 } link
+                ? link.Size
+                : null;
 
     /// <summary>
     /// Lists the trickplay images a link took from its source, since Jellyfin leaves trickplay out of an

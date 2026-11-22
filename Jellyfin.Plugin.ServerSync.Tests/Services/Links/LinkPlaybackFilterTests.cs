@@ -242,6 +242,28 @@ public sealed class LinkPlaybackFilterTests
     }
 
     /// <summary>
+    /// A link's media source carries the size of the file it stands in for, and keeps Jellyfin's when none is recorded.
+    /// True: clients show the film's real size, not the few bytes of its .strm.
+    /// False: the media info would list a 4K film as a hundred bytes, or a size of 0.
+    /// </summary>
+    /// <param name="recorded">The size the link table records for the file.</param>
+    /// <param name="expected">The size the response carries.</param>
+    [Theory]
+    [InlineData(734003200L, 734003200L)]
+    [InlineData(0L, 111L)]
+    public async Task OnResultExecutionAsync_LinkSource_CarriesTheFilesSize(long recorded, long expected)
+    {
+        var registry = new LinkFakeRegistry().Add(new LinkEntry(LinkPath, "/media/Film.mkv", "aaaa", "a", recorded));
+        var source = new MediaSourceInfo { Id = _movie.Id.ToString("N"), Path = LinkUrl, Protocol = MediaProtocol.Http, IsRemote = true, Size = 111 };
+        var filter = new LinkPlaybackFilter(_library, registry, _grants, _chooser, NullLogger<LinkPlaybackFilter>.Instance);
+
+        await RunResult(filter, new ObjectResult(new PlaybackInfoResponse { MediaSources = new[] { source } }));
+
+        Assert.Equal(expected, source.Size);
+        Assert.Null(source.Path);
+    }
+
+    /// <summary>
     /// A lazily built list of items is made concrete, so the cleared addresses are the ones written out.
     /// True: the response that leaves the server is the one the filter cleaned.
     /// False: the list would be built again when written, with every link address back in it.
