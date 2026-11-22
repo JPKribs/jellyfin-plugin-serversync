@@ -177,6 +177,7 @@ A link is a `.strm` holding an address on the linking server itself, `/Sync/Link
 | Allow the stream for a short time | `LinkGrants` |
 | Serve the address in the `.strm` | `LinkController`, which accepts only this server's own requests |
 | Stream the bytes | `LinkStreamer`, from the link cache or `GET /Sync/Peer/Stream/{itemId}` |
+| Send a link's file for Jellyfin's **Download** | `LinkPlaybackFilter`, `LinkAccess`, `LinkStreamer` |
 | Map the user and enforce limits on the source | `LinkPolicy`, `LinkSessions`, `ThrottledReadStream` |
 | Show playback on the source | `LinkPlaybackReporter`, `LinkPlaybackSessions` |
 | Keep played links locally | `LinkCache`, `LinkCacheFiller` |

@@ -178,6 +178,42 @@ public sealed class LinkPolicyTests : IDisposable
     }
 
     /// <summary>
+    /// A download needs the user's download permission here as well as playback, and a play does not.
+    /// True: the source's own download permission holds for downloads through links.
+    /// False: a user barred from downloading could save files through another server, or be refused playback.
+    /// </summary>
+    /// <param name="mayDownload">Whether the user may download here.</param>
+    /// <param name="download">Whether the request is a download.</param>
+    /// <param name="allowed">Whether it is allowed.</param>
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public void Check_Download_NeedsDownloadPermission(bool mayDownload, bool download, bool allowed)
+    {
+        _user.SetPermission(PermissionKind.EnableContentDownloading, mayDownload);
+
+        var verdict = Policy().Check(Peer(), _movie.Id, RemoteUser.ToString("N"), null, probe: false, download: download);
+
+        Assert.Equal(allowed, verdict.Allowed);
+        Assert.Equal(allowed ? null : "the account you stream as on the source may not download media", verdict.Reason);
+    }
+
+    /// <summary>
+    /// The media probe cannot download a file.
+    /// True: a download always runs as a user the source checks.
+    /// False: a download asked for as a probe would skip every user check.
+    /// </summary>
+    [Fact]
+    public void Check_ProbeDownload_IsRefused()
+    {
+        var verdict = Policy().Check(Peer(), _movie.Id, null, null, probe: true, download: true);
+
+        Assert.False(verdict.Allowed);
+        Assert.Equal("a media probe cannot download a file", verdict.Reason);
+    }
+
+    /// <summary>
     /// A mapped user who may play is allowed, and the verdict names the item and the user here.
     /// True: the stream runs as this server's own user for the caller.
     /// False: an allowed stream would run with no user, uncounted and unlimited.

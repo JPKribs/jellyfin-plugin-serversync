@@ -187,6 +187,44 @@ public sealed class LinkAccessTests
         Assert.Equal("the source refused", choice.Refusal);
     }
 
+    /// <summary>
+    /// A download is asked for with the download flag, and is allowed only when the source says it checked the download.
+    /// True: a source on an older build, which ignores the flag, cannot let a user download.
+    /// False: a user barred from downloading on the source could download through a link.
+    /// </summary>
+    /// <param name="checkedHere">Whether the source answers that it checked the download.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChooseForDownloadAsync_NeedsTheSourceToCheckTheDownload(bool checkedHere)
+    {
+        using var handler = new StubHandler(_ => Json(new LinkStreamCheckResponse { Allowed = true, ItemId = "aaaa", Size = 1000, DownloadAllowed = checkedHere }));
+
+        var choice = await Access(new LinkStubClientFactory(handler), new LinkHealth(), Server("a")).ChooseForDownloadAsync(Link, LocalUser, null, CancellationToken.None);
+
+        using var body = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.True(body.RootElement.GetProperty("Download").GetBoolean());
+        Assert.Equal(checkedHere ? new LinkRoute("a", "aaaa") : null, choice.Route);
+        Assert.Equal(checkedHere ? null : "Server a needs a newer Server Sync to allow downloads", choice.Refusal);
+    }
+
+    /// <summary>
+    /// A play is asked for without the download flag.
+    /// True: the source applies only its playback checks to a play.
+    /// False: a user who may play but not download would be refused playback.
+    /// </summary>
+    [Fact]
+    public async Task ChooseAsync_Play_IsNotAskedAsADownload()
+    {
+        using var handler = new StubHandler(_ => Json(new LinkStreamCheckResponse { Allowed = true, ItemId = "aaaa", Size = 1000 }));
+
+        var choice = await Access(new LinkStubClientFactory(handler), new LinkHealth(), Server("a")).ChooseAsync(Link, LocalUser, null, CancellationToken.None);
+
+        using var body = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.False(body.RootElement.GetProperty("Download").GetBoolean());
+        Assert.NotNull(choice.Route);
+    }
+
     private static HttpResponseMessage Json(object body)
         => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
 

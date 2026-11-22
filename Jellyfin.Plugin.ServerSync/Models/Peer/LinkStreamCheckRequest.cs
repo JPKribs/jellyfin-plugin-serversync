@@ -23,4 +23,7 @@ public class LinkStreamCheckRequest
 
     /// <summary>Gets or sets the source user the asking server maps that user to, if it maps them.</summary>
     public string? SourceUserId { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the user is downloading the file, which also needs download permission on the source.</summary>
+    public bool Download { get; set; }
 }

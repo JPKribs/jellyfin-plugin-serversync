@@ -2746,6 +2746,55 @@ def scenario_link_cache(creds, apis):
         film.teardown()
 
 
+def scenario_link_download(creds, apis):
+    """The Download button on a link saves the source's file under the copy's name, a user barred from downloading on either server is refused, a cached link downloads from the cache, and Jellyfin's file route still refuses a link."""
+    film = LinkedFilm(creds, apis, seconds=10, size="320x240", local_flags=dict(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)).setup()
+    a, local = film.a, film.local
+    au = creds["servers"]["source-a"]["userId"]
+    source_policy = a.get(f"/Users/{au}")["Policy"]
+    local_policy = local.get(f"/Users/{film.lu}")["Policy"]
+    path = f"/Items/{film.item['Id']}/Download"
+
+    def saved_as(headers):
+        """Returns the response's Content-Disposition header."""
+        return {k.lower(): v for k, v in headers.items()}.get("content-disposition", "")
+
+    try:
+        data = film.original()
+        status, headers, body = http(local, "GET", path)
+        expect(status == 200 and body == data, f"downloading the link gives the source's file ({status}, {len(body)} bytes)")
+        expect(saved_as(headers).startswith("attachment") and f"{film.title}.mp4" in saved_as(headers), f"the download is saved under the copy's name ({saved_as(headers)})")
+        status, _, body = http(local, "GET", path, {"Range": "bytes=1000-1999"})
+        expect(status == 206 and body == data[1000:2000], f"a download resumes from a range ({status})")
+        status, _, body = http(local, "GET", f"/Items/{film.item['Id']}/File")
+        expect(status == 403 and b"/Sync/Link/" not in body, f"Jellyfin's file route still refuses a link ({status})")
+
+        a.post(f"/Users/{au}/Policy", dict(source_policy, EnableContentDownloading=False), expect=204)
+        status, _, body = http(local, "GET", path)
+        expect(status == 403 and b"may not download media" in body, f"a user the source bars from downloading is refused, with the reason ({status}: {body[:200]!r})")
+        status, _ = film.play_info()
+        expect(status == 200, f"the same user may still play the link ({status})")
+        a.post(f"/Users/{au}/Policy", source_policy, expect=204)
+
+        local.post(f"/Users/{film.lu}/Policy", dict(local_policy, EnableContentDownloading=False), expect=204)
+        status, _, _ = http(local, "GET", path)
+        expect(status == 403, f"a user barred from downloading here is refused before the source is asked ({status})")
+        local.post(f"/Users/{film.lu}/Policy", local_policy, expect=204)
+
+        film.play_info()
+        play = {"ItemId": film.item["Id"], "MediaSourceId": film.source["Id"], "PlaySessionId": uuid.uuid4().hex, "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"}
+        local.post("/Sessions/Playing", play, expect=204)
+        wait_until(lambda: local.get("/Sync/LinkCache").get("Files") == 1, 90, "playing the link caches its file")
+        local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
+        status, headers, body = http(local, "GET", path)
+        expect(status == 200 and body == data, f"a cached link downloads the file ({status}, {len(body)} bytes)")
+        expect(saved_as(headers).startswith("attachment") and f"{film.title}.mp4" in saved_as(headers), f"a cached download is saved under the copy's name ({saved_as(headers)})")
+    finally:
+        a.post(f"/Users/{au}/Policy", source_policy, expect=204)
+        local.post(f"/Users/{film.lu}/Policy", local_policy, expect=204)
+        film.teardown()
+
+
 def scenario_link_cache_rules(creds, apis):
     """A user mapping's own stream limit applies to that user, starting an episode caches the next one ahead, a library left out of the cache has its files dropped, a show picked to always keep becomes full copies in the library, removing the pick turns them back into links with each copy moved into the cache, and a copy kept by hand stays until it is turned back from the Storage tab."""
     local, b = apis["local"], apis["source-b"]
@@ -4314,6 +4363,7 @@ SCENARIOS = [
     ("links: seeking reads exactly the bytes asked for", scenario_link_ranges),
     ("links: media info, images, per user direct play, and the link check", scenario_link_care),
     ("links: a played link is cached and plays from the cache", scenario_link_cache),
+    ("links: the Download button saves the file a link stands in for", scenario_link_download),
     ("links: cache rules and a user's own stream limit", scenario_link_cache_rules),
     ("links: speed limits per server and per user", scenario_link_speed),
     ("links: every version is linked, and a bitrate limit picks one", scenario_link_versions),

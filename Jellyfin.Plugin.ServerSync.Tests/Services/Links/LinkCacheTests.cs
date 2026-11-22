@@ -331,6 +331,31 @@ public sealed class LinkCacheTests : IDisposable
     }
 
     /// <summary>
+    /// A download of a cached link is sent from the local file as an attachment under the copy's name.
+    /// True: a cached film downloads at local speed, and the browser saves it under its real name.
+    /// False: a cached download would go back to the source, or save without a name.
+    /// </summary>
+    [Fact]
+    public async Task Streamer_DownloadsACachedLinkAsAnAttachment()
+    {
+        var cache = Cache();
+        var data = Enumerable.Range(0, 1000).Select(i => (byte)(i % 251)).ToArray();
+        File.WriteAllBytes(cache.PartPathFor(A, ".mkv"), data);
+        Assert.True(cache.Complete(A, ".mkv", data.Length, CacheReason.Played));
+        var streamer = new LinkStreamer(new FakeConfig(_config), null!, null!, null!, new LinkGrants(), new LinkHealth(), NullLogger<LinkStreamer>.Instance, LinkStreamer.StallTimeout, cache);
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
+        var body = new MemoryStream();
+        context.Request.Method = "GET";
+        context.Response.Body = body;
+
+        var status = await streamer.StreamAsync(context, new LinkEntry("/m/Film.strm", "/m/Film.mkv", A, "gone"), new LinkGrant(Guid.NewGuid(), false, Download: true), "/src/Film.mkv", "Film.mkv");
+
+        Assert.Equal(LinkStreamer.Written, status);
+        Assert.Equal(data, body.ToArray());
+        Assert.StartsWith("attachment; filename=Film.mkv", context.Response.Headers.ContentDisposition.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The episodes ahead are the next ones in order, across a season's end, without specials.
     /// True: the episode a viewer reaches next is the one cached ahead of them.
     /// False: the wrong episodes would be cached, and the next press of play would stream.

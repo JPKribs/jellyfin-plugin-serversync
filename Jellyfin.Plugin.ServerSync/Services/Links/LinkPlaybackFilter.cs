@@ -26,7 +26,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// A filter on Jellyfin's own routes, for this server's links only, that asks the source whether a user
 /// may play a link, refuses at once when no server allows it, and records the user and server the link
 /// route streams as. It also clears the link's loopback URL from every response so clients never see the
-/// link's secret, and answers a player's direct play by streaming from the source for that user.
+/// link's secret, and answers a player's direct play or a download by streaming from the source for that user.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
@@ -94,7 +94,13 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
-        // A download of a link hands out its .strm, and so its secret.
+        if (await DownloadLinkAsync(context).ConfigureAwait(false) is { } download)
+        {
+            context.Result = download;
+            return;
+        }
+
+        // Any other read of a link's own file hands out its .strm, and so its secret.
         if (DownloadsALink(context))
         {
             context.Result = new ObjectResult("This item streams from another server and cannot be downloaded from here") { StatusCode = StatusCodes.Status403Forbidden };
@@ -404,6 +410,55 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
 
         return false;
     }
+
+    /// <summary>
+    /// Answers Jellyfin's download route for a link with the file itself, from the link cache or a server
+    /// that allows the user to download it, or null when the request is not a download of a known link.
+    /// </summary>
+    private async Task<IActionResult?> DownloadLinkAsync(ActionExecutingContext context)
+    {
+        if (_streamer is null
+            || Plugin.Held
+            || context.ActionDescriptor is not ControllerActionDescriptor { ControllerName: "Library", ActionName: "GetDownload" }
+            || RouteItemId(context) is not { } itemId)
+        {
+            return null;
+        }
+
+        // Jellyfin downloads the item the route names, whatever version a query names.
+        var links = FindLinks(context, out _, out _);
+        if (links.FirstOrDefault(l => l.VersionId == itemId) is not { Link: { } link })
+        {
+            return null;
+        }
+
+        if (!Guid.TryParse(context.HttpContext.User.FindFirst(UserIdClaim)?.Value, out var userId) || userId == Guid.Empty)
+        {
+            return Refused("this server could not tell who is downloading");
+        }
+
+        if (!MayDownloadHere(itemId, userId))
+        {
+            return new ObjectResult("This server does not let you download this item") { StatusCode = StatusCodes.Status403Forbidden };
+        }
+
+        var choice = await _access.ChooseForDownloadAsync(link, userId, null, context.HttpContext.RequestAborted).ConfigureAwait(false);
+        if (choice.Route is not { } route)
+        {
+            _logger.LogDebug("Refused to download the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(link.LinkPath), FormatUtilities.SanitizeForLog(choice.Refusal, 300));
+            return Refused(choice.Refusal ?? "no server that holds the file allowed it");
+        }
+
+        // The grant counts the download against this server's own stream limits, as a play is.
+        _grants.Grant(link.LinkId, userId, route);
+        return new LinkStreamResult(_streamer, link, new LinkGrant(userId, false, route, Download: true), Path.GetFileName(link.CopiedPath));
+    }
+
+    /// <summary>Whether this server's own rules let a user download an item, which also needs download permission.</summary>
+    private bool MayDownloadHere(Guid itemId, Guid userId)
+        => MaySeeHere(itemId, userId)
+            && (_services?.GetService<IUserManager>() is not { } users
+                || users.GetUserById(userId)?.HasPermission(PermissionKind.EnableContentDownloading) == true);
 
     /// <summary>The item a route names, which Jellyfin calls routeItemId for subtitles and videoId for attachments.</summary>
     private static Guid? RouteItemId(FilterContext context)

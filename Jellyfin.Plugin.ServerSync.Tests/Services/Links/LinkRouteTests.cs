@@ -875,6 +875,9 @@ public sealed class LinkRouteTests : IDisposable
             Calls++;
             return Task.FromResult(new LinkChoice(_refusal is null ? LinkFallback.PrimaryOf(link) : null, _refusal));
         }
+
+        public Task<LinkChoice> ChooseForDownloadAsync(LinkEntry link, Guid userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => ChooseAsync(link, userId, skip, cancellationToken);
     }
 
     private sealed class PickyAccess : ILinkAccess
@@ -885,6 +888,9 @@ public sealed class LinkRouteTests : IDisposable
 
         public Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
             => Task.FromResult(_refused.Contains(link.LinkId) ? new LinkChoice(null, "refused " + link.LinkId) : new LinkChoice(LinkFallback.PrimaryOf(link), null));
+
+        public Task<LinkChoice> ChooseForDownloadAsync(LinkEntry link, Guid userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => ChooseAsync(link, userId, skip, cancellationToken);
     }
 
     private sealed class ManyLinks : Dictionary<string, string>, ILinkRegistry

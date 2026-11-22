@@ -182,6 +182,19 @@ Jellyfin's own stop of a paused session on the source is not passed on, so the s
 
 History sync takes the larger play count when both servers counted, so a play counted on the source by its session and on the linking server by Jellyfin stays one play.
 
+## Downloading a Link
+
+Jellyfin's **Download** button on a link saves the file the link stands in for, under the copy's name. `Film (2020) - 4K.strm` downloads as `Film (2020) - 4K.mkv`. The `.strm` itself is never sent.
+
+* **Both servers must allow it.** The user needs download permission on the linking server, and the account they stream as needs it on the source, along with everything a play needs. See [Who the Source Streams As](#who-the-source-streams-as).
+* **The source is always asked first**, even for a file in the link cache. Another server that holds the same file is asked when the link's own server cannot send it, as for a play.
+* **A refused download ends with `403`** and the reason, before any of the file is sent. A browser shows only that the download failed.
+* **A cached file is sent from the cache.** Any other file streams from the source as it is sent.
+* **A download from the source counts as a stream** on both servers while it runs, so the stream and speed limits apply to it. A cached one counts on neither, as for a play.
+* **A download can be resumed.** A request for a byte range gets that range.
+
+A source whose Server Sync cannot check download permission refuses every download through a link.
+
 ## The Link Cache
 
 A link can keep a full local copy of its file in the link cache. The `.strm` never changes, so Jellyfin and players notice nothing when a file is cached or dropped. While a link's file is in the cache, these things hold:
@@ -281,10 +294,10 @@ Every sync type that matches by path still matches when one server holds `Film.m
 
 * **The link's address only answers the linking server itself**, from and to its own loopback address. A request that carries a proxy header (`X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`, `Forwarded`, or `Via`) is refused, so a reverse proxy on the same machine cannot reach it. So is one carrying `X-Original-For`, `X-Original-Host`, or `X-Original-Proto`, which Jellyfin leaves when it took the request's address from a trusted proxy's header, so a visitor cannot pass as this server by sending a loopback `X-Forwarded-For` through a proxy that forwards it unchanged. A router's port forward or a Docker published port arrives on another address and never reaches it. The address also needs the link's secret, and a user here whom the source allowed to play the link the link. Only transcodes, subtitle extraction, and the media probe read through this address. Direct play is streamed by Server Sync on Jellyfin's own stream route, for the signed in user who pressed play.
 * **Each link carries a secret** derived from a key only this server holds, so a link cannot be guessed from its id. The key is `serversync-link.key` in Jellyfin's data folder, readable by the server's account only.
-* **The address never reaches a client.** It is cleared from playback info and from every item response, and Jellyfin's routes that hand out an item's own file, **Download** and its file route, refuse links.
+* **The address never reaches a client.** It is cleared from playback info and from every item response. Jellyfin's **Download** route sends the file the link stands in for, never the `.strm`, and its file route refuses links.
 * **Only a user who was allowed at play can be read for.** A user is recorded when the source allows them at play, or when they press play on a link whose file is in the link cache. Stream and transcode requests on a link must come from a user who holds that permission, so no one can stream a link under another viewer's permission. A subtitle or attachment request from a signed in user needs that user's permission too. One that names no user, which is how players such as webOS ask and how Jellyfin answers for any item, is read while a viewer is playing the link and refused otherwise. A permission nobody uses expires after two minutes. Once in use it lasts an hour after the last read.
 * **No source credential is ever written to disk.** The linking server streams with the key on its entry for the source, and the source checks the user it streams as on every play that streams from it.
-* **A cached link follows the linking server's rules only.** Any user there who can see the item can play it, including one the source would refuse, and it keeps playing after the source turns off **Allow linking** until the next **Sync Content** run, whose link check finds the source will not stream it and drops the file. Turn off **Cache this library's links**, or use **Empty the Cache**, where the source's rules must always apply.
+* **A cached link follows the linking server's rules only.** Any user there who can see the item can play it, including one the source would refuse, and it keeps playing after the source turns off **Allow linking** until the next **Sync Content** run, whose link check finds the source will not stream it and drops the file. Turn off **Cache this library's links**, or use **Empty the Cache**, where the source's rules must always apply. A download of a cached link still asks the source.
 
 ## Troubleshooting
 

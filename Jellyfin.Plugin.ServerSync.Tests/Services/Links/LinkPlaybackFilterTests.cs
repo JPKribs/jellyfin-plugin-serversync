@@ -287,6 +287,80 @@ public sealed class LinkPlaybackFilterTests
         return ran;
     }
 
+    /// <summary>
+    /// A download of a link the source allows is streamed here as a download of the copy's name, counted as a stream, and only the download question is asked.
+    /// True: the Download button saves the film itself, after the source checked download permission, within this server's stream limits.
+    /// False: the download would be refused, hand out the .strm, skip the source's download check, or escape the stream limits.
+    /// </summary>
+    [Fact]
+    public async Task OnActionExecutionAsync_DownloadAllowed_IsStreamedAsADownload()
+    {
+        _access.Answer(nameof(ILinkAccess.ChooseForDownloadAsync), _ => Task.FromResult(new LinkChoice(new LinkRoute("b", "bbbb"), null)));
+        var context = Executing("Library", "GetDownload", User);
+
+        var ran = await Run(Filter(Streamer()), context);
+
+        var result = Assert.IsType<LinkStreamResult>(context.Result);
+        Assert.False(ran);
+        Assert.Equal(new LinkGrant(User, false, new LinkRoute("b", "bbbb"), Download: true), result.Grant);
+        Assert.Equal("Film.mkv", result.DownloadName);
+        Assert.Equal(nameof(ILinkAccess.ChooseForDownloadAsync), Assert.Single(_access.Calls).Name);
+        Assert.Equal(new LinkRoute("b", "bbbb"), _grants.RouteFor("aaaa", User));
+    }
+
+    /// <summary>
+    /// A download the source refuses ends with 403 and the source's reason.
+    /// True: a user the source bars from downloading gets nothing.
+    /// False: the file would be sent anyway, or the refusal would carry no reason.
+    /// </summary>
+    [Fact]
+    public async Task OnActionExecutionAsync_DownloadRefused_IsRefusedWithTheReason()
+    {
+        _access.Answer(nameof(ILinkAccess.ChooseForDownloadAsync), _ => Task.FromResult(new LinkChoice(null, "the account you stream as on the source may not download media")));
+        var context = Executing("Library", "GetDownload", User);
+
+        var ran = await Run(Filter(Streamer()), context);
+
+        var refused = Assert.IsType<ObjectResult>(context.Result);
+        Assert.False(ran);
+        Assert.Equal(StatusCodes.Status403Forbidden, refused.StatusCode);
+        Assert.Equal("This item streams from another server, which refused: the account you stream as on the source may not download media", refused.Value);
+    }
+
+    /// <summary>
+    /// A download with no user is refused without asking the source.
+    /// True: every download is tied to a user before a source is asked.
+    /// False: an anonymous request would be checked as nobody.
+    /// </summary>
+    [Fact]
+    public async Task OnActionExecutionAsync_DownloadWithoutAUser_IsRefused()
+    {
+        var context = Executing("Library", "GetDownload", null);
+
+        var ran = await Run(Filter(Streamer()), context);
+
+        Assert.False(ran);
+        Assert.Equal("This item streams from another server, which refused: this server could not tell who is downloading", Assert.IsType<ObjectResult>(context.Result).Value);
+        Assert.Empty(_access.Calls);
+    }
+
+    /// <summary>
+    /// Jellyfin's file route still refuses a link, even with a streamer to send the file.
+    /// True: only the download route, which checks download permission, sends a link's file.
+    /// False: any user who can see the item could save it without download permission.
+    /// </summary>
+    [Fact]
+    public async Task OnActionExecutionAsync_FileRoute_StillRefusesALink()
+    {
+        var context = Executing("Library", "GetFile", User);
+
+        var ran = await Run(Filter(Streamer()), context);
+
+        Assert.False(ran);
+        Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(context.Result).StatusCode);
+        Assert.Empty(_access.Calls);
+    }
+
     private async Task<bool> RunResult(LinkPlaybackFilter filter, ObjectResult result)
     {
         var context = new ResultExecutingContext(Executing("Items", "GetItems", User), new List<IFilterMetadata>(), result, new object());

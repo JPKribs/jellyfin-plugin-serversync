@@ -34,6 +34,7 @@ public partial class PeerController
     /// <param name="sessions">Counts the open link streams against the limits.</param>
     /// <param name="userManager">Finds the user a standard caller is held to.</param>
     /// <param name="statistics">Counts a stream that starts, for the Statistics tab.</param>
+    /// <param name="download">Whether the user is downloading the file, which also needs download permission here.</param>
     /// <returns>The file, or 403 or 429 with the reason.</returns>
     [HttpGet("Stream/{itemId}")]
     [HttpHead("Stream/{itemId}")]
@@ -51,7 +52,8 @@ public partial class PeerController
         [FromServices] LinkPolicy policy,
         [FromServices] LinkSessions sessions,
         [FromServices] IUserManager userManager,
-        [FromServices] Services.Database.SyncStatisticsStore? statistics = null)
+        [FromServices] Services.Database.SyncStatisticsStore? statistics = null,
+        [FromQuery] bool download = false)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -61,7 +63,7 @@ public partial class PeerController
             return refusal!;
         }
 
-        var verdict = HeldToScopedUser(policy.Check(peer, itemId, userId, sourceUserId, probe, watching: !fill), userManager);
+        var verdict = HeldToScopedUser(policy.Check(peer, itemId, userId, sourceUserId, probe, watching: !fill, download: download), userManager);
         if (!verdict.Allowed || verdict.Item is null)
         {
             _logger.LogWarning("Refused a link stream to '{Server}': {Reason}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(verdict.Reason, 300));
@@ -192,7 +194,7 @@ public partial class PeerController
             itemId = found.Id;
         }
 
-        var verdict = HeldToScopedUser(policy.Check(peer, itemId, request.UserId, request.SourceUserId, request.Probe), userManager);
+        var verdict = HeldToScopedUser(policy.Check(peer, itemId, request.UserId, request.SourceUserId, request.Probe, download: request.Download), userManager);
         if (!verdict.Allowed || verdict.Item is null)
         {
             return Ok(new LinkStreamCheckResponse { Allowed = false, Reason = verdict.Reason });
@@ -214,7 +216,8 @@ public partial class PeerController
             ItemId = verdict.Item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
             Size = size,
             StreamsInUse = sessions?.CountForPeer(peer.Key) ?? 0,
-            StreamLimit = Math.Max(0, peer.LinkMaxStreams)
+            StreamLimit = Math.Max(0, peer.LinkMaxStreams),
+            DownloadAllowed = request.Download
         });
     }
 

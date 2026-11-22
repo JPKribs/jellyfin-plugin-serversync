@@ -57,13 +57,19 @@ public sealed class LinkPolicy
     /// <param name="claimedUserId">The user here the calling server maps them to, if it does.</param>
     /// <param name="probe">Whether this is the calling server's media probe.</param>
     /// <param name="watching">Whether someone is watching, since a download into the calling server's link cache is exempt from the stream limits.</param>
+    /// <param name="download">Whether the user is downloading the file, which also needs download permission here.</param>
     /// <returns>The verdict, which names the item and the user when it allows the stream.</returns>
-    public LinkVerdict Check(SourceServer peer, Guid itemId, string? remoteUserId, string? claimedUserId, bool probe, bool watching = true)
+    public LinkVerdict Check(SourceServer peer, Guid itemId, string? remoteUserId, string? claimedUserId, bool probe, bool watching = true, bool download = false)
     {
         ArgumentNullException.ThrowIfNull(peer);
         if (!peer.OffersLinks)
         {
             return LinkVerdict.Refuse($"linking is not allowed for {peer.DisplayName} here");
+        }
+
+        if (download && probe)
+        {
+            return LinkVerdict.Refuse("a media probe cannot download a file");
         }
 
         var item = _libraryManager.GetItemById(itemId);
@@ -102,6 +108,11 @@ public sealed class LinkPolicy
         if (!item.IsVisible(user))
         {
             return LinkVerdict.Refuse("the account you stream as on the source cannot see this item");
+        }
+
+        if (download && !user.HasPermission(PermissionKind.EnableContentDownloading))
+        {
+            return LinkVerdict.Refuse("the account you stream as on the source may not download media");
         }
 
         if (peer.LinkHonorBitrateLimit

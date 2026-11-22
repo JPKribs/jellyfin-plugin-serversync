@@ -190,6 +190,52 @@ public class LinkStreamerTests
         Assert.NotNull(grants.Use("link"));
     }
 
+    /// <summary>
+    /// A download asks the source with the download flag and is sent as an attachment under the copy's name, and a play is not.
+    /// True: the source can check download permission, and the browser saves the film under its real name.
+    /// False: the source would treat a download as a play, or the browser would show the file or save it unnamed.
+    /// </summary>
+    /// <param name="downloadName">The name a download is saved as, or null for a play.</param>
+    [Theory]
+    [InlineData("Film.mkv")]
+    [InlineData(null)]
+    public async Task Download_AsksAsADownloadAndNamesTheFile(string? downloadName)
+    {
+        var peers = new Streams();
+        string? query = null;
+        peers["a"] = request =>
+        {
+            query = request.RequestUri!.Query;
+            return Body(request);
+        };
+        var (context, body, _) = Request();
+
+        var status = await Streamer(peers, new NoStandIn()).StreamAsync(context, Link, new LinkGrant(Guid.NewGuid(), false, Download: downloadName is not null), "/src/Film.mkv", downloadName);
+
+        Assert.Equal(LinkStreamer.Written, status);
+        Assert.Equal(File, body.ToArray());
+        Assert.Equal(downloadName is not null, query!.Contains("&download=true", StringComparison.Ordinal));
+        Assert.Equal(downloadName is null ? string.Empty : "attachment; filename=Film.mkv; filename*=UTF-8''Film.mkv", context.Response.Headers.ContentDisposition.ToString());
+    }
+
+    /// <summary>
+    /// A download whose source fails is handed to another server only after that server allows the download.
+    /// True: a stand-in checks download permission as the first server did.
+    /// False: a server that lets the user play but not download would send the file anyway.
+    /// </summary>
+    [Fact]
+    public async Task Download_StandIn_IsAskedAboutTheDownload()
+    {
+        var peers = new Streams();
+        peers["a"] = _ => throw new HttpRequestException("connection refused");
+        peers["b"] = request => Body(request);
+        var (context, body, _) = Request();
+
+        await Streamer(peers, new DownloadOnlyStandIn(new LinkRoute("b", "bbbb"))).StreamAsync(context, Link, new LinkGrant(Guid.NewGuid(), false, Download: true), "/src/Film.mkv", "Film.mkv");
+
+        Assert.Equal(File, body.ToArray());
+    }
+
     private static LinkStreamer Streamer(Streams peers, ILinkAccess access, LinkGrants? grants = null, LinkHealth? health = null, TimeSpan? stall = null)
     {
         var (host, hostStub) = InterfaceStub.Create<IServerApplicationHost>();
@@ -312,6 +358,9 @@ public class LinkStreamerTests
     {
         public Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
             => Task.FromResult(new LinkChoice(null, "nobody else holds the file"));
+
+        public Task<LinkChoice> ChooseForDownloadAsync(LinkEntry link, Guid userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => ChooseAsync(link, userId, skip, cancellationToken);
     }
 
     private sealed class StandIn : ILinkAccess
@@ -322,6 +371,23 @@ public class LinkStreamerTests
 
         public Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
             => Task.FromResult(new LinkChoice(skip?.Contains(_route.ServerKey, StringComparer.OrdinalIgnoreCase) == true ? null : _route, null));
+
+        public Task<LinkChoice> ChooseForDownloadAsync(LinkEntry link, Guid userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => ChooseAsync(link, userId, skip, cancellationToken);
+    }
+
+    // Lets another server stand in only for a download, so a test can tell which question was asked.
+    private sealed class DownloadOnlyStandIn : ILinkAccess
+    {
+        private readonly LinkRoute _route;
+
+        public DownloadOnlyStandIn(LinkRoute route) => _route = route;
+
+        public Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => Task.FromResult(new LinkChoice(null, "asked as a play"));
+
+        public Task<LinkChoice> ChooseForDownloadAsync(LinkEntry link, Guid userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => Task.FromResult(new LinkChoice(_route, null));
     }
 
     private sealed class FakeConfig : IPluginConfigurationManager

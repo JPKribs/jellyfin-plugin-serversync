@@ -237,6 +237,8 @@ export function createSyncTableModule(view, shared) {
 * Write a key or secret file with `AtomicFile` and `ownerOnly: true`, so it is never readable by others, even for a moment.
 * Guard every peer route with `PeerCallerGuardAttribute`, check the sender with `PeerController.Sender`, and add `RequireCompatibleProtocolAttribute` to every route but `Capabilities`. Guard every operator route with `[Authorize(Policy = "RequiresElevation")]`.
 * Check the caller's user mapping before returning or streaming anything for a user.
+* Record a grant in `LinkGrants` before streaming a link for a user, as a play does. Without one, `LinkGrants.Hold` counts nothing and this server's own stream limits miss the read.
+* Add a field the source must act on, such as `Download`, with an answer field that echoes it. A source on an older build ignores the field, so the caller refuses when the echo is missing.
 * Build SQL with parameters only. Never put a value into SQL text.
 * Keep files inside the folders they belong to with `PathContainment` and `FileNameSanitizer`.
 * Escape every value placed in HTML with `escapeHtml`.

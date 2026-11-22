@@ -20,4 +20,10 @@ public class LinkStreamCheckResponse
 
     /// <summary>Gets or sets the most link streams this server runs for the caller at once, or 0 for no limit.</summary>
     public int StreamLimit { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a download was asked for and checked. A source that leaves it
+    /// <c>false</c> did not check download permission, so the asking server refuses the download.
+    /// </summary>
+    public bool DownloadAllowed { get; set; }
 }

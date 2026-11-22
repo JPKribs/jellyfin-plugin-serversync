@@ -251,6 +251,23 @@ public sealed class PeerControllerLinksTests : IDisposable
     }
 
     /// <summary>
+    /// A check says it checked a download only when one was asked for and allowed.
+    /// True: the linking server can tell this server checked download permission.
+    /// False: a play would read as a checked download, or a refused download as allowed.
+    /// </summary>
+    /// <param name="download">Whether the check asks about a download.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CheckStream_Download_IsSaidToBeChecked(bool download)
+    {
+        var result = _harness.PeerRoutes(Secret).CheckStream(new LinkStreamCheckRequest { ServerId = PeerId, ItemId = ItemId.ToString("N"), Probe = true, Download = download }, Policy(), _harness.UserManager, _harness.Library);
+
+        var body = Assert.IsType<LinkStreamCheckResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal((!download, false), (body.Allowed, body.DownloadAllowed));
+    }
+
+    /// <summary>
     /// A check by path finds the file this server holds at that path, and says so when it holds none.
     /// True: a linking server can find the same film here to fall back to.
     /// False: fallback would never find a file, or would be told one exists when it does not.

@@ -571,6 +571,23 @@ public sealed class SourceServerClientPeerTests : IDisposable
     }
 
     /// <summary>
+    /// A download's stream request says it is a download.
+    /// True: the peer checks the user's download permission before it sends the file.
+    /// False: the peer would send the file to a user it lets play but not download.
+    /// </summary>
+    [Fact]
+    public async Task OpenPeerStreamAsync_Download_SaysSo()
+    {
+        var user = Guid.Parse("0123456789abcdef0123456789abcdef");
+        var server = new ClientStubServer().OnStatus("/Sync/Peer/Stream/abc", HttpStatusCode.OK, "bytes");
+        using var client = server.Client();
+
+        using var response = await client.OpenPeerStreamAsync("abc", ThisServer, new LinkGrant(user, false, Download: true), null, null, head: false, fill: false);
+
+        Assert.Equal("?serverId=" + ThisServer + "&userId=0123456789abcdef0123456789abcdef&download=true", Assert.Single(server.Seen).Query);
+    }
+
+    /// <summary>
     /// A plain stream check sends HEAD with only the caller named.
     /// True: a link check reads the headers without pulling the file.
     /// False: checking a link would download it.

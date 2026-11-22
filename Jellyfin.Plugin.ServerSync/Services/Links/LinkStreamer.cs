@@ -122,8 +122,9 @@ public sealed class LinkStreamer
     /// <param name="link">The link to stream.</param>
     /// <param name="grant">Who the link is read for, and the server it is routed to.</param>
     /// <param name="sourcePath">The file's path for the log, on the source or where its copy would sit here.</param>
+    /// <param name="downloadName">The file name to save the file as, or null when it is played.</param>
     /// <returns><see cref="Written"/> once the response has been written, otherwise the status to answer with.</returns>
-    public async Task<int> StreamAsync(HttpContext context, LinkEntry link, LinkGrant grant, string sourcePath)
+    public async Task<int> StreamAsync(HttpContext context, LinkEntry link, LinkGrant grant, string sourcePath, string? downloadName = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(link);
@@ -134,7 +135,7 @@ public sealed class LinkStreamer
         {
             try
             {
-                await Results.File(cached, MimeTypes.GetMimeType(cached), enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
+                await Results.File(cached, MimeTypes.GetMimeType(cached), downloadName, enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
                 return Written;
             }
             catch (IOException) when (!context.Response.HasStarted)
@@ -190,6 +191,13 @@ public sealed class LinkStreamer
             http.ContentType = MimeTypes.GetMimeType(string.IsNullOrEmpty(link.CopiedPath) ? sourcePath : link.CopiedPath);
             http.Headers["X-Content-Type-Options"] = "nosniff";
             http.ContentLength = response.Content.Headers.ContentLength;
+            if (!string.IsNullOrEmpty(downloadName))
+            {
+                var disposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("attachment");
+                disposition.SetHttpFileName(downloadName);
+                http.Headers.ContentDisposition = disposition.ToString();
+            }
+
             foreach (var name in PassedHeaders)
             {
                 if (response.Headers.TryGetValues(name, out var values) || response.Content.Headers.TryGetValues(name, out values))
@@ -386,7 +394,10 @@ public sealed class LinkStreamer
     /// </summary>
     private async Task<(HttpResponseMessage Response, LinkRoute Route)?> StandInAsync(LinkEntry link, LinkGrant grant, LinkRoute failed, bool head, string? range, string sourcePath, List<IDisposable> clients, CancellationToken aborted)
     {
-        var choice = await _access.ChooseAsync(link, grant.UserId, new[] { failed.ServerKey }, aborted).ConfigureAwait(false);
+        var skip = new[] { failed.ServerKey };
+        var choice = grant is { Download: true, UserId: { } user }
+            ? await _access.ChooseForDownloadAsync(link, user, skip, aborted).ConfigureAwait(false)
+            : await _access.ChooseAsync(link, grant.UserId, skip, aborted).ConfigureAwait(false);
         if (choice.Route is not { } next)
         {
             return null;

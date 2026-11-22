@@ -410,6 +410,7 @@ public partial class SourceServerClient
             + (grant.UserId is { } user ? "&userId=" + user.ToString("N", System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
             + (string.IsNullOrEmpty(sourceUserId) ? string.Empty : "&sourceUserId=" + Uri.EscapeDataString(sourceUserId))
             + (grant.Probe ? "&probe=true" : string.Empty)
+            + (grant.Download ? "&download=true" : string.Empty)
             + (fill ? "&fill=true" : string.Empty);
         var response = await SendPeerStreamAsync(path, range, head, cancellationToken).ConfigureAwait(false);
         if ((int)response.StatusCode != Services.Queue.HintProtocol.UnpairedStatus || Pairing is null)

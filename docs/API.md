@@ -257,11 +257,11 @@ Negotiate watch history. Each entry proposes a merged state for one of the recei
 
 These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, `Playback`, `Links/Describe`, and `Links/{itemId}/Images`. The linking server answers `Control` and `Links`. All need the protocol headers. `Stream`, `Stream/Check`, `Playback`, `Control`, `Links/Describe`, and `Links/{itemId}/Images` also need the caller to be paired, as for `Queue`, and answer `400` when the server id or body is missing, `409` when the caller is not on the **Servers** tab, and `428` when it is not paired.
 
-#### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}&fill={bool}
+#### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}&fill={bool}&download={bool}
 
-Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache). It passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. A stream for a user is held to that server's speed under **Settings > Bandwidth**, or the user's own, after the first three seconds' worth.
+Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache). It passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. `download=true` is a user [downloading a link](Links.md#downloading-a-link), which also needs the user's download permission here and is otherwise checked and counted as a stream. A stream for a user is held to that server's speed under **Settings > Bandwidth**, or the user's own, after the first three seconds' worth.
 
-Answers `200` or `206` with the file, or `403` with the reason as text. The reason is that linking is off for the caller, the user cannot be resolved or may not play or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
+Answers `200` or `206` with the file, or `403` with the reason as text. The reason is that linking is off for the caller, the user cannot be resolved or may not play, download, or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
 
 #### POST /Sync/Peer/Stream/Check
 
@@ -271,7 +271,7 @@ The same checks without streaming, made when a user presses play so a refusal sh
 { "ServerId": "…", "ItemId": "9c1e0f…", "UserId": "caller user id", "SourceUserId": "user here, or null" }
 ```
 
-A server [falling back](Links.md#when-the-source-cannot-stream) from another source leaves `ItemId` empty and names the file by its `Path` here instead, at most 4096 characters. An item at that path that is a folder, or no item, is refused with `the file is not on this server`. `Probe: true` with no `UserId` is the calling server's media probe, checked as for `Stream`.
+A server [falling back](Links.md#when-the-source-cannot-stream) from another source leaves `ItemId` empty and names the file by its `Path` here instead, at most 4096 characters. An item at that path that is a folder, or no item, is refused with `the file is not on this server`. `Probe: true` with no `UserId` is the calling server's media probe, checked as for `Stream`. `Download: true` asks about a user downloading the file, which also needs their download permission here.
 
 ```json
 { "ServerId": "…", "ItemId": "", "Path": "/media/Movies/Film (2024)/Film (2024).mkv", "UserId": "caller user id", "SourceUserId": null, "Probe": false }
@@ -283,7 +283,7 @@ An allowed answer carries this server's id for the item and the file's size in b
 { "Allowed": true, "Reason": null, "ItemId": "4b07c2…", "Size": 734003200, "StreamsInUse": 1, "StreamLimit": 3 }
 ```
 
-`StreamsInUse` is how many link streams this server is running for the caller now, and `StreamLimit` the most it runs for the caller at once, where 0 is no limit. A caller with several servers that hold the same file uses them to [pick the one with the most room](Links.md#when-the-source-cannot-stream).
+`StreamsInUse` is how many link streams this server is running for the caller now, and `StreamLimit` the most it runs for the caller at once, where 0 is no limit. `DownloadAllowed` is `true` when the request asked about a download and it is allowed. The caller refuses a download whose answer leaves it out. A caller with several servers that hold the same file uses them to [pick the one with the most room](Links.md#when-the-source-cannot-stream).
 
 ```json
 { "Allowed": false, "Reason": "the source allows 2 link streams at once and all are in use" }

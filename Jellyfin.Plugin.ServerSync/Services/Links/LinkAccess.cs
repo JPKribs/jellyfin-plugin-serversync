@@ -106,7 +106,15 @@ public sealed class LinkAccess : ILinkAccess
     }
 
     /// <inheritdoc />
-    public async Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+    public Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+        => ChooseRouteAsync(link, userId, false, skip, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<LinkChoice> ChooseForDownloadAsync(LinkEntry link, Guid userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+        => ChooseRouteAsync(link, userId, true, skip, cancellationToken);
+
+    /// <summary>Asks the link's own server, then the others that hold the same file, until one allows the play or download.</summary>
+    private async Task<LinkChoice> ChooseRouteAsync(LinkEntry link, Guid? userId, bool download, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(link);
         var config = _configManager.Configuration;
@@ -142,7 +150,7 @@ public sealed class LinkAccess : ILinkAccess
             }
             else
             {
-                primaryAsk = AskAsync(primary, link.LinkId, null, userId, cancellationToken);
+                primaryAsk = AskAsync(primary, link.LinkId, null, userId, download, cancellationToken);
                 if (await Task.WhenAny(primaryAsk, Task.Delay(_hedge, cancellationToken)).ConfigureAwait(false) == primaryAsk)
                 {
                     var answer = await primaryAsk.ConfigureAwait(false);
@@ -172,7 +180,7 @@ public sealed class LinkAccess : ILinkAccess
             ? Task.FromResult(new LinkStreamCheckResponse { Reason = $"{a.Server.DisplayName} could not be reached" })
             : Full(a.Server)
                 ? Task.FromResult(new LinkStreamCheckResponse { Reason = $"this server is already streaming {Taking(a.Server)} link(s) from {a.Server.DisplayName}, the most it takes from it" })
-                : AskAlternateAsync(a, link, userId, cancellationToken)).ToList();
+                : AskAlternateAsync(a, link, userId, download, cancellationToken)).ToList();
 
         // The first idle server takes the play, else one with strictly more room.
         if (busyPrimary is not null)
@@ -251,7 +259,7 @@ public sealed class LinkAccess : ILinkAccess
         // Nobody else can play it, so the server passed over is asked after all.
         if (primaryPassedOver)
         {
-            var answer = await AskAsync(primary!, link.LinkId, null, userId, cancellationToken).ConfigureAwait(false);
+            var answer = await AskAsync(primary!, link.LinkId, null, userId, download, cancellationToken).ConfigureAwait(false);
             if (answer.Allowed)
             {
                 return new LinkChoice(LinkFallback.PrimaryOf(link), null);
@@ -310,9 +318,9 @@ public sealed class LinkAccess : ILinkAccess
     }
 
     /// <summary>Asks another server, and refuses it unless it names the item and holds a file of the same size.</summary>
-    private async Task<LinkStreamCheckResponse> AskAlternateAsync(LinkAlternate alternate, LinkEntry link, Guid? userId, CancellationToken cancellationToken)
+    private async Task<LinkStreamCheckResponse> AskAlternateAsync(LinkAlternate alternate, LinkEntry link, Guid? userId, bool download, CancellationToken cancellationToken)
     {
-        var answer = await AskAsync(alternate.Server, string.Empty, alternate.SourcePath, userId, cancellationToken).ConfigureAwait(false);
+        var answer = await AskAsync(alternate.Server, string.Empty, alternate.SourcePath, userId, download, cancellationToken).ConfigureAwait(false);
         if (answer.Allowed && string.IsNullOrEmpty(answer.ItemId))
         {
             return new LinkStreamCheckResponse { Reason = "it did not say which item holds the file" };
@@ -326,8 +334,8 @@ public sealed class LinkAccess : ILinkAccess
         return answer;
     }
 
-    /// <summary>Asks one server whether the play is allowed, and records whether it answered.</summary>
-    private async Task<LinkStreamCheckResponse> AskAsync(SourceServer server, string itemId, string? path, Guid? userId, CancellationToken cancellationToken)
+    /// <summary>Asks one server whether the play or download is allowed, and records whether it answered.</summary>
+    private async Task<LinkStreamCheckResponse> AskAsync(SourceServer server, string itemId, string? path, Guid? userId, bool download, CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(CheckTimeout);
@@ -342,10 +350,18 @@ public sealed class LinkAccess : ILinkAccess
                     Path = path,
                     Probe = userId is null,
                     UserId = userId?.ToString("N", CultureInfo.InvariantCulture),
-                    SourceUserId = SourceUserFor(server, userId)
+                    SourceUserId = SourceUserFor(server, userId),
+                    Download = download
                 },
                 deadline.Token).ConfigureAwait(false);
             _health.Answered(server.Key);
+
+            // A source that did not check download permission cannot allow a download.
+            if (download && answer.Allowed && !answer.DownloadAllowed)
+            {
+                return new LinkStreamCheckResponse { Reason = $"{server.DisplayName} needs a newer Server Sync to allow downloads" };
+            }
+
             if (!answer.Allowed)
             {
                 answer.Reason = FormatUtilities.SanitizeForLog(answer.Reason ?? "the source refused", 300);
