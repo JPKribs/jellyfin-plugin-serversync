@@ -2747,7 +2747,7 @@ def scenario_link_cache(creds, apis):
 
 
 def scenario_link_download(creds, apis):
-    """The Download button on a link saves the source's file under the copy's name, a user barred from downloading on either server is refused, a cached link downloads from the cache, and Jellyfin's file route still refuses a link."""
+    """The Download button on a link saves the source's file under the copy's name, a user barred from downloading on either server is refused, a cached link downloads from the cache under local's rules alone, and Jellyfin's file route still refuses a link."""
     film = LinkedFilm(creds, apis, seconds=10, size="320x240", local_flags=dict(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)).setup()
     a, local = film.a, film.local
     au = creds["servers"]["source-a"]["userId"]
@@ -2789,7 +2789,17 @@ def scenario_link_download(creds, apis):
         status, headers, body = http(local, "GET", path)
         expect(status == 200 and body == data, f"a cached link downloads the file ({status}, {len(body)} bytes)")
         expect(saved_as(headers).startswith("attachment") and f"{film.title}.mp4" in saved_as(headers), f"a cached download is saved under the copy's name ({saved_as(headers)})")
+
+        # A cached file is local's own, so the source's refusal does not reach it.
+        a.post(f"/Users/{au}/Policy", dict(source_policy, EnableContentDownloading=False), expect=204)
+        set_linking(a, "local", False)
+        status, _, body = http(local, "GET", path)
+        expect(status == 200 and body == data, f"a cached link downloads although the source refuses ({status}, {len(body)} bytes)")
+        local.post(f"/Users/{film.lu}/Policy", dict(local_policy, EnableContentDownloading=False), expect=204)
+        status, _, _ = http(local, "GET", path)
+        expect(status == 403, f"a cached link still needs download permission here ({status})")
     finally:
+        set_linking(a, "local", True)
         a.post(f"/Users/{au}/Policy", source_policy, expect=204)
         local.post(f"/Users/{film.lu}/Policy", local_policy, expect=204)
         film.teardown()

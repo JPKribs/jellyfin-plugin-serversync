@@ -412,8 +412,8 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     }
 
     /// <summary>
-    /// Answers Jellyfin's download route for a link with the file itself, from the link cache or a server
-    /// that allows the user to download it, or null when the request is not a download of a known link.
+    /// Answers Jellyfin's download route for a link with the file itself, or null when the request is not a
+    /// download of a known link. A cached file follows this server's rules only, and any other asks a server that holds it.
     /// </summary>
     private async Task<IActionResult?> DownloadLinkAsync(ActionExecutingContext context)
     {
@@ -440,6 +440,14 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         if (!MayDownloadHere(itemId, userId))
         {
             return new ObjectResult("This server does not let you download this item") { StatusCode = StatusCodes.Status403Forbidden };
+        }
+
+        // A cached file is this server's own, so the source is not asked, as for a play.
+        if (_cache?.Holds(link.LinkId) == true)
+        {
+            var own = LinkFallback.PrimaryOf(link);
+            _grants.Grant(link.LinkId, userId, own);
+            return new LinkStreamResult(_streamer, link, new LinkGrant(userId, false, own, Download: true), Path.GetFileName(link.CopiedPath));
         }
 
         var choice = await _access.ChooseForDownloadAsync(link, userId, null, context.HttpContext.RequestAborted).ConfigureAwait(false);

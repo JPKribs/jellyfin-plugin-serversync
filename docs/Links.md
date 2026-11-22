@@ -186,10 +186,9 @@ History sync takes the larger play count when both servers counted, so a play co
 
 Jellyfin's **Download** button on a link saves the file the link stands in for, under the copy's name. `Film (2020) - 4K.strm` downloads as `Film (2020) - 4K.mkv`. The `.strm` itself is never sent.
 
-* **Both servers must allow it.** The user needs download permission on the linking server, and the account they stream as needs it on the source, along with everything a play needs. See [Who the Source Streams As](#who-the-source-streams-as).
-* **The source is always asked first**, even for a file in the link cache. Another server that holds the same file is asked when the link's own server cannot send it, as for a play.
+* **A cached file is the linking server's own.** It downloads from the cache under the linking server's rules alone, as it plays. The source is not asked.
+* **Any other file needs both servers to allow it.** The user needs download permission on the linking server, and the account they stream as needs it on the source, along with everything a play needs. See [Who the Source Streams As](#who-the-source-streams-as). Another server that holds the same file is asked when the link's own server cannot send it, as for a play. The file streams from the source as it is sent.
 * **A refused download ends with `403`** and the reason, before any of the file is sent. A browser shows only that the download failed.
-* **A cached file is sent from the cache.** Any other file streams from the source as it is sent.
 * **A download from the source counts as a stream** on both servers while it runs, so the stream and speed limits apply to it. A cached one counts on neither, as for a play.
 * **A download can be resumed.** A request for a byte range gets that range.
 
@@ -297,7 +296,7 @@ Every sync type that matches by path still matches when one server holds `Film.m
 * **The address never reaches a client.** It is cleared from playback info and from every item response. Jellyfin's **Download** route sends the file the link stands in for, never the `.strm`, and its file route refuses links.
 * **Only a user who was allowed at play can be read for.** A user is recorded when the source allows them at play, or when they press play on a link whose file is in the link cache. Stream and transcode requests on a link must come from a user who holds that permission, so no one can stream a link under another viewer's permission. A subtitle or attachment request from a signed in user needs that user's permission too. One that names no user, which is how players such as webOS ask and how Jellyfin answers for any item, is read while a viewer is playing the link and refused otherwise. A permission nobody uses expires after two minutes. Once in use it lasts an hour after the last read.
 * **No source credential is ever written to disk.** The linking server streams with the key on its entry for the source, and the source checks the user it streams as on every play that streams from it.
-* **A cached link follows the linking server's rules only.** Any user there who can see the item can play it, including one the source would refuse, and it keeps playing after the source turns off **Allow linking** until the next **Sync Content** run, whose link check finds the source will not stream it and drops the file. Turn off **Cache this library's links**, or use **Empty the Cache**, where the source's rules must always apply. A download of a cached link still asks the source.
+* **A cached link follows the linking server's rules only.** Any user there who can see the item can play it, and one with download permission there can download it, including one the source would refuse, and it keeps playing after the source turns off **Allow linking** until the next **Sync Content** run, whose link check finds the source will not stream it and drops the file. Turn off **Cache this library's links**, or use **Empty the Cache**, where the source's rules must always apply. A cached link downloads under the same rules.
 
 ## Troubleshooting
 

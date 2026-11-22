@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
@@ -325,6 +326,39 @@ public sealed class LinkPlaybackFilterTests
         Assert.False(ran);
         Assert.Equal(StatusCodes.Status403Forbidden, refused.StatusCode);
         Assert.Equal("This item streams from another server, which refused: the account you stream as on the source may not download media", refused.Value);
+    }
+
+    /// <summary>
+    /// A download of a cached link is sent without asking the source.
+    /// True: a cached file is this server's own, and downloads under this server's rules as it plays.
+    /// False: a cached file would fail to download while its source is down or refuses.
+    /// </summary>
+    [Fact]
+    public async Task OnActionExecutionAsync_DownloadOfACachedLink_DoesNotAskTheSource()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "serversync-filter-cache-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            const string Cached = "0123456789abcdef0123456789abcdef";
+            var cache = new LinkCache(new FakeConfigManager(new PluginConfiguration { LinkCacheSizeGb = 1 }), folder, NullLogger<LinkCache>.Instance, () => DateTime.UtcNow);
+            File.WriteAllBytes(cache.PartPathFor(Cached, ".mkv"), new byte[100]);
+            Assert.True(cache.Complete(Cached, ".mkv", 100, CacheReason.Played));
+            var registry = new LinkFakeRegistry().Add(new LinkEntry(LinkPath, "/media/Film.mkv", Cached, "a", 100));
+            var filter = new LinkPlaybackFilter(_library, registry, _grants, _chooser, NullLogger<LinkPlaybackFilter>.Instance, Streamer(), cache: cache);
+            var context = Executing("Library", "GetDownload", User);
+
+            var ran = await Run(filter, context);
+
+            var result = Assert.IsType<LinkStreamResult>(context.Result);
+            Assert.False(ran);
+            Assert.True(result.Grant.Download);
+            Assert.Equal("Film.mkv", result.DownloadName);
+            Assert.Empty(_access.Calls);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     /// <summary>
