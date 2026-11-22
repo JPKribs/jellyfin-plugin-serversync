@@ -2366,9 +2366,10 @@ def scenario_links(creds, apis):
         expect(wrong.stdout.strip() == "403", "the link URL refuses local itself when the secret is wrong")
         proxied = run(["docker", "exec", "serversync-it-local", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-H", "X-Forwarded-For: 203.0.113.9", url], capture=True, check=False)
         expect(proxied.stdout.strip() == "403", "the link URL refuses a request that came through a proxy, even with the right secret")
-        for route in ("File", "Download"):
-            status, body = local.call("GET", f"/Items/{item['Id']}/{route}", raw=True)
-            expect(status == 403 and b"Sync/Link" not in body, f"/Items/{{id}}/{route} never hands out the link or its secret")
+        status, body = local.call("GET", f"/Items/{item['Id']}/File", raw=True)
+        expect(status == 403 and b"Sync/Link" not in body, f"/Items/{{id}}/File refuses the link and never hands out its secret ({status})")
+        status, body = local.call("GET", f"/Items/{item['Id']}/Download", raw=True)
+        expect(status == 200 and b"Sync/Link" not in body, f"/Items/{{id}}/Download sends the file, never the link or its secret ({status})")
         viewer = Api("local-viewer", SERVERS["local"]["port"], "viewer-device")
         _, auth = viewer.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
         viewer.token = auth["AccessToken"]
@@ -3541,8 +3542,8 @@ def scenario_link_hostile(creds, apis):
         expect(status in (400, 415), f"an empty playback report is malformed ({status})")
         status, body = film.local.call("POST", "/Sync/Peer/Control", {"ServerId": film.creds["servers"]["source-a"]["serverId"], "SessionKey": "x" * 300})
         expect(status in (400, 428), f"a control request with an oversized session is refused ({status})")
-        status, _, _ = http(film.local, "GET", f"/Items/{film.item['Id']}/Download")
-        expect(status == 403, f"downloading a link is refused ({status})")
+        status, _, body = http(film.local, "GET", f"/Items/{film.item['Id']}/Download")
+        expect(status == 200 and b"/Sync/Link/" not in body, f"downloading a link sends the file, never the .strm ({status})")
         logs = run(["docker", "logs", "--since", "3m", "serversync-it-local"], capture=True, check=False)
         errors = [l for l in (logs.stdout + logs.stderr).splitlines() if "[ERR]" in l and ("Link" in l or "ServerSync" in l)]
         expect(not errors, f"none of those requests logged an error ({errors[:2]})")
